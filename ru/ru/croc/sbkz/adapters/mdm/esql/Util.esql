@@ -1,0 +1,654 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.mdm.esql
+
+CREATE FUNCTION isMapped() RETURNS CHARACTER
+BEGIN
+	RETURN 0;
+END; 
+
+/**
+ * Р—Р°РїРѕР»РЅРµРЅРёРµ СЃС‚Р°РЅРґР°СЂС‚РЅС‹С… РїРѕР»РµР№ MDO РІ СЃРѕРѕР±С‰РµРЅРёСЏС… (Р·Р°РїСЂРѕСЃ)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRq (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	SET outroot.*:*[<].(XMLNSC.NamespaceDecl)xmlns:orgs = orgs;
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	
+END;
+
+/**
+ * Р—Р°РїРѕР»РЅРµРЅРёРµ СЃС‚Р°РЅРґР°СЂС‚РЅС‹С… РїРѕР»РµР№ MDO РІ СЃРѕРѕР±С‰РµРЅРёСЏС… (Р·Р°РїСЂРѕСЃ)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRq2 (IN inroot REFERENCE, 
+											 IN outroot REFERENCE, 
+											 IN rootNode CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF outroot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF outroot.XMLNSC NAME rootNode;
+	DECLARE outRef REFERENCE TO outroot.XMLNSC.*[<];
+	DECLARE inRef REFERENCE TO inroot.XMLNSC.*:*[<];
+	SET outRef.(XMLNSC.NamespaceDecl)xmlns:orgs = orgs;
+	
+	SET outRef.RqUID		= inRef.RqUID;
+	SET outRef.RqTm			= inRef.RqTm;
+	
+END;
+
+/**
+ * Р—Р°РїРѕР»РЅРµРЅРёРµ СЃС‚Р°РЅРґР°СЂС‚РЅС‹С… РїРѕР»РµР№ MDO РІ СЃРѕРѕР±С‰РµРЅРёСЏС… (РѕС‚РІРµС‚)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRs (IN inroot REFERENCE, IN outroot REFERENCE, IN rootNode CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF outroot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF outroot.XMLNSC NAME rootNode;
+	DECLARE outRef REFERENCE TO outroot.XMLNSC.*[<];
+	DECLARE inRef REFERENCE TO inroot.XMLNSC.*:*[<];
+	SET outRef.(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+	
+	SET outRef.RqUID					= FIELDVALUE(inRef.*:RqUID);
+	SET outRef.Status.ifxca:StatusCode	= FIELDVALUE(inRef.*:Status);
+	SET outRef.Status.ifxca:StatusDesc	= '';
+	SET outRef.Status.ifxca:Severity	= CASE FIELDVALUE(inRef.*:Status) WHEN '0' THEN 'Info' ELSE 'Error' END;
+END;
+
+
+/**
+ * Р—Р°РїРѕР»РЅРµРЅРёРµ СЃС‚Р°РЅРґР°СЂС‚РЅС‹С… РїРѕР»РµР№ CRM РІ СЃРѕРѕР±С‰РµРЅРёСЏС… (РѕС‚РІРµС‚)
+ **/
+CREATE PROCEDURE FillCRMStandartElementsRs (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;
+	SET outroot.*:*[<].Status.StatusCode VALUE	= inroot.*:*[<].Status.*:StatusCode;
+	SET outroot.*:*[<].Status.StatusDesc VALUE	= inroot.*:*[<].Status.*:StatusDesc;
+	
+END;
+
+/**
+ * Р—Р°РїРѕР»РЅРµРЅРёРµ СЃС‚Р°РЅРґР°СЂС‚РЅС‹С… РїРѕР»РµР№ CRM РІ СЃРѕРѕР±С‰РµРЅРёСЏС… (РѕС‚РІРµС‚)
+ **/
+CREATE PROCEDURE FillCRMStandartElementsRs2 (IN inroot REFERENCE, IN outroot REFERENCE, IN rootNode CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF outroot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF outroot.XMLNSC NAME rootNode;
+	DECLARE outRef REFERENCE TO outroot.XMLNSC.*[<];
+	DECLARE inRef REFERENCE TO inroot.XMLNSC.*:*[<];
+	SET outRef.RqUID							= inRef.RqUID;
+	SET outRef.RqTm								= inRef.RqTm;
+	SET outRef.TSMUID							= inRef.TSMUID;
+	SET outRef.Status.StatusCode VALUE			= inRef.Status.*:StatusCode;
+	SET outRef.Status.StatusDesc VALUE			= inRef.Status.*:StatusDesc;
+	
+END;
+	
+	
+/**
+ * 7.1	Признак Резидент/Нерезидент
+ **/
+CREATE FUNCTION convertResidencyCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN 'Y' THEN '1'
+		WHEN 'N' THEN '2' 
+		ELSE code
+	END;
+END; 
+
+
+	
+/**
+ * 7.2	Статус связи
+ **/
+CREATE FUNCTION convertConnectionStatusCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN '1' THEN '1'
+		WHEN '2' THEN '2'
+		WHEN '3' THEN '3'
+		WHEN '4' THEN '4' 
+		ELSE code
+	END;
+END; 
+
+
+	
+/**
+ * 7.3	Тип адреса
+ **/
+CREATE FUNCTION convertAddrTypeCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN '1' THEN '1'
+		WHEN '2' THEN '2'
+		WHEN '3' THEN '3' 
+		ELSE code
+	END;
+END; 
+
+	
+/**
+ * 7.3	Тип адреса
+   22 - Тип адресадля ЮЛ
+ **/
+CREATE FUNCTION convertAddrTypeJurCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN '1' THEN '1'
+		WHEN '2' THEN '2'
+		WHEN '3' THEN '3' 
+		ELSE code
+	END;
+END;
+
+
+	
+/**
+ * 7.3	Тип адреса
+   22 - Тип адреса для ФЛ
+ **/
+CREATE FUNCTION convertAddrTypeFizCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN 'Primary' THEN 'Primary'
+		WHEN 'Secondary' THEN 'Secondary'
+		ELSE code
+	END;
+END;
+
+
+	
+/**
+ * 7.4	Справочник статусов ЕК и МГ
+ **/
+CREATE FUNCTION convertStatusCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN '1' THEN '1'
+		WHEN '2' THEN '2'
+		ELSE code
+	END;
+END;
+
+
+/**
+ * 7.5	Критерий связанности
+ **/
+CREATE FUNCTION convertConnectionCriterionCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN '1' THEN '1'
+		WHEN '2' THEN '2'
+		WHEN '3' THEN '3'
+		WHEN '4' THEN '4' 
+		WHEN '5' THEN '5'
+		WHEN '6' THEN '6'
+		WHEN '7' THEN '7'
+		WHEN '8' THEN '8'
+		WHEN '9' THEN '9'
+		WHEN '10' THEN '10'
+		WHEN '11' THEN '11'
+		WHEN '12' THEN '12'
+		WHEN '13' THEN '13'
+		WHEN '14' THEN '14'
+		WHEN '15' THEN '15'
+		WHEN '16' THEN '16'
+		ELSE code
+	END;
+END; 
+
+
+/**
+ * 7.6	Роль связанного лица
+ **/
+CREATE FUNCTION convertConnectionRoleCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN '1' THEN '1'
+		WHEN '2' THEN '2'
+		WHEN '3' THEN '3'
+		WHEN '4' THEN '4' 
+		WHEN '5' THEN '5'
+		WHEN '6' THEN '6'
+		ELSE code
+	END;
+END; 
+
+/**
+ * 7.7	Справочник «Страна»
+ **/
+CREATE FUNCTION convertCountryCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN code;
+	/*
+	CASE code	
+		WHEN '1' THEN 'Россия'
+		WHEN '2' THEN 'Кения'
+		WHEN '3' THEN 'Йемен'
+		WHEN '4' THEN 'Макао'
+		WHEN '5' THEN 'Ливан'
+		WHEN '6' THEN 'Лесото'
+		WHEN '7' THEN 'Либерия'
+		WHEN '8' THEN 'Лихтенштейн'
+		WHEN '9' THEN 'Литва'
+		WHEN '10' THEN 'Люксембург'
+		WHEN '11' THEN 'Лаосская Народно-Демокр. Респ'
+		WHEN '12' THEN 'Латвия'
+		WHEN '13' THEN 'Ямайка'
+		WHEN '14' THEN 'Япония'
+		WHEN '15' THEN 'Казахстан'
+		WHEN '16' THEN 'Израиль'
+		WHEN '17' THEN 'Гуам'
+		WHEN '18' THEN 'Гватемала'
+		WHEN '19' THEN 'Гвинея'
+		WHEN '20' THEN 'Гвинея-Бисау'
+		WHEN '21' THEN 'Гайана'
+		WHEN '22' THEN 'Гаити'
+		WHEN '23' THEN 'Херд и Мак-Дональда Острова'
+		WHEN '24' THEN 'Гваделупа'
+		WHEN '25' THEN 'Гонконг'
+		WHEN '26' THEN 'Венгрия'
+		WHEN '27' THEN 'Индия'
+		WHEN '28' THEN 'Индонезия'
+		WHEN '29' THEN 'Иран (Исламская Республика)'
+		WHEN '30' THEN 'Ирак'
+		WHEN '31' THEN 'Ирландия'
+		WHEN '32' THEN 'Ватикан (Папский Престол)'
+		WHEN '33' THEN 'Гондурас'
+		WHEN '34' THEN 'Кирибати'
+		WHEN '35' THEN 'Корея'
+		WHEN '36' THEN 'Токелау'
+		WHEN '37' THEN 'Таиланд'
+		WHEN '38' THEN 'Тувалу'
+		WHEN '39' THEN 'Турция'
+		WHEN '40' THEN 'Тунис'
+		WHEN '41' THEN 'Тонга'
+		WHEN '42' THEN 'Кувейт'
+		WHEN '43' THEN 'Кыргызстан'
+		WHEN '44' THEN 'Португалия'
+		WHEN '45' THEN 'Парагвай'
+		WHEN '46' THEN 'Перу'
+		WHEN '47' THEN 'Филиппины'
+		WHEN '48' THEN 'Питкерн'
+		WHEN '49' THEN 'Польша'
+		WHEN '50' THEN 'Панама'
+		WHEN '51' THEN 'Папуа-Новая Гвинея'
+		WHEN '52' THEN 'Палау'
+		WHEN '53' THEN 'Северные Марианские острова'
+		WHEN '54' THEN 'Оман'
+		WHEN '55' THEN 'Пакистан'
+		WHEN '56' THEN 'Норвегия'
+		WHEN '57' THEN 'Нигер'
+		WHEN '58' THEN 'Нигерия'
+		WHEN '59' THEN 'Ниуэ'
+		WHEN '60' THEN 'Остров Норфолк'
+		WHEN '61' THEN 'Новая Зеландия'
+		WHEN '62' THEN 'Марокко'
+		WHEN '63' THEN 'Мозамбик'
+		WHEN '64' THEN 'Мьянма'
+		WHEN '65' THEN 'Науру'
+		WHEN '66' THEN 'Непал'
+		WHEN '67' THEN 'Никарагуа'
+		WHEN '68' THEN 'Новая Каледония'
+		WHEN '69' THEN 'Нидерланды'
+		WHEN '70' THEN 'Колумбия'
+		WHEN '71' THEN 'Канада'
+		WHEN '72' THEN 'Ботсвана'
+		WHEN '73' THEN 'Армения'
+		WHEN '74' THEN 'Аруба'
+		WHEN '75' THEN 'Австралия'
+		WHEN '76' THEN 'Австрия'
+		WHEN '77' THEN 'Азербайджан'
+		WHEN '78' THEN 'Чили'
+		WHEN '79' THEN 'Антарктида'
+		WHEN '80' THEN 'Аргентина'
+		WHEN '81' THEN 'Беларусь'
+		WHEN '82' THEN 'Бельгия'
+		WHEN '83' THEN 'Белиз'
+		WHEN '84' THEN 'Бенин'
+		WHEN '85' THEN 'Бермудские острова'
+		WHEN '86' THEN 'Бутан'
+		WHEN '87' THEN 'Боливия'
+		WHEN '88' THEN 'Босния и Герцеговина'
+		WHEN '89' THEN 'Багамы'
+		WHEN '90' THEN 'Бахрейн'
+		WHEN '91' THEN 'Бангладеш'
+		WHEN '92' THEN 'Барбадос'
+		WHEN '93' THEN 'Бразилия'
+		WHEN '94' THEN 'Британские тер-и в Инд. океане'
+		WHEN '95' THEN 'Болгария'
+		WHEN '96' THEN 'Буркина-Фасо'
+		WHEN '97' THEN 'Бурунди'
+		WHEN '98' THEN 'Реюньон'
+		WHEN '99' THEN 'Сан-Марино'
+		WHEN '100' THEN 'Камбоджа'
+		WHEN '101' THEN 'Камерун'
+		WHEN '102' THEN 'Буве'
+		WHEN '103' THEN 'Сан-Томе и Принсипи'
+		WHEN '104' THEN 'Сейшелы'
+		WHEN '105' THEN 'Сенегал'
+		WHEN '106' THEN 'Соломоновы Острова'
+		WHEN '107' THEN 'Сомали'
+		WHEN '108' THEN 'Южная Африка'
+		WHEN '109' THEN 'Южная Георгия и Южные Сендвиче'
+		WHEN '110' THEN 'Сингапур'
+		WHEN '111' THEN 'Словакия (Словацкая Респ.)'
+		WHEN '112' THEN 'Словения'
+		WHEN '113' THEN 'Сен-Пьер и Микелон'
+		WHEN '114' THEN 'Тайвань'
+		WHEN '115' THEN 'Швейцария'
+		WHEN '116' THEN 'Свазиленд'
+		WHEN '117' THEN 'Судан'
+		WHEN '118' THEN 'Суринам'
+		WHEN '119' THEN 'Шпицберген и Ян-Майен острова'
+		WHEN '120' THEN 'Швеция'
+		WHEN '121' THEN 'Св. Елены о-в'
+		WHEN '122' THEN 'Центральная Африканская Респ.'
+		WHEN '123' THEN 'Чад'
+		WHEN '124' THEN 'Китай'
+		WHEN '125' THEN 'Остров Рождества'
+		WHEN '126' THEN 'Кабо-Верде'
+		WHEN '127' THEN 'Каймановы острова'
+		WHEN '128' THEN 'Фарерские острова'
+		WHEN '129' THEN 'Фиджи'
+		WHEN '130' THEN 'Финляндия'
+		WHEN '131' THEN 'Франция'
+		WHEN '132' THEN 'Французская Гвиана'
+		WHEN '133' THEN 'Французская Полинезия'
+		WHEN '134' THEN 'Французские Южные территории'
+		WHEN '135' THEN 'Коморы'
+		WHEN '136' THEN 'Конго'
+		WHEN '137' THEN 'Конго, Демократическая Респ.'
+		WHEN '138' THEN 'Острова Кука'
+		WHEN '139' THEN 'Коста-Рика'
+		WHEN '140' THEN 'Кот-д''Ивуар'
+		WHEN '141' THEN 'Хорватия'
+		WHEN '142' THEN 'Куба'
+		WHEN '143' THEN 'Кипр'
+		WHEN '144' THEN 'Чешская Республика'
+		WHEN '145' THEN 'Дания'
+		WHEN '146' THEN 'Джибути'
+		WHEN '147' THEN 'Доминика'
+		WHEN '148' THEN 'Доминиканская Республика'
+		WHEN '149' THEN 'Восточный Тимор'
+		WHEN '150' THEN 'Эквадор'
+		WHEN '151' THEN 'Египет'
+		WHEN '152' THEN 'Сальвадор'
+		WHEN '153' THEN 'Экваториальная Гвинея'
+		WHEN '154' THEN 'Эритрея'
+		WHEN '155' THEN 'Эстония'
+		WHEN '156' THEN 'Эфиопия'
+		WHEN '157' THEN 'Габон'
+		WHEN '158' THEN 'Гамбия'
+		WHEN '159' THEN 'Грузия'
+		WHEN '160' THEN 'Германия'
+		WHEN '161' THEN 'Гана'
+		WHEN '162' THEN 'Гибралтар'
+		WHEN '163' THEN 'Греция'
+		WHEN '164' THEN 'Гренландия'
+		WHEN '165' THEN 'Гренада'
+		WHEN '166' THEN 'Шри-Ланка'
+		WHEN '167' THEN 'Сирийская Арабская Республика'
+		WHEN '168' THEN 'Таджикистан'
+		WHEN '169' THEN 'Танзания, Объединенная Респ.'
+		WHEN '170' THEN 'Тринидад и Тобаго'
+		WHEN '171' THEN 'Туркменистан'
+		WHEN '172' THEN 'Объединенные Арабские Эмираты'
+		WHEN '173' THEN 'Уганда'
+		WHEN '174' THEN 'Украина'
+		WHEN '175' THEN 'Теркс и Кайкос'
+		WHEN '176' THEN 'Великобритания'
+		WHEN '177' THEN 'Соединенные Штаты Малые о-ва'
+		WHEN '178' THEN 'Уругвай'
+		WHEN '179' THEN 'Узбекистан'
+		WHEN '180' THEN 'Вануату'
+		WHEN '181' THEN 'Виргинские острова (Брит.)'
+		WHEN '182' THEN 'Виргинские острова (США)'
+		WHEN '183' THEN 'Западная Сахара'
+		WHEN '184' THEN 'Венесуэла'
+		WHEN '185' THEN 'Испания'
+		WHEN '186' THEN 'Сьерра-Леоне'
+		WHEN '187' THEN 'Саудовская Аравия'
+		WHEN '188' THEN 'Сент-Китс и Невис'
+		WHEN '189' THEN 'Сент-Люсия'
+		WHEN '190' THEN 'Сент-Винсент и Grenadin'
+		WHEN '191' THEN 'Самоа'
+		WHEN '192' THEN 'США'
+		WHEN '193' THEN 'Румыния'
+		WHEN '194' THEN 'Руанда'
+		WHEN '195' THEN 'Пуэрто-Рико'
+		WHEN '196' THEN 'Катар'
+		WHEN '197' THEN 'Мадагаскар'
+		WHEN '198' THEN 'Малайзия'
+		WHEN '199' THEN 'Мальдивы'
+		WHEN '200' THEN 'Афганистан'
+		WHEN '201' THEN 'Албания'
+		WHEN '202' THEN 'Алжир'
+		WHEN '203' THEN 'Американское Самоа'
+		WHEN '204' THEN 'Андорра'
+		WHEN '205' THEN 'Ангола'
+		WHEN '206' THEN 'Ангилья'
+		WHEN '207' THEN 'Мали'
+		WHEN '208' THEN 'Мальта'
+		WHEN '209' THEN 'Малави'
+		WHEN '210' THEN 'Маршалловы Острова'
+		WHEN '211' THEN 'Мавритания'
+		WHEN '212' THEN 'Маврикий'
+		WHEN '213' THEN 'Майотта'
+		WHEN '214' THEN 'Мексика'
+		WHEN '215' THEN 'Микронезия, Федеративные Штаты'
+		WHEN '216' THEN 'Монако'
+		WHEN '217' THEN 'Молдова, Республика'
+		WHEN '218' THEN 'Монтсеррат'
+		WHEN '219' THEN 'Монголия'
+		WHEN '220' THEN 'Намибия'
+		WHEN '221' THEN 'Зимбабве'
+		WHEN '222' THEN 'Замбия'
+		WHEN '223' THEN 'Абхазия'
+		WHEN '224' THEN 'Бруней-Даруссалам'
+		WHEN '225' THEN 'Кокосовые (Килинг) острова'
+		WHEN '226' THEN 'Иордания'
+		WHEN '227' THEN 'Корейская Народно-Демокр. Респ'
+		WHEN '228' THEN 'Уоллис и Футуна'
+		WHEN '229' THEN 'Ливия'
+		WHEN '230' THEN 'Республика Македония'
+		WHEN '231' THEN 'БОНЭЙР, СИНТ-ЭСТАТИУС И САБА'
+		WHEN '232' THEN 'ГЕРНСИ'
+		WHEN '233' THEN 'ДЖЕРСИ'
+		WHEN '234' THEN 'ИСЛАНДИЯ'
+		WHEN '235' THEN 'КЮРАСАО'
+		WHEN '236' THEN 'ОСТРОВ МЭН'
+		WHEN '237' THEN 'ПАЛЕСТИНСКАЯ ТЕРРИТОРИЯ'
+		WHEN '238' THEN 'СЕН-БАРТЕЛЕМИ'
+		WHEN '239' THEN 'СЕН-МАРТЕН'
+		WHEN '240' THEN 'СЕН-МАРТЕН (нидерландская част'
+		WHEN '241' THEN 'СЕРБИЯ'
+		WHEN '242' THEN 'ЧЕРНОГОРИЯ'
+		WHEN '243' THEN 'ЭЛАНДСКИЕ ОСТРОВА'
+		WHEN '244' THEN 'ЮЖНЫЙ СУДАН'
+		WHEN '245' THEN 'ЮЖНАЯ ОСЕТИЯ'
+		WHEN '246' THEN 'Италия'
+		WHEN '247' THEN 'Антигуа и Барбуда'
+		WHEN '248' THEN 'Фолклендские (Мальвинск.) о-ва'
+		WHEN '249' THEN 'Того'
+		WHEN '250' THEN 'Вьетнам'
+		WHEN '251' THEN 'Мартиника'
+		WHEN '252' THEN '----------------------'
+
+		ELSE code
+		*/
+	--END;
+END; 
+
+
+/**
+ * 7.8	Статусы клиента
+ **/
+CREATE FUNCTION convertCustomerStatusCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN 'Customer' THEN code
+		WHEN 'NewCustomer' THEN code
+		WHEN 'Inactive' THEN code
+		ELSE code
+	END;
+END; 
+
+/**
+ * 7.9	Типы клиента
+ **/
+CREATE FUNCTION convertCustomerTypeCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN '402' THEN '1'
+		WHEN '201' THEN '1'
+		WHEN '410' THEN '1'
+		WHEN '301' THEN '1'
+		WHEN '404' THEN '1'
+		WHEN '103' THEN '1'
+		WHEN '409' THEN '1'
+		WHEN '611' THEN '1'
+		WHEN '305' THEN '1'
+		WHEN '304' THEN '1'
+		WHEN '612' THEN '1'
+		WHEN '603' THEN '1'
+		WHEN '411' THEN '1'
+		WHEN '405' THEN '2'
+		WHEN '602' THEN '1'
+		WHEN '406' THEN '1'
+		WHEN '606' THEN '1'
+		WHEN '615' THEN '1'
+		WHEN '403' THEN '2'
+		WHEN '302' THEN '1'
+		WHEN '407' THEN '2'
+		WHEN '613' THEN '1'
+		WHEN '614' THEN '1'
+		WHEN '303' THEN '1'
+		WHEN '604' THEN '1'
+		WHEN '605' THEN '1'
+		WHEN '408' THEN '2'
+		ELSE code
+	END;
+END; 
+
+
+/**
+ * 7.10	Сегменты
+ **/
+CREATE FUNCTION convertSegmentCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN '1' THEN '1'
+		WHEN '2' THEN '2'
+		WHEN '3' THEN '3'
+		WHEN '4' THEN '4' 
+		ELSE code
+	END;
+END; 
+
+/**
+ * 7.11	Типы контактов
+ **/
+CREATE FUNCTION convertContactTypeCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN '1' THEN '1'
+		WHEN '2' THEN '2'
+		WHEN '3' THEN '3'
+		WHEN '4' THEN '4' 
+		WHEN '5' THEN '5'
+		WHEN '6' THEN '6'
+		ELSE code
+	END;
+END; 
+
+/**
+ * 7.12	Типы связи
+ **/
+CREATE FUNCTION convertConnectionTypeCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN '20' THEN '1'
+		WHEN '10' THEN '2'
+		WHEN '3' THEN '3'
+		WHEN '40' THEN '4' 
+		WHEN '6' THEN '6'
+		WHEN '7' THEN '7'
+		WHEN '8' THEN '8'
+		WHEN '10' THEN '10'
+		WHEN '12' THEN '12'
+		WHEN '90' THEN '13'
+		WHEN '30' THEN '14'
+		ELSE code
+	END;
+END; 
+
+/**
+ * 7.13	Отрасли
+ **/
+CREATE FUNCTION convertIndustryCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN 'OIL_GAS' THEN code
+		WHEN 'COAL_MINING' THEN code
+		WHEN 'GOVERNANCE' THEN code
+		WHEN 'MECH_ENGINEERING' THEN code
+		WHEN 'METALLURGY' THEN code
+		WHEN 'CHEMICAL' THEN code
+		WHEN 'FOOD' THEN code
+		WHEN 'AGRICULTURE' THEN code
+		WHEN 'CONSTRUCTION' THEN code
+		WHEN 'TRADE' THEN code
+		WHEN 'TRANSPORTATION' THEN code
+		WHEN 'COMMUNICATIONS' THEN code
+		WHEN 'FINANCE' THEN code
+		WHEN 'ENERGY' THEN code
+		WHEN 'LEASING' THEN code
+		WHEN 'HEALTH_EDUCATION' THEN code
+		WHEN 'WOOD' THEN code
+		WHEN 'SERVICE' THEN code
+		WHEN 'BANK' THEN code
+		WHEN 'MILITARY' THEN code
+		WHEN 'LIGHT_INDUSTRY' THEN code
+		WHEN 'IT' THEN code
+		WHEN 'REAL_ESTATE' THEN code
+		WHEN 'OTHER' THEN code
+		ELSE code
+	END;
+END; 
+
+
+/**
+ * 7.14	Типы документов
+ **/
+CREATE FUNCTION convertDocumentTypeCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN '1' THEN '1'
+		WHEN '2' THEN '2'
+		WHEN '3' THEN '3'
+		WHEN '4' THEN '4' 
+		WHEN '5' THEN '5'
+		WHEN '6' THEN '6'
+		ELSE code
+	END;
+END; 
+
+
+
+/**
+ * 7.15	Коды ИС
+ **/
+CREATE FUNCTION convertSystemCRM(IN code CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE code
+		WHEN 'urn:sbrfsystems:crmkz' THEN 'urn:sbrfsystems:crmkz'
+		ELSE code
+	END;
+END; 
+
+
+--END; 
+

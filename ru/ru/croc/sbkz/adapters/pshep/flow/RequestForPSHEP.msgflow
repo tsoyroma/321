@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmLabel.msgnode="ComIbmLabel.msgnode" xmlns:ComIbmMQInput.msgnode="ComIbmMQInput.msgnode" xmlns:ComIbmMQOutput.msgnode="ComIbmMQOutput.msgnode" xmlns:ComIbmRouteToLabel.msgnode="ComIbmRouteToLabel.msgnode" xmlns:ComIbmSOAPExtract.msgnode="ComIbmSOAPExtract.msgnode" xmlns:ComIbmSOAPRequest.msgnode="ComIbmSOAPRequest.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow"
+    xmlns:ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow="ru/croc/sbrf/bp/common/flow/ErrorHandlerSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow" xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbkz/adapters/pshep/flow/RequestForPSHEP.msgflow"
+    nsPrefix="ru_croc_sbkz_adapters_pshep_flow_RequestForPSHEP.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <translation xmi:type="utility:TranslatableString" key="RequestForPSHEP" bundleName="ru/croc/sbkz/adapters/pshep/flow/RequestForPSHEP" pluginId="AdaptersKZ"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/AdaptersKZ/icons/full/obj16/RequestForPSHEP.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/AdaptersKZ/icons/full/obj30/RequestForPSHEP.gif"/>
+    <composition>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="63,485" labelName="SendPaymentRequest">
+        <translation xmi:type="utility:ConstantString" string="SendPaymentRequest"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_2" location="499,379" EventReceiverProp="A_PSHEP" EventSourceProp="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflowFault"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_3" location="521,470" EventReceiverProp="A_PSHEP" EventSourceProp="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflowFailure"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_4" location="147,671" computeExpression="esql://routine/ru.croc.sbkz.adapters.pshep.esql#RequestForPSHEP_PrepareSOAPBody.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="MakeSOAPBody_AuthorizePaymentsRequest"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_5" location="263,525" CurrentOperation="Сообщение RegisterPaymentRequest передано Web-сервису PSHEP" CurrentEventSource="A_PSHEP" CurrentEventReceiver="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="A_PSHEP -> PSHEP"/>
+      </nodes>
+      <nodes xmi:type="ComIbmSOAPExtract.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_6" location="680,577">
+        <translation xmi:type="utility:ConstantString" string="SOAP Extract"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_7" location="780,295" computeExpression="esql://routine/ru.croc.sbkz.adapters.pshep.esql#RequestForPSHEP_RetrieveHeader.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="RetrieveHeaderAndAppendData"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_8" location="137,170" computeExpression="esql://routine/ru.croc.sbkz.adapters.pshep.esql#RequestForPSHEP_PrepareSOAPBody.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="MakeSOAPBody_RefundPaymentRequest"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_9" location="647,29" computeExpression="esql://routine/ru.croc.sbkz.adapters.pshep.esql#RequestForPSHEP_DetectOperation.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="DetectOperation"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_10" location="1080,583" destinationMode="list">
+        <translation xmi:type="utility:ConstantString" string="QRESPONSE"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_11" location="796,864" computeExpression="esql://routine/ru.croc.sbkz.adapters.pshep.esql#RequestForPSHEP_RetrieveHeader.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="RetrieveHeaderAndAppendData1"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_12" location="205,31" EventReceiverProp="A_PSHEP" EventSourceProp="ESB">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflow"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_13" location="530,682" EventReceiverProp="A_PSHEP" EventSourceProp="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflowFault1"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_14" location="1168,587" CurrentOperation="Сообщение обработано адаптером PSHEP и передано для дальнейшей обработки" CurrentEventSource="A_PSHEP" CurrentEventReceiver="ESB">
+        <translation xmi:type="utility:ConstantString" string="A_PSHEP -> ESB"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_15" location="80,290" labelName="RefundPaymentRequest">
+        <translation xmi:type="utility:ConstantString" string="RefundPaymentRequest"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_16" location="565,291" CurrentOperation="Адаптером PSHEP получен ответ от Web-сервиса PSHEP" CurrentEventSource="PSHEP" CurrentEventReceiver="A_PSHEP">
+        <translation xmi:type="utility:ConstantString" string="PSHEP -> A_PSHEP"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_17" location="156,402" computeExpression="esql://routine/ru.croc.sbkz.adapters.pshep.esql#RequestForPSHEP_PrepareSOAPBody.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="MakeSOAPBody_RegisterPaymentRequest"/>
+      </nodes>
+      <nodes xmi:type="ComIbmSOAPRequest.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_18" location="446,581" wsdlFileName="msg.soap.PSHEPTest.KZ/kz/bee/bip/syncchannel/v10/interfaces/binding2/SyncChannelHttp_Service.wsdl" selectedPortType="ISyncChannel" selectedBinding="SyncChannelHttpBinding" selectedOperation="SendMessage" selectedPort="SyncChannelHttpPort" targetNamespace="http://bip.bee.kz/SyncChannel/v10/Interfaces/Binding2" useHTTPTransport="true" webServiceURL="http://192.168.184.3:80/bip-external-sync/"
+          sslProtocol="TLS" messageSetProperty="msg.soap.PSHEPTest.KZ" parserXmlnscBuildTreeUsingXMLSchema="false" validateMaster="none">
+        <translation xmi:type="utility:ConstantString" string="SOAP Request"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQInput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_19" location="61,31" queueName="ESB.PSHEP.REQUEST" messageDomainProperty="XMLNSC">
+        <translation xmi:type="utility:ConstantString" string="ESB.PSHEP.REQUEST"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_20" location="514,184" EventReceiverProp="A_PSHEP" EventSourceProp="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflowFailure1"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_21" location="777,581" computeExpression="esql://routine/ru.croc.sbkz.adapters.pshep.esql#RequestForPSHEP_RetrieveHeader.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="RetrieveHeaderAndAppendData2"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_22" location="549,965" EventReceiverProp="A_PSHEP" EventSourceProp="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflowFault2"/>
+      </nodes>
+      <nodes xmi:type="ComIbmSOAPRequest.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_23" location="415,286" wsdlFileName="msg.soap.PSHEPTest.KZ/kz/bee/bip/syncchannel/v10/interfaces/binding2/SyncChannelHttp_Service.wsdl" selectedPortType="ISyncChannel" selectedBinding="SyncChannelHttpBinding" selectedOperation="SendMessage" selectedPort="SyncChannelHttpPort" targetNamespace="http://bip.bee.kz/SyncChannel/v10/Interfaces/Binding2" useHTTPTransport="true" webServiceURL="http://192.168.184.3:80/bip-external-sync/"
+          sslProtocol="TLS" messageSetProperty="msg.soap.PSHEPTest.KZ" parserXmlnscBuildTreeUsingXMLSchema="false" validateMaster="none">
+        <translation xmi:type="utility:ConstantString" string="SOAP Request1"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_24" location="250,296" CurrentOperation="Сообщение RefundPaymentRequest передано Web-сервису PSHEP" CurrentEventSource="A_PSHEP" CurrentEventReceiver="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="A_PSHEP -> PSHEP1"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_25" location="540,753" EventReceiverProp="A_PSHEP" EventSourceProp="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflowFailure2"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_26" location="58,778" labelName="AuthorizePaymentsRequest">
+        <translation xmi:type="utility:ConstantString" string="AuthorizePaymentsRequest"/>
+      </nodes>
+      <nodes xmi:type="ComIbmSOAPRequest.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_27" location="475,860" wsdlFileName="msg.soap.PSHEPTest.KZ/kz/bee/bip/syncchannel/v10/interfaces/binding2/SyncChannelHttp_Service.wsdl" selectedPortType="ISyncChannel" selectedBinding="SyncChannelHttpBinding" selectedOperation="SendMessage" selectedPort="SyncChannelHttpPort" targetNamespace="http://bip.bee.kz/SyncChannel/v10/Interfaces/Binding2" useHTTPTransport="true" webServiceURL="http://192.168.184.3:80/bip-external-sync/"
+          sslProtocol="TLS" messageSetProperty="msg.soap.PSHEPTest.KZ" parserXmlnscBuildTreeUsingXMLSchema="false" validateMaster="none">
+        <translation xmi:type="utility:ConstantString" string="SOAP Request2"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_28" location="552,578" CurrentOperation="Адаптером PSHEP получен ответ от Web-сервиса PSHEP" CurrentEventSource="PSHEP" CurrentEventReceiver="A_PSHEP">
+        <translation xmi:type="utility:ConstantString" string="PSHEP -> A_PSHEP1"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_29" location="356,28" CurrentOperation="Сообщение передано в адаптер PSHEP" CurrentEventSource="ESB" CurrentEventReceiver="A_PSHEP" SourceQueue="ESB.PSHEP.REQUEST">
+        <translation xmi:type="utility:ConstantString" string="ESB -> A_PSHEP"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_30" location="264,828" CurrentOperation="Сообщение AuthorizePaymentsRequest передано Web-сервису PSHEP" CurrentEventSource="A_PSHEP" CurrentEventReceiver="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="A_PSHEP -> PSHEP2"/>
+      </nodes>
+      <nodes xmi:type="ComIbmRouteToLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_31" location="818,30">
+        <translation xmi:type="utility:ConstantString" string="Route To Service"/>
+      </nodes>
+      <nodes xmi:type="ComIbmSOAPExtract.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_32" location="699,860">
+        <translation xmi:type="utility:ConstantString" string="SOAP Extract1"/>
+      </nodes>
+      <nodes xmi:type="ComIbmSOAPExtract.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_33" location="673,291">
+        <translation xmi:type="utility:ConstantString" string="SOAP Extract2"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_34" location="576,854" CurrentOperation="Адаптером PSHEP получен ответ от Web-сервиса PSHEP" CurrentEventSource="PSHEP" CurrentEventReceiver="A_PSHEP">
+        <translation xmi:type="utility:ConstantString" string="PSHEP -> A_PSHEP2"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_35" location="494,28" computeExpression="esql://routine/ru.croc.sbkz.adapters.pshep.esql#RequestForPSHEP_SaveOrigMess.Main">
+        <translation xmi:type="utility:ConstantString" string="SaveOrigMess"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_36" location="595,1170" CurrentOperation="Адаптером PSHEP получен ответ от Web-сервиса PSHEP" CurrentEventSource="PSHEP" CurrentEventReceiver="A_PSHEP">
+        <translation xmi:type="utility:ConstantString" string="PSHEP -> A_PSHEP3"/>
+      </nodes>
+      <nodes xmi:type="ComIbmSOAPExtract.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_37" location="718,1176">
+        <translation xmi:type="utility:ConstantString" string="SOAP Extract3"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_38" location="43,1139" labelName="SummaryPaymentRequest">
+        <translation xmi:type="utility:ConstantString" string="SummaryPaymentRequest"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_39" location="295,1144" CurrentOperation="Сообщение SummaryPaymentRequest передано Web-сервису PSHEP" CurrentEventSource="A_PSHEP" CurrentEventReceiver="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="A_PSHEP -> PSHEP3"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_40" location="559,1069" EventReceiverProp="A_PSHEP" EventSourceProp="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflowFailure3"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_41" location="815,1180" computeExpression="esql://routine/ru.croc.sbkz.adapters.pshep.esql#RequestForPSHEP_RetrieveHeader.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="RetrieveHeaderAndAppendData3"/>
+      </nodes>
+      <nodes xmi:type="ComIbmSOAPRequest.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_42" location="494,1176" wsdlFileName="msg.soap.PSHEPTest.KZ/kz/bee/bip/syncchannel/v10/interfaces/binding2/SyncChannelHttp_Service.wsdl" selectedPortType="ISyncChannel" selectedBinding="SyncChannelHttpBinding" selectedOperation="SendMessage" selectedPort="SyncChannelHttpPort" targetNamespace="http://bip.bee.kz/SyncChannel/v10/Interfaces/Binding2" useHTTPTransport="true" webServiceURL="http://192.168.184.3:80/bip-external-sync/"
+          sslProtocol="TLS" messageSetProperty="msg.soap.PSHEPTest.KZ" parserXmlnscBuildTreeUsingXMLSchema="false" validateMaster="none">
+        <translation xmi:type="utility:ConstantString" string="SOAP Request3"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_43" location="568,1281" EventReceiverProp="A_PSHEP" EventSourceProp="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflowFault3"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_44" location="155,1003" computeExpression="esql://routine/ru.croc.sbkz.adapters.pshep.esql#RequestForPSHEP_PrepareSOAPBody.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="MakeSOAPBody_SendSummaryPayment"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_52" location="600,1476" CurrentOperation="Адаптером PSHEP получен ответ от Web-сервиса PSHEP" CurrentEventSource="PSHEP" CurrentEventReceiver="A_PSHEP">
+        <translation xmi:type="utility:ConstantString" string="PSHEP -> A_PSHEP4"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_53" location="48,1445" labelName="GetTreasuryRefundPaymentsRequest">
+        <translation xmi:type="utility:ConstantString" string="GetTreasuryRefundPaymentsRequest"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_54" location="573,1587" EventReceiverProp="A_PSHEP" EventSourceProp="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflowFault4"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_55" location="564,1375" EventReceiverProp="A_PSHEP" EventSourceProp="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflowFailure4"/>
+      </nodes>
+      <nodes xmi:type="ComIbmSOAPExtract.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_56" location="723,1482">
+        <translation xmi:type="utility:ConstantString" string="SOAP Extract4"/>
+      </nodes>
+      <nodes xmi:type="ComIbmSOAPRequest.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_57" location="499,1482" wsdlFileName="msg.soap.PSHEPTest.KZ/kz/bee/bip/syncchannel/v10/interfaces/binding2/SyncChannelHttp_Service.wsdl" selectedPortType="ISyncChannel" selectedBinding="SyncChannelHttpBinding" selectedOperation="SendMessage" selectedPort="SyncChannelHttpPort" targetNamespace="http://bip.bee.kz/SyncChannel/v10/Interfaces/Binding2" useHTTPTransport="true" webServiceURL="http://192.168.184.3:80/bip-external-sync/"
+          sslProtocol="TLS" messageSetProperty="msg.soap.PSHEPTest.KZ" parserXmlnscBuildTreeUsingXMLSchema="false" validateMaster="none">
+        <translation xmi:type="utility:ConstantString" string="SOAP Request4"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_58" location="160,1309" computeExpression="esql://routine/ru.croc.sbkz.adapters.pshep.esql#RequestForPSHEP_PrepareSOAPBody.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="MakeSOAPBody_GetTreasuryRefundPayments"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_59" location="820,1486" computeExpression="esql://routine/ru.croc.sbkz.adapters.pshep.esql#RequestForPSHEP_RetrieveHeader.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="RetrieveHeaderAndAppendData4"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_60" location="300,1450" CurrentOperation="Сообщение GetTreasuryRefundPaymentsRequestt передано Web-сервису PSHEP" CurrentEventSource="A_PSHEP" CurrentEventReceiver="PSHEP">
+        <translation xmi:type="utility:ConstantString" string="A_PSHEP -> PSHEP4"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_34" sourceNode="FCMComposite_1_27" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_28" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_12" sourceNode="FCMComposite_1_19" sourceTerminalName="OutTerminal.catch" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_28" sourceNode="FCMComposite_1_18" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_17" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_30" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_31" sourceNode="FCMComposite_1_9" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_8" targetNode="FCMComposite_1_8" sourceNode="FCMComposite_1_15" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_9" targetNode="FCMComposite_1_9" sourceNode="FCMComposite_1_35" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_10" targetNode="FCMComposite_1_12" sourceNode="FCMComposite_1_19" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_11" targetNode="FCMComposite_1_17" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_12" targetNode="FCMComposite_1_11" sourceNode="FCMComposite_1_32" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_13" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_26" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_14" targetNode="FCMComposite_1_21" sourceNode="FCMComposite_1_6" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_15" targetNode="FCMComposite_1_12" sourceNode="FCMComposite_1_19" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_16" targetNode="FCMComposite_1_22" sourceNode="FCMComposite_1_27" sourceTerminalName="OutTerminal.fault" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_17" targetNode="FCMComposite_1_25" sourceNode="FCMComposite_1_27" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_18" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_33" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_19" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_18" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_20" targetNode="FCMComposite_1_14" sourceNode="FCMComposite_1_10" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_21" targetNode="FCMComposite_1_23" sourceNode="FCMComposite_1_24" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_22" targetNode="FCMComposite_1_35" sourceNode="FCMComposite_1_29" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_23" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_18" sourceTerminalName="OutTerminal.fault" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_24" targetNode="FCMComposite_1_33" sourceNode="FCMComposite_1_16" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_25" targetNode="FCMComposite_1_10" sourceNode="FCMComposite_1_7" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_26" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_23" sourceTerminalName="OutTerminal.fault" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_27" targetNode="FCMComposite_1_27" sourceNode="FCMComposite_1_30" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_28" targetNode="FCMComposite_1_18" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_29" targetNode="FCMComposite_1_20" sourceNode="FCMComposite_1_23" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_30" targetNode="FCMComposite_1_10" sourceNode="FCMComposite_1_11" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_31" targetNode="FCMComposite_1_24" sourceNode="FCMComposite_1_8" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_32" targetNode="FCMComposite_1_16" sourceNode="FCMComposite_1_23" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_33" targetNode="FCMComposite_1_32" sourceNode="FCMComposite_1_34" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_34" targetNode="FCMComposite_1_29" sourceNode="FCMComposite_1_12" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_35" targetNode="FCMComposite_1_10" sourceNode="FCMComposite_1_21" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_36" targetNode="FCMComposite_1_36" sourceNode="FCMComposite_1_42" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_37" targetNode="FCMComposite_1_40" sourceNode="FCMComposite_1_42" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_38" targetNode="FCMComposite_1_42" sourceNode="FCMComposite_1_39" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_39" targetNode="FCMComposite_1_41" sourceNode="FCMComposite_1_37" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_40" targetNode="FCMComposite_1_43" sourceNode="FCMComposite_1_42" sourceTerminalName="OutTerminal.fault" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_41" targetNode="FCMComposite_1_37" sourceNode="FCMComposite_1_36" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_42" targetNode="FCMComposite_1_10" sourceNode="FCMComposite_1_41" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_43" targetNode="FCMComposite_1_39" sourceNode="FCMComposite_1_44" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_44" targetNode="FCMComposite_1_44" sourceNode="FCMComposite_1_38" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_51" targetNode="FCMComposite_1_58" sourceNode="FCMComposite_1_53" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_52" targetNode="FCMComposite_1_54" sourceNode="FCMComposite_1_57" sourceTerminalName="OutTerminal.fault" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_53" targetNode="FCMComposite_1_59" sourceNode="FCMComposite_1_56" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_54" targetNode="FCMComposite_1_57" sourceNode="FCMComposite_1_60" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_55" targetNode="FCMComposite_1_56" sourceNode="FCMComposite_1_52" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_56" targetNode="FCMComposite_1_55" sourceNode="FCMComposite_1_57" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_57" targetNode="FCMComposite_1_52" sourceNode="FCMComposite_1_57" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_58" targetNode="FCMComposite_1_60" sourceNode="FCMComposite_1_58" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_59" targetNode="FCMComposite_1_10" sourceNode="FCMComposite_1_59" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer/>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

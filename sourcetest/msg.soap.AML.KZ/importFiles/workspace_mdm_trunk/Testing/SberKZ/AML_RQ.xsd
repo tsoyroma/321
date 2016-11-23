@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<xsd:element name="CLIENTCARDS">
+		<xsd:complexType>
+			<xsd:sequence>
+				<xsd:element name="CLIENTCARD">
+					<xsd:complexType>
+						<xsd:sequence>
+							<xsd:element type="xsd:string" name="CLIENTID" />
+							<xsd:element type="xsd:string" name="BSCLIENTID" />
+							<xsd:element type="xsd:string" name="RqUID" />
+							<xsd:element type="xsd:string" name="RqTm" />
+						</xsd:sequence>
+					</xsd:complexType>
+				</xsd:element>
+			</xsd:sequence>
+		</xsd:complexType>
+	</xsd:element>
+</xsd:schema>

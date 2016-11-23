@@ -1,0 +1,316 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.credit.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+/**
+ * Объединение ответов АБПК и МАБПК
+ **/
+CREATE COMPUTE MODULE CreditHistoryPragmaResponse_CreateResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE origMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+		SET Environment.UserProperties = origMsg.UserProperties;
+		DECLARE inRef REFERENCE TO origMsg.Body.*[<];
+
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(origMsg, OutputLocalEnvironment);
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.KZGetCreditHistoryRs AS outRef;
+		SET outRef.(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+		DECLARE msgDate DATE CAST(SUBSTRING(inRef.RqTm FROM 1 FOR 10) AS DATE FORMAT 'yyyy-MM-dd');
+		
+		SET outRef.RqUID	= inRef.RqUID;
+		SET outRef.RqTm		= inRef.RqTm;
+		
+		IF NOT EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMANEW[]) THEN
+			SET outRef.Status.ifxca:StatusCode	= '-100';
+			SET outRef.Status.ifxca:StatusDesc	= 'Не удалось получить ответ от МАБПК в течение установленного временного интервала.';
+		/*ELSEIF NOT EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMA[]) THEN
+			SET outRef.Status.ifxca:StatusCode	= '-100';
+			SET outRef.Status.ifxca:StatusDesc	= 'Не удалось получить ответ от АБПК в течение установленного временного интервала.';*/
+		ELSE
+			
+			DECLARE pragmaRespValid BOOLEAN FALSE;
+			DECLARE pragmaNewRespValid BOOLEAN FALSE;
+			
+			IF COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMANEW.XMLNSC.*[<].Status.*:StatusCode, '') IN ('', '0') THEN
+				SET pragmaNewRespValid = TRUE;
+			END IF;
+			/*IF COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMA.XMLNSC.*[<].Status.*:StatusCode, '') IN ('', '0') THEN
+				SET pragmaRespValid = TRUE;
+			END IF;*/
+			
+			-- u06068 24/07/2014 - В случае ошибки от QPragma нужно по приоритету поставить ее первой и выдать ошибку транзакту без ответа от старой Прагмы
+			--IF pragmaRespValid=FALSE AND pragmaNewRespValid=FALSE THEN
+			IF pragmaNewRespValid=FALSE THEN
+				SET outRef.Status.ifxca:StatusCode	= FIELDVALUE(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMANEW.XMLNSC.*[<].Status.*:StatusCode);
+				SET outRef.Status.ifxca:StatusDesc	= COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMANEW.XMLNSC.*[<].Status.*:StatusDesc, '');
+			/*ELSEIF pragmaRespValid=FALSE THEN
+				SET outRef.Status.ifxca:StatusCode	= FIELDVALUE(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMA.XMLNSC.*[<].Status.*:StatusCode);
+				SET outRef.Status.ifxca:StatusDesc	= COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMA.XMLNSC.*[<].Status.*:StatusDesc, '');*/
+			ELSE
+				
+				SET outRef.Status.ifxca:StatusCode	= '0';
+				SET outRef.Status.ifxca:StatusDesc	= '';
+				
+				DECLARE pragmaRoot REFERENCE TO InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMA.XMLNSC.*[<];
+				DECLARE pragmaNewRoot REFERENCE TO InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMANEW.XMLNSC.*[<];		
+				DECLARE agrRecord REFERENCE TO outRef;	
+				DECLARE delayRecord REFERENCE TO outRef;
+				
+				IF inRef.BKI = 'PRAGMA_CORP' THEN
+				
+					/*IF pragmaNewRespValid=TRUE THEN
+						SET outRef.ProductVersion 		= pragmaNewRoot.ProductVersion;
+						FOR agreement AS pragmaNewRoot.Agreement[] DO
+							 
+							 CREATE LASTCHILD OF outRef AS agrRecord NAME 'Agreement';
+							 
+							 SET agrRecord = agreement;
+							 
+						END FOR;
+						
+					END IF;
+					
+					IF pragmaRespValid=TRUE THEN
+						
+						FOR blockData AS pragmaRoot.Agreement[] DO
+						
+							CREATE LASTCHILD OF outRef AS agrRecord NAME 'Agreement';
+							
+							SET agrRecord = blockData;
+						
+						END FOR;	
+						
+					END IF;	*/
+					IF pragmaNewRespValid=TRUE THEN
+						SET outRef.ProductVersion 		= pragmaNewRoot.ProductVersion;
+						
+						-- итерация по записям из ответа МАБПК
+						FOR agreementNew AS pragmaNewRoot.Agreement[] DO 
+							DECLARE acctId CHARACTER FIELDVALUE(agreementNew.AcctId);
+							DECLARE agreementOld REFERENCE TO outRef;
+							DECLARE matchFound BOOLEAN FALSE;
+							DECLARE dateControlPassed BOOLEAN FALSE;
+							DECLARE recNum INTEGER 1;
+							DECLARE pragmaRecs INTEGER CARDINALITY(pragmaRoot.Agreement[]);
+							
+							IF pragmaRespValid = TRUE THEN
+								X: WHILE recNum <= pragmaRecs DO
+									IF FIELDVALUE(pragmaRoot.Agreement[recNum].AcctId) = acctId THEN
+										MOVE agreementOld TO pragmaRoot.Agreement[recNum];
+										SET matchFound = TRUE;
+										LEAVE X;
+									ELSE 
+										SET recNum = recNum + 1;
+									END IF;
+								END WHILE X;
+							END IF;
+							
+							-- проверка даты перехода филиала для МАБПК
+							IF agreementNew.DateTransfer <> '' THEN
+								DECLARE transDate DATE CAST(agreementNew.DateTransfer AS DATE FORMAT 'yyyy-MM-dd');
+								IF transDate < msgDate THEN 
+									SET dateControlPassed = TRUE;
+								END IF;
+							END IF;
+							
+							IF dateControlPassed = TRUE THEN
+								CREATE LASTCHILD OF outRef AS agrRecord NAME 'Agreement';
+								-- Запись копируется из ответа МАБПК
+								SET agrRecord = agreementNew;
+								IF matchFound THEN
+									-- найдена аналогичная запись в ответе АБПК, необходимо объединить данные
+									IF agreementOld.Restruct = '1' THEN
+										SET agrRecord.Restruct 	= '1';
+									END IF;
+									IF agreementOld.ChargeOff = '1' THEN
+										SET agrRecord.ChargeOff	= '1';
+									END IF;
+									IF agreementOld.NoDelay = '2' THEN
+										SET agrRecord.NoDelay	= '2';
+									END IF;
+									
+									-- удаляем устаревшие записи из ответа АБПК
+									CALL RemoveObsoleteDelayRecords(agreementOld,TRUE);
+									-- добавляем записи о просрочках из ответа АБПК, если они не имеют дублей в ответе МАБПК
+									FOR delay AS agreementOld.DelayInfo[] DO
+										IF NOT EXISTS(SELECT exDelay.* FROM agreementNew.DelayInfo[] AS exDelay 
+													  WHERE exDelay.StartDelayDate = delay.StartDelayDate 
+													  	AND exDelay.EndDelayDate = delay.EndDelayDate 
+													  	AND exDelay.MaxDelaySum = delay.MaxDelaySum ) THEN
+											CREATE LASTCHILD OF agrRecord AS delayRecord NAME 'DelayInfo';
+											SET delayRecord = delay;
+										END IF;
+									END FOR;
+									
+									SET pragmaRoot.Agreement[recNum] = NULL;
+								ELSE 	
+									-- удаление устаревших записей о просрочке в ответе
+									CALL RemoveObsoleteDelayRecords(agrRecord,FALSE);
+								END IF;	
+							
+							ELSE 
+								-- Запись копируется из ответа АБПК
+								IF matchFound = TRUE THEN
+									CREATE LASTCHILD OF outRef AS agrRecord NAME 'Agreement';
+									SET agrRecord = agreementOld;
+									SET pragmaRoot.Agreement[recNum] = NULL;
+									CALL RemoveObsoleteDelayRecords(agrRecord,TRUE);
+								END IF;
+							END IF;
+							
+						END FOR;
+					END IF;
+					
+					IF pragmaRespValid=TRUE THEN
+						-- добавляем уникальные записи из ответа АБПК
+						FOR agreementNew AS pragmaRoot.Agreement[] DO 
+							CREATE LASTCHILD OF outRef AS agrRecord NAME 'Agreement';
+							SET agrRecord = agreementNew;
+							-- удаление устаревших записей о просрочке в ответе
+							CALL RemoveObsoleteDelayRecords(agrRecord,TRUE);
+						END FOR;
+					END IF; 	
+				
+				ELSE -- Если не юр. лица то физ. лица
+				
+					IF pragmaNewRespValid=TRUE THEN
+						SET outRef.ProductVersion 		= pragmaNewRoot.ProductVersion;
+						
+						-- итерация по записям из ответа МАБПК
+						FOR agreementNew AS pragmaNewRoot.Agreement[] DO 
+							DECLARE acctId CHARACTER FIELDVALUE(agreementNew.AcctId);
+							DECLARE agreementOld REFERENCE TO outRef;
+							DECLARE matchFound BOOLEAN FALSE;
+							DECLARE dateControlPassed BOOLEAN FALSE;
+							DECLARE recNum INTEGER 1;
+							DECLARE pragmaRecs INTEGER CARDINALITY(pragmaRoot.Agreement[]);
+							
+							IF pragmaRespValid = TRUE THEN
+								X: WHILE recNum <= pragmaRecs DO
+									IF FIELDVALUE(pragmaRoot.Agreement[recNum].AcctId) = acctId THEN
+										MOVE agreementOld TO pragmaRoot.Agreement[recNum];
+										SET matchFound = TRUE;
+										LEAVE X;
+									ELSE 
+										SET recNum = recNum + 1;
+									END IF;
+								END WHILE X;
+							END IF;
+							
+							-- проверка даты перехода филиала для МАБПК
+							IF agreementNew.DateTransfer <> '' THEN
+								DECLARE transDate DATE CAST(agreementNew.DateTransfer AS DATE FORMAT 'yyyy-MM-dd');
+								IF transDate < msgDate THEN 
+									SET dateControlPassed = TRUE;
+								END IF;
+							END IF;
+							
+							IF dateControlPassed = TRUE THEN
+								CREATE LASTCHILD OF outRef AS agrRecord NAME 'Agreement';
+								-- Запись копируется из ответа МАБПК
+								SET agrRecord = agreementNew;
+								IF matchFound THEN
+									-- найдена аналогичная запись в ответе АБПК, необходимо объединить данные
+									IF agreementOld.Restruct = '1' THEN
+										SET agrRecord.Restruct 	= '1';
+									END IF;
+									IF agreementOld.ChargeOff = '1' THEN
+										SET agrRecord.ChargeOff	= '1';
+									END IF;
+									IF agreementOld.NoDelay = '2' THEN
+										SET agrRecord.NoDelay	= '2';
+									END IF;
+									
+									-- удаляем устаревшие записи из ответа АБПК
+									CALL RemoveObsoleteDelayRecords(agreementOld,TRUE);
+									-- добавляем записи о просрочках из ответа АБПК, если они не имеют дублей в ответе МАБПК
+									FOR delay AS agreementOld.DelayInfo[] DO
+										IF NOT EXISTS(SELECT exDelay.* FROM agreementNew.DelayInfo[] AS exDelay 
+													  WHERE exDelay.StartDelayDate = delay.StartDelayDate 
+													  	AND exDelay.EndDelayDate = delay.EndDelayDate 
+													  	AND exDelay.MaxDelaySum = delay.MaxDelaySum ) THEN
+											CREATE LASTCHILD OF agrRecord AS delayRecord NAME 'DelayInfo';
+											SET delayRecord = delay;
+										END IF;
+									END FOR;
+									
+									SET pragmaRoot.Agreement[recNum] = NULL;
+								ELSE 	
+									-- удаление устаревших записей о просрочке в ответе
+									CALL RemoveObsoleteDelayRecords(agrRecord,FALSE);
+								END IF;	
+							
+							ELSE 
+								-- Запись копируется из ответа АБПК
+								IF matchFound = TRUE THEN
+									CREATE LASTCHILD OF outRef AS agrRecord NAME 'Agreement';
+									SET agrRecord = agreementOld;
+									SET pragmaRoot.Agreement[recNum] = NULL;
+									CALL RemoveObsoleteDelayRecords(agrRecord,TRUE);
+								END IF;
+							END IF;
+							
+						END FOR;
+					END IF;
+					
+					IF pragmaRespValid=TRUE THEN
+						-- добавляем уникальные записи из ответа АБПК
+						FOR agreementNew AS pragmaRoot.Agreement[] DO 
+							CREATE LASTCHILD OF outRef AS agrRecord NAME 'Agreement';
+							SET agrRecord = agreementNew;
+							-- удаление устаревших записей о просрочке в ответе
+							CALL RemoveObsoleteDelayRecords(agrRecord,TRUE);
+						END FOR;
+					END IF;
+			
+				END IF;
+			
+			END IF;
+			
+		END IF;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Удаление устаревших записей о просрочке
+ **/
+CREATE PROCEDURE RemoveObsoleteDelayRecords(IN agreement REFERENCE, IN removeOpenDate BOOLEAN)
+BEGIN
+	DECLARE minDate DATE (CURRENT_DATE - INTERVAL '5' YEAR);
+	DECLARE curDate DATE CURRENT_DATE;
+	DECLARE i INTEGER 1;
+	WHILE i <= CARDINALITY(agreement.DelayInfo[]) DO
+		DECLARE removeFlag BOOLEAN FALSE;
+		IF agreement.DelayInfo[i].StartDelayDate <> '' THEN
+			DECLARE startDate DATE CAST(agreement.DelayInfo[i].StartDelayDate AS DATE FORMAT 'yyyy-MM-dd');
+			IF startDate < minDate THEN
+				SET removeFlag = TRUE;
+			ELSEIF  removeOpenDate THEN
+				IF agreement.DelayInfo[i].EndDelayDate <> '' THEN
+					DECLARE endDate DATE CAST(agreement.DelayInfo[i].EndDelayDate AS DATE FORMAT 'yyyy-MM-dd');
+					IF endDate >= curDate THEN
+						SET removeFlag = TRUE;
+					END IF;
+				ELSE 
+					SET removeFlag = TRUE;
+				END IF;
+			END IF;
+		ELSEIF removeOpenDate THEN
+			SET removeFlag = TRUE;
+		END IF;
+		
+		IF removeFlag THEN
+			SET agreement.DelayInfo[i] = NULL;
+		ELSE 
+			SET i = i + 1;
+		END IF;
+	END WHILE;
+END;

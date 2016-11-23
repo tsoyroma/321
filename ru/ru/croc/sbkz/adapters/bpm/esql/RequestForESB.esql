@@ -1,0 +1,868 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.bpm.esql
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot; 
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.ErrParams.Operation;--FIELDVALUE(OutputRoot.XMLNSC.*:Envelope.*:Header.*:"operation-name");
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'getLimitRq' THEN
+			SET labelName = 'GetLimitRq';
+		WHEN 'createLimitRq' THEN
+			SET labelName = 'CreateLimitRq';
+		WHEN 'updateLimitRq' THEN
+			SET labelName = 'UpdateLimitRq';
+		WHEN 'updateFinTransactionRq' THEN
+			SET labelName = 'UpdateFinTransactionRq';
+		WHEN 'calcMarkerDebtCapacityRq' THEN
+			SET labelName = 'CalcMarkerDebtCapacityRq';
+		ELSE
+			SET labelName = 'AMRLIRT';			
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertGetLimitRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRef REFERENCE TO InputRoot.XMLNSC.*:*[<];
+		DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetLimitRq';
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.GetLimitRq;
+		DECLARE InReq REFERENCE TO InputRoot.XMLNSC.*:Envelope.*:Body.*:getLimitRq.*:limitFilter;
+			SET outRef.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+			SET outRef.RqUID 	= InRef.*:Header.*:"message-id";
+			SET outRef.RqTm 	= SUBSTRING(InRef.*:Header.*:"request-time" FROM 0 FOR 20)||'+03:00';
+			SET outRef.OperUID 	= InRef.*:Header.*:"operation-name";
+			SET outRef.SPName 	= 'urn:sbrfsystems:kz-bpmnkp';--InRef.*:Header.*:"eis-name";	
+			SET outRef.SystemId = 'urn:sbrfsystems:99-saplm';--InRef.*:Header.*:"system-id";
+					
+		DECLARE bankinfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS bankinfo NAME 'BankInfo';
+			SET bankinfo.RegionId = 'kz';
+			SET bankinfo.AgencyId = '';
+		
+		DECLARE sourcekey REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS sourcekey NAME 'SourceKey';
+			SET sourcekey.SourceSystem = 'BPMKZ';
+			SET sourcekey.LegalEntity = 'SBKZ';
+
+		DECLARE limitfilter REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS limitfilter NAME 'LimitFilter';
+			SET limitfilter.ValidityDate 	= InReq.*:validityDate; 
+			SET limitfilter.IncludeArchLimits = InReq.*:includeArchLimits;
+			SET limitfilter.GetFChars 		= InReq.*:getFChars;
+			SET limitfilter.GetPos 			= InReq.*:getPositions;
+			SET limitfilter.GetUtlSum 		= InReq.*:getUtlSum;
+			SET limitfilter.GetSnglUtlSum 	= InReq.*:getSnglUtlSum;
+			SET limitfilter.GetMChars 		= InReq.*:getMChars;
+			SET limitfilter.GetNotes 		= InReq.*:getNotes;
+			SET limitfilter.GetCharTexts 	= InReq.*:getCharTexts;
+		
+		DECLARE limsectyperange REFERENCE TO limitfilter;
+		CREATE LASTCHILD OF limitfilter AS limsectyperange NAME 'LimSecTypeRange';
+			/*
+			FOR inlimSecTypeRange AS InReq.*:limSecTypeRange.*:item.*:rangeLSec[] DO 
+				DECLARE rangelsec REFERENCE TO limsectyperange;
+				CREATE LASTCHILD OF limsectyperange AS rangelsec NAME 'RangeLsec';
+				SET rangelsec.Sign 		= inlimSecTypeRange.*:sign;
+				
+				SET rangelsec.Option 	= inlimSecTypeRange.*:option;
+				SET rangelsec.Low 		= inlimSecTypeRange.*:low;
+				SET rangelsec.High		= inlimSecTypeRange.*:high;
+			END FOR;
+			
+			FOR inlimSecTypeRange AS InReq.*:limSecTypeRange.*:item.*:tRangesLType.*:item[] DO 
+				DECLARE trangesltype REFERENCE TO limsectyperange;
+				CREATE LASTCHILD OF limsectyperange AS trangesltype NAME 'TRangesLtype';
+				SET trangesltype.Sign 		= inlimSecTypeRange.*:sign;
+				SET trangesltype.Option 	= inlimSecTypeRange.*:option;
+				SET trangesltype.Low 		= inlimSecTypeRange.*:low;
+				SET trangesltype.High		= inlimSecTypeRange.*:high;
+			END FOR;
+		*/
+			FOR inlimSecTypeRange AS InReq.*:limSecTypeRange.*:item[] DO -- Заменил блок LimSecTypeRange u07357 29/09/2015 
+				DECLARE rangelsec REFERENCE TO limsectyperange;
+				CREATE LASTCHILD OF limsectyperange AS rangelsec NAME 'RangeLsec';
+				SET rangelsec.Sign 		= inlimSecTypeRange.*:rangeLSec.*:sign;
+				SET rangelsec.Option 	= inlimSecTypeRange.*:rangeLSec.*:option;
+				SET rangelsec.Low 		= inlimSecTypeRange.*:rangeLSec.*:low;
+				SET rangelsec.High		= inlimSecTypeRange.*:rangeLSec.*:high;
+					FOR intrangesLtype AS inlimSecTypeRange.*:tRangesLType.*:item[] DO 
+						DECLARE trangesltype REFERENCE TO limsectyperange;
+						CREATE LASTCHILD OF limsectyperange AS trangesltype NAME 'TRangesLtype';
+						SET trangesltype.Sign 		= intrangesLtype.*:sign;
+						SET trangesltype.Option 	= intrangesLtype.*:option;
+						SET trangesltype.Low 		= intrangesLtype.*:low;
+						SET trangesltype.High		= intrangesLtype.*:high;
+					END FOR;
+			END FOR;
+				
+			DECLARE fieldnamee CHARACTER; 
+			DECLARE lowfield CHARACTER; 
+			DECLARE lowfield2 CHARACTER; 
+
+			FOR inlimcharrange AS InReq.*:limCharRange.*:item[] DO 
+				DECLARE limcharrange REFERENCE TO limitfilter;
+				CREATE LASTCHILD OF limitfilter AS limcharrange NAME 'LimCharRange';
+				
+				SET limcharrange.FieldName	= inlimcharrange.*:fieldName;
+				SET fieldnamee				= inlimcharrange.*:fieldName;
+
+				--CREATE LASTCHILD OF limcharrange NAME 'FieldName' VALUE inlimcharrange.*:fieldName; 		 			
+				DECLARE tranges REFERENCE TO limcharrange;
+				CREATE LASTCHILD OF limcharrange AS tranges NAME 'TRanges';
+
+				SET lowfield2 = inlimcharrange.*:tRanges.*:item.*:low;
+
+				IF fieldnamee = '/BA1/C20BPART' THEN -- Деловой партнер 
+					SET lowfield = inlimcharrange.*:tRanges.*:item.*:low;
+					SET lowfield2 = 'CRMKZ_' || lowfield;								
+				END IF;	
+
+				IF fieldnamee = '/BIC/ZFLLIMFT' THEN -- Сделка в рамках лимита
+					SET lowfield = inlimcharrange.*:tRanges.*:item.*:low;
+					SET lowfield2 = 'CRMKZ_' || lowfield;
+				END IF;	
+				/* -- 2.5.4
+				IF fieldnamee = '/BIC/ZMAXLGD' THEN -- Сделка в рамках лимита
+					SET lowfield = inlimcharrange.*:tRanges.*:item.*:low;
+					SET lowfield2 = REPLACE(lowfield, ',', '.');
+				END IF;	
+				*/
+
+				SET tranges.Sign 		= inlimcharrange.*:tRanges.*:item.*:sign;
+				SET tranges.Option 		= inlimcharrange.*:tRanges.*:item.*:option;
+				SET tranges.Low 		= lowfield2;
+				SET tranges.High		= inlimcharrange.*:tRanges.*:item.*:high;								
+			END FOR;
+			 
+		/*
+			FOR inlimcharrange AS InReq.*:limCharRange.*:item[] DO 
+				DECLARE fieldname REFERENCE TO limcharrange;
+				CREATE LASTCHILD OF limcharrange AS fieldname NAME 'FieldName';
+				SET limcharrange.FieldName = inlimcharrange.*:fieldName; 
+				FOR intranges AS InReq.*:limCharRange.*:item.*:tRanges.*:item[] DO 
+					DECLARE tranges REFERENCE TO limcharrange;
+					CREATE LASTCHILD OF limcharrange AS tranges NAME 'TRanges';				
+					SET tranges.Sign 		= intranges.*:sign;
+					SET tranges.Option 		= intranges.*:option;
+					SET tranges.Low 		= intranges.*:low;
+					SET tranges.High		= intranges.*:high;
+				END FOR;
+				
+			END FOR;
+			*/
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertCreateLimitRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRef REFERENCE TO InputRoot.XMLNSC.*:*[<];
+		DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'CreateLimitRq';
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.CreateLimitRq;
+		DECLARE InReq REFERENCE TO InputRoot.XMLNSC.*:Envelope.*:Body.*:createLimitRq.*:limitData.*:item;
+			SET outRef.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+			SET outRef.RqUID 	= InRef.*:Header.*:"message-id";
+			SET outRef.RqTm 	= SUBSTRING(InRef.*:Header.*:"request-time" FROM 0 FOR 20)||'+03:00';
+			SET outRef.OperUID 	= InRef.*:Header.*:"operation-name";
+			SET outRef.SPName 	= 'urn:sbrfsystems:kz-bpmnkp';--InRef.*:Header.*:"eis-name";	
+			SET outRef.SystemId = 'urn:sbrfsystems:99-saplm';--InRef.*:Header.*:"system-id";
+						
+		DECLARE bankinfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS bankinfo NAME 'BankInfo';
+			SET bankinfo.RegionId = 'kz';
+			SET bankinfo.AgencyId = '';
+		
+		DECLARE sourcekey REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS sourcekey NAME 'SourceKey';
+			SET sourcekey.SourceSystem = 'BPMKZ';
+			SET sourcekey.LegalEntity = 'SBKZ';
+			
+		DECLARE checkmodule REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS checkmodule NAME 'CheckModule';
+			SET checkmodule.Module = '';--'DUMMY';
+			SET checkmodule.BlockFlag = 'false';
+
+		DECLARE limitdata REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS limitdata NAME 'LimitData';
+		
+		DECLARE limithead REFERENCE TO limitdata;
+		CREATE LASTCHILD OF limitdata AS limithead NAME 'LimitHead';
+			SET limithead.LimitSector 		= InReq.*:limitHead.*:sector;
+			SET limithead.LimitType 		= InReq.*:limitHead.*:type;
+			SET limithead.LimitValidFrom 	= InReq.*:limitHead.*:validFrom;
+			SET limithead.LimitValidTo 		= InReq.*:limitHead.*:validTo;
+			SET limithead.LimitCurrencyMIso = InReq.*:limitHead.*:currency;
+			SET limithead.LimitText 		= InReq.*:limitHead.*:comment;
+
+		IF EXISTS(InReq.*:limitChars[]) THEN
+			DECLARE limitchars REFERENCE TO limitdata;
+				FOR inlimitChars AS InReq.*:limitChars.*:item[] DO  
+					CREATE LASTCHILD OF limitdata AS limitchars NAME 'LimitChars';
+						SET limitchars.Name 		= inlimitChars.*:paramName;
+						SET limitchars.Value 		= inlimitChars.*:paramValue;
+				END FOR;
+		END IF;	
+		/*
+		DECLARE limitfchars REFERENCE TO limitdata;
+		CREATE LASTCHILD OF limitdata AS limitfchars NAME 'LimitFChars';
+		SET limitfchars.Name 		= InReq.*:limitFChars.*:item.*:paramName;
+		SET limitfchars.Value 		= InReq.*:limitFChars.*:item.*:paramValue;
+		*/
+		
+		IF EXISTS(InReq.*:limitFChars[]) THEN
+			FOR inlimitFChars AS InReq.*:limitFChars.*:item[] DO 
+				DECLARE limitfchars REFERENCE TO limitdata;
+				CREATE LASTCHILD OF limitdata AS limitfchars NAME 'LimitFChars';
+	
+				IF inlimitFChars.*:fieldName = '/BA1C/ORGSY' THEN -- Исходная система 
+					SET limitfchars.Name 		= '/BA1/_BA1C_ORGSY';
+					SET limitfchars.Value 		= inlimitFChars.*:fieldValue;				
+				ELSE
+					SET limitfchars.Name 		= inlimitFChars.*:fieldName;
+					SET limitfchars.Value 		= inlimitFChars.*:fieldValue;				
+				END IF;
+			END FOR;		
+		END IF;
+		
+		IF EXISTS(InReq.*:limitPositions[]) THEN
+			FOR inlimitpositions AS InReq.*:limitPositions.*:item[] DO
+				DECLARE limitpos REFERENCE TO limitdata;
+				CREATE LASTCHILD OF limitdata AS limitpos  NAME 'LimitPos';
+					SET limitpos.LimitCategory		= inlimitpositions.*:category;
+					SET limitpos.PosValidFrom		= inlimitpositions.*:validFrom;
+					SET limitpos.PosValidTo			= inlimitpositions.*:validTo;
+					SET limitpos.LimitAmount		= inlimitpositions.*:amount;
+					SET limitpos.LimitAmountAbs		= inlimitpositions.*:amount;
+					SET limitpos.LimitCurrencyIso 	= inlimitpositions.*:currency;
+					SET limitpos.LimitPosText		= inlimitpositions.*:comment;
+			END FOR;
+		END IF;
+		
+		IF EXISTS(InReq.*:limitMChars[]) THEN
+			FOR inlimitmchars AS InReq.*:limitMChars.*:item[] DO
+				DECLARE limitmchars REFERENCE TO limitdata;
+				CREATE LASTCHILD OF limitdata AS limitmchars NAME 'LimitMChars';
+					SET limitmchars.AttrTableType = inlimitmchars.*:attrTableType;
+				DECLARE limitmchar REFERENCE TO limitmchars;
+				CREATE LASTCHILD OF limitmchars AS limitmchar NAME 'LimitMChar';
+					DECLARE defmchars REFERENCE TO limitmchar;
+					CREATE LASTCHILD OF limitmchar AS defmchars NAME 'DefMChars';
+						SET defmchars.Name 			= inlimitmchars.*:item.*:defMChars.*:item.*:paramName;
+						SET defmchars.Value 		= inlimitmchars.*:item.*:defMChars.*:item.*:paramValue;
+			END FOR;
+		END IF;
+		
+		IF EXISTS(InReq.*:limitNotes[]) THEN
+			FOR inlimitnotes AS InReq.*:limitNotes.*:item[] DO
+				DECLARE limitnotes REFERENCE TO limitdata;
+				CREATE LASTCHILD OF limitdata AS limitnotes NAME 'LimitNotes';
+					SET limitnotes.Lang	= inlimitnotes.*:lang;
+					SET limitnotes.Type	= inlimitnotes.*:type;
+					SET limitnotes.Text	= inlimitnotes.*:text;
+			END FOR;
+		END IF;	
+			
+		RETURN TRUE;
+	END;
+END MODULE;
+ 
+
+CREATE COMPUTE MODULE RequestForESB_ConvertUpdateLimitRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRef REFERENCE TO InputRoot.XMLNSC.*:*[<];
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'UpdateLimitRq';
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.UpdateLimitRq;
+		DECLARE InReq REFERENCE TO InputRoot.XMLNSC.*:Envelope.*:Body.*:updateLimitRq.*:limitData.*:item;
+		
+		DECLARE counter CHARACTER '0';
+		DECLARE IndateLimitRq REFERENCE TO InputRoot.XMLNSC.*:Envelope.*:Body.*:updateLimitRq;
+			SET outRef.RqUID 	= InRef.*:Header.*:"message-id";
+			SET outRef.RqTm 	= SUBSTRING(InRef.*:Header.*:"request-time" FROM 0 FOR 20)||'+03:00';
+			SET outRef.OperUID 	= InRef.*:Header.*:"operation-name";
+			SET outRef.SPName 	= 'urn:sbrfsystems:kz-bpmnkp';--InRef.*:Header.*:"eis-name";	
+			SET outRef.SystemId = 'urn:sbrfsystems:99-saplm';--InRef.*:Header.*:"system-id";
+					
+		DECLARE bankinfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS bankinfo NAME 'BankInfo';
+			SET bankinfo.RegionId = 'kz';
+			SET bankinfo.AgencyId = '';
+		
+		DECLARE sourcekey REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS sourcekey NAME 'SourceKey';
+			SET sourcekey.SourceSystem = 'BPMKZ';
+			SET sourcekey.LegalEntity = 'SBKZ';
+			
+		DECLARE checkmodule REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS checkmodule NAME 'CheckModule';
+			SET checkmodule.Module = '';--'DUMMY';
+			SET checkmodule.BlockFlag = 'false';
+
+		DECLARE Param REFERENCE TO checkmodule;
+		CREATE LASTCHILD OF checkmodule AS Param NAME 'Param';
+			SET Param.Name 	= '';
+			SET Param.Value = '';
+			
+		DECLARE varC55LGENT CHARACTER '0';
+		DECLARE	counter3 CHARACTER '0'; 
+		DECLARE	counter2 CHARACTER '0';
+			
+		FOR inlimitData AS IndateLimitRq.*:limitData[] DO			
+			FOR initem AS inlimitData.*:item[] DO
+				DECLARE limitdata REFERENCE TO outRef;
+				CREATE LASTCHILD OF outRef AS limitdata NAME 'LimitData';
+				SET counter3 = '0';
+				SET counter2 = '0';
+				SET varC55LGENT = '0';
+				DECLARE limithead REFERENCE TO limitdata;
+				CREATE LASTCHILD OF limitdata AS limithead NAME 'LimitHead';
+					SET limithead.LimitSector 		= LimitRange(initem.*:limitHead.*:type);
+					SET limithead.LimitType 		= initem.*:limitHead.*:type;
+					SET limithead.LimitValidFrom 	= initem.*:limitHead.*:validFrom;
+					SET limithead.LimitValidTo 		= initem.*:limitHead.*:validTo;
+					SET limithead.LimitCurrencyMIso = initem.*:limitHead.*:currency;
+					SET limithead.LimitText 		= initem.*:limitHead.*:comment;
+				--Проверка на наличие поля /BIC/ZOPERGR
+				FOR inlimitChars2 AS initem.*:limitChars.*:item[] DO
+					 IF inlimitChars2.*:fieldName = '/BIC/ZOPERGR' THEN -- Группа операций
+						SET counter3 = '1';
+				    END IF;
+				END FOR;
+				
+				FOR inlimitChars AS initem.*:limitChars.*:item[] DO 
+					DECLARE limitchars REFERENCE TO limitdata;
+					CREATE LASTCHILD OF limitdata AS limitchars NAME 'LimitChars';
+					
+						SET limitchars.Name 		= inlimitChars.*:fieldName;
+						SET limitchars.Value 		= inlimitChars.*:fieldValue;
+
+					IF inlimitChars.*:fieldName = '/BIC/ZFLLIMFT' THEN -- Сделка в рамках лимита 
+						SET limitchars.Name 		= inlimitChars.*:fieldName;
+						SET limitchars.Value 		= trueFsap(inlimitChars.*:fieldValue);
+				    END IF;
+
+					IF inlimitChars.*:fieldName = '/BA1/C20BPART' THEN -- Деловой партнер
+						SET limitchars.Name 		= inlimitChars.*:fieldName;
+						IF CONTAINS(inlimitChars.*:fieldValue, 'CRMKZ_') THEN 
+						SET limitchars.Value 		= inlimitChars.*:fieldValue;
+						ELSE --'CRMKZ_' || inlimitChars.*:fieldValue; На время!!!
+				        SET limitchars.Value 		= 'CRMKZ_' || inlimitChars.*:fieldValue; 
+						END IF;
+				    END IF;
+
+
+					IF inlimitChars.*:fieldName = '/BIC/ZPRODGR' THEN -- Группа продуктов
+						SET limitchars.Name 		= inlimitChars.*:fieldName;
+						SET limitchars.Value 		= inlimitChars.*:fieldValue;
+					
+						IF counter3 = '0' THEN
+							DECLARE limitchars REFERENCE TO limitdata;
+							CREATE LASTCHILD OF limitdata AS limitchars NAME 'LimitChars';				
+							SET limitchars.Name 		= '/BIC/ZOPERGR'; -- Группа операций
+							SET limitchars.Value 		= funGrpProduct(inlimitChars.*:fieldValue); 
+						END IF;
+						
+				    END IF;
+				    
+ 
+					IF inlimitChars.*:fieldName = '/BA1/C55LGENT' THEN -- Юридическая единица
+						SET varC55LGENT 		= '1';
+				    END IF;
+				END FOR;
+
+				--- Признаки /BA1/C55LGENT (Юридическая единица) должны проставляться на КСШ ДБ.
+				IF varC55LGENT = '0' THEN 
+					DECLARE limitchars REFERENCE TO limitdata;
+					CREATE LASTCHILD OF limitdata AS limitchars NAME 'LimitChars';				
+					SET limitchars.Name 		= '/BA1/C55LGENT'; -- Юридическая единица
+					SET limitchars.Value 		= 'SBKZ';
+				END IF;
+				-------------------------------------------------------------------------------------------------
+				
+				FOR inlimitFChars2 AS initem.*:limitFChars.*:item[] DO
+					IF inlimitFChars2.*:fieldName = '/B20/S_C55LGENT' THEN 
+						SET counter2 = '1';
+				    END IF;
+				END FOR;
+				
+				FOR inlimitFChars AS initem.*:limitFChars.*:item[] DO 
+					DECLARE limitfchars REFERENCE TO limitdata;
+					CREATE LASTCHILD OF limitdata AS limitfchars NAME 'LimitFChars';
+
+					SET limitfchars.Name 		= inlimitFChars.*:fieldName;
+					SET limitfchars.Value 		= inlimitFChars.*:fieldValue;				
+
+					IF inlimitFChars.*:fieldName = '/BIC/ZFLGENAGR' THEN -- Генеральное соглашение 
+						SET limitfchars.Name 		= '/BIC/ZFLGENAGR';
+						SET limitfchars.Value 		= trueFsap2(inlimitFChars.*:fieldValue);		
+				    END IF;
+
+					IF inlimitFChars.*:fieldName = '/BA1C/ORGSY' THEN -- Исходная система 
+						SET limitfchars.Name 		= '/BA1/_BA1C_ORGSY';
+						SET limitfchars.Value 		= COALESCE(inlimitFChars.*:fieldValue, 'A');				
+				    END IF;
+
+					IF inlimitFChars.*:fieldName = '/BIC/ZLIMPRDT' THEN -- Дата утверждения лимита 
+						SET limitfchars.Name 		= COALESCE(inlimitFChars.*:fieldName, 'A');
+						SET limitfchars.Value		= CAST(CAST(inlimitFChars.*:fieldValue AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'yyyyMMdd');
+				    END IF;
+					
+					IF inlimitFChars.*:fieldName = '/BIC/ZLIMAVDT' THEN -- Дата утверждения лимита 
+						SET limitfchars.Name 		= COALESCE(inlimitFChars.*:fieldName, 'A');
+						SET limitfchars.Value		= CAST(CAST(inlimitFChars.*:fieldValue AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'yyyyMMdd');
+				    END IF;
+					
+					IF inlimitFChars.*:fieldName = '/BIC/ZUPDTMSTM' THEN -- Метка времени изменения 
+						SET limitfchars.Name 		= COALESCE(inlimitFChars.*:fieldName, 'A');
+	                    SET limitfchars.Value       = CAST(CAST(inlimitFChars.*:fieldValue AS TIMESTAMP FORMAT 'yyyy-MM-dd''T''HH:mm:ss.SSS''Z') AS CHARACTER FORMAT 'yyyyMMddHHmmssSSS');
+				    END IF;
+				    
+				   IF inlimitFChars.*:fieldName = '/BIC/ZFLLIMSET' THEN -- Лимит утверждается
+						SET limitfchars.Name 		= inlimitFChars.*:fieldName;
+						SET limitfchars.Value		= trueFalseSAP(inlimitFChars.*:fieldValue);
+				    END IF;
+				    
+				    IF inlimitFChars.*:fieldName = 'DYN_FL_PROD_ALW' THEN -- разрешено распределение продукта на лимит
+						SET limitfchars.Name 		= inlimitFChars.*:fieldName;
+						SET limitfchars.Value		= trueFalseSAP(inlimitFChars.*:fieldValue);
+				    END IF;
+				------------
+				END FOR;
+					IF counter2 = '0' THEN
+						DECLARE limitfchars REFERENCE TO limitdata;
+						CREATE LASTCHILD OF limitdata AS limitfchars NAME 'LimitFChars';
+						SET limitfchars.Name 		= '/B20/S_C55LGENT'; -- Юридическая единица 
+						SET limitfchars.Value 		= 'SBKZ';
+					END IF;	
+				
+				
+				--IF EXISTS(initem.*:limitPositions.*:item[]) THEN 		
+					FOR inlimitPositions AS initem.*:limitPositions.*:item[] DO 
+						DECLARE limitpos REFERENCE TO limitdata;
+						CREATE LASTCHILD OF limitdata AS limitpos  NAME 'LimitPos';
+						SET limitpos.LimitCategory		= inlimitPositions.*:category;
+						SET limitpos.PosValidFrom		= inlimitPositions.*:validFrom;
+						SET limitpos.PosValidTo			= inlimitPositions.*:validTo;
+						SET limitpos.LimitAmount		= inlimitPositions.*:amount;
+						SET limitpos.LimitAmountAbs		= inlimitPositions.*:amount;
+						SET limitpos.LimitCurrencyIso 	= inlimitPositions.*:currency;
+						SET limitpos.LimitPosText		= inlimitPositions.*:comment;
+					END FOR;
+				/*ELSE 		
+						DECLARE limitpos REFERENCE TO limitdata;
+						CREATE LASTCHILD OF limitdata AS limitpos  NAME 'LimitPos';
+						SET limitpos.LimitCategory		= 'A';--inlimitPositions.*:category;
+						SET limitpos.PosValidFrom		= '1999-01-01';--inlimitPositions.*:validFrom;
+						SET limitpos.PosValidTo			= '1999-01-01';--inlimitPositions.*:validTo;
+						SET limitpos.LimitAmount		= '0.0';--inlimitPositions.*:amount;
+						SET limitpos.LimitAmountAbs		= '0.0';--inlimitPositions.*:amount;
+						SET limitpos.LimitCurrencyIso 	= 'A';--inlimitPositions.*:currency;
+						SET limitpos.LimitPosText		= 'A';--inlimitPositions.*:comment;
+				END IF;
+				*/
+				
+				IF EXISTS(initem.*:limitMChars.*:item[]) THEN 
+					FOR inlimitmchars AS initem.*:limitMChars.*:item[] DO
+						DECLARE limitmchars REFERENCE TO limitdata;
+						CREATE LASTCHILD OF limitdata AS limitmchars NAME 'LimitMChars';
+							SET limitmchars.AttrTableType = inlimitmchars.*:attrTableType;								
+								FOR inlimitdefmchars AS inlimitmchars.*:item[] DO
+								DECLARE limitmchar REFERENCE TO limitmchars;
+								CREATE LASTCHILD OF limitmchars AS limitmchar NAME 'LimitMChar';
+									FOR inlimitdefmcharsitem AS inlimitdefmchars.*:defMChars.*:item[] DO 
+									DECLARE defmchars REFERENCE TO limitmchar;
+									CREATE LASTCHILD OF limitmchar AS defmchars NAME 'DefMChars';
+										SET defmchars.Name 			= inlimitdefmcharsitem.*:fieldName;
+										SET defmchars.Value 		= inlimitdefmcharsitem.*:fieldValue;
+									END FOR;
+								END FOR;								
+					END FOR;
+				END IF;
+				
+				/*
+					IF EXISTS(InReq.*:limitMChars.*:item[]) THEN 
+					FOR inlimitmchars AS InReq.*:limitMChars.*:item[] DO
+						DECLARE limitmchars REFERENCE TO limitdata;
+						CREATE LASTCHILD OF limitdata AS limitmchars NAME 'LimitMChars';
+							SET limitmchars.AttrTableType111 = inlimitmchars.*:attrTableType;	
+							
+							FOR inlimitmchars1 AS inlimitmchars.*:item[] DO 
+							SET limitmchars.asd1 = 'sad';
+							END FOR;
+							
+							IF EXISTS(inlimitmchars.*:item[]) THEN
+								SET limitmchars.asd1 = 'sad';
+							END IF;
+							IF EXISTS(inlimitmchars.*:item.*:defMChars[]) THEN
+								SET limitmchars.asd2 = 'sad';
+							END IF;
+							IF EXISTS(inlimitmchars.*:item.*:defMChars.*:item[]) THEN	
+								SET limitmchars.ASD = 'fds';					
+								FOR inlimitdefmchars AS inlimitmchars.*:item.*:defMChars.*:item[] DO
+								DECLARE limitmchar REFERENCE TO limitmchars;
+								CREATE LASTCHILD OF limitmchars AS limitmchar NAME 'LimitMChar';
+									
+									DECLARE defmchars REFERENCE TO limitmchar;
+									CREATE LASTCHILD OF limitmchar AS defmchars NAME 'DefMChars';
+										SET defmchars.Name 			= inlimitdefmchars.*:fieldName;
+										SET defmchars.Value 		= inlimitdefmchars.*:fieldValue;	
+								END FOR;								
+							END IF;
+					END FOR;
+				END IF;
+				*/
+				--IF EXISTS(inlimitmchars.*:item.*:defMChars[]) THEN --	END IF;
+				/*
+					IF EXISTS(InReq.*:limitMChars[]) THEN
+			FOR inlimitmchars AS InReq.*:limitMChars.*:item[] DO
+				DECLARE limitmchars REFERENCE TO limitdata;
+				CREATE LASTCHILD OF limitdata AS limitmchars NAME 'LimitMChars';
+					SET limitmchars.AttrTableType = inlimitmchars.*:attrTableType;
+				DECLARE limitmchar REFERENCE TO limitmchars;
+				CREATE LASTCHILD OF limitmchars AS limitmchar NAME 'LimitMChar';
+					DECLARE defmchars REFERENCE TO limitmchar;
+					CREATE LASTCHILD OF limitmchar AS defmchars NAME 'DefMChars';
+						SET defmchars.Name 			= inlimitmchars.*:item.*:defMChars.*:item.*:paramName;
+						SET defmchars.Value 		= inlimitmchars.*:item.*:defMChars.*:item.*:paramValue;
+			END FOR;
+		END IF;
+				*/
+				
+				IF EXISTS(initem.*:limitNotes.*:item[]) THEN
+					FOR inlimnotes AS initem.*:limitNotes.*:item[] DO
+						DECLARE limitnotes REFERENCE TO limitdata;
+						CREATE LASTCHILD OF limitdata AS limitnotes NAME 'LimitNotes';
+						SET limitnotes.Lang	= inlimnotes.*:lang;
+						SET limitnotes.Type	= inlimnotes.*:type;				
+						SET limitnotes.Text	= inlimnotes.*:text;
+					END FOR;
+				END IF;
+ 				--- Согласно схеме SAP, блок LimitNotes не обязательный, но если он был передан, то поля Lang, Type и Text должны быть заполнены.					
+				/*ELSE
+						DECLARE limitnotes REFERENCE TO limitdata;
+						CREATE LASTCHILD OF limitdata AS limitnotes NAME 'LimitNotes';
+						SET limitnotes.Lang	= ' ';
+						SET limitnotes.Type	= ' ';				
+						SET limitnotes.Text	= ' ';
+				END IF; */ 
+			END FOR;
+		END FOR;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertUpdateFinTransactionRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRef REFERENCE TO InputRoot.XMLNSC.*:*[<];
+		DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'UpdateFinTransactionRq';
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.UpdateFinTransactionRq;
+		DECLARE InReq REFERENCE TO InputRoot.XMLNSC.*:Envelope.*:Body.*:updateFinTransactionRq.*:finTransactionList;
+			SET outRef.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+			SET outRef.RqUID 	= InRef.*:Header.*:"message-id";
+			SET outRef.RqTm 	= SUBSTRING(InRef.*:Header.*:"request-time" FROM 0 FOR 20) ||'+03:00';
+			SET outRef.OperUID 	= InRef.*:Header.*:"operation-name";
+			SET outRef.SPName 	= 'urn:sbrfsystems:kz-bpmnkp';--InRef.*:Header.*:"eis-name";	
+			SET outRef.SystemId = 'urn:sbrfsystems:99-saplm';--InRef.*:Header.*:"system-id";
+		 
+		DECLARE bankinfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS bankinfo NAME 'BankInfo';
+			SET bankinfo.RegionId = 'kz';
+			SET bankinfo.AgencyId = '';
+		
+		DECLARE sourcekey REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS sourcekey NAME 'SourceKey';
+			SET sourcekey.SourceSystem = 'BPMKZ';
+			SET sourcekey.LegalEntity = 'SBKZ';
+		
+		DECLARE checkmodule REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS checkmodule NAME 'CheckModule';
+			SET checkmodule.Module = '';--'DUMMY';
+			SET checkmodule.BlockFlag = 'false';
+		--SET checkmodule.Param.Name = 'dsada';
+		--SET checkmodule.Param.Value = 'das';
+		
+		FOR initemfintr AS InReq.*:item[] DO
+			DECLARE fintransaction REFERENCE TO outRef;
+			CREATE LASTCHILD OF outRef AS fintransaction NAME 'FinTransaction';
+					
+			DECLARE sourcekeynew REFERENCE TO fintransaction;
+			CREATE LASTCHILD OF fintransaction AS sourcekeynew NAME 'SourceKey';	
+				SET sourcekeynew.SourceSystem = 'BPMKZ';
+				SET sourcekeynew.LegalEntity = 'SBKZ';
+			
+			DECLARE extrcont CHARACTER;
+			DECLARE extrcont2 CHARACTER;
+				SET extrcont = initemfintr.*:externalContract;	
+				SET extrcont2 = REPLACE(extrcont, 'BPM', 'BPMKZ');
+				SET extrcont2 = REPLACE(extrcont, 'CRM', 'CRMKZ');
+				SET fintransaction.ExternalContract = extrcont2;	
+			
+				SET fintransaction.BeginDate 		= initemfintr.*:beginDate;
+				SET fintransaction.OperationTime 	= SUBSTRING(initemfintr.*:operationTime FROM 0 FOR 20)||'+03:00';
+				SET fintransaction.Status 			= initemfintr.*:status;
+			
+			IF EXISTS(initemfintr.*:partnerData[]) THEN 
+				FOR inpartnerdata AS initemfintr.*:partnerData.*:item[] DO
+					DECLARE partnerdata REFERENCE TO fintransaction;
+					CREATE LASTCHILD OF fintransaction AS partnerdata NAME 'PartnerData';
+						SET partnerdata.SeqNo 		= inpartnerdata.*:seqNo;
+						SET partnerdata.BeginDate	= inpartnerdata.*:validFrom;
+						SET partnerdata.EndDate		= inpartnerdata.*:validTo;
+						SET partnerdata.ExternalId	= 'CRMKZ_' || inpartnerdata.*:externalIdentifier;
+				END FOR;
+			END IF;
+			
+			IF EXISTS(initemfintr.*:crmIdentifiers[]) THEN
+				DECLARE crmidentifiers REFERENCE TO fintransaction;
+				CREATE LASTCHILD OF fintransaction AS crmidentifiers NAME 'CrmIdentifiers';
+					SET crmidentifiers.CrmTransId 		= initemfintr.*:crmIdentifiers.*:dealId;
+					SET crmidentifiers.CrmMainTransId	= initemfintr.*:crmIdentifiers.*:mainDealId;
+					SET crmidentifiers.CrmRelTransId	= initemfintr.*:crmIdentifiers.*:relDealId;
+			END IF;
+				
+			IF EXISTS(initemfintr.*:deal[]) THEN	
+			DECLARE transdata REFERENCE TO fintransaction;
+			CREATE LASTCHILD OF fintransaction AS transdata NAME 'TransData';
+				SET transdata.LimitVersion	= initemfintr.*:deal.*:limitVersion;
+				SET transdata.TransStatus	= DealStat(initemfintr.*:deal.*:status);
+			
+			
+			IF EXISTS(initemfintr.*:deal.*:rating.*:item[]) THEN
+				FOR initemdealrat AS initemfintr.*:deal.*:rating.*:item[] DO
+				DECLARE rating REFERENCE TO transdata;
+				CREATE LASTCHILD OF transdata AS rating NAME 'Rating';
+					SET rating.SeqNo		= initemdealrat.*:seqNo;
+					SET rating.BeginDate	= initemdealrat.*:validFrom;
+					SET rating.EndDate		= initemdealrat.*:validTo;
+					SET rating.RatingSystem = RatingModel(initemdealrat.*:ratingSystem);
+					/*IF NOT EXISTS(InReq.*:deal.*:rating.*:item.*:ratGrade[]) THEN  
+						SET rating.Grade		= '1';
+					ELSE
+						SET rating.Grade		= InReq.*:deal.*:rating.*:item.*:ratGrade;
+					END IF;*/
+					
+					SET rating.Grade		= initemdealrat.*:grade;		
+					SET rating.RatingDate	= initemdealrat.*:ratingDate;
+				END FOR;
+			END IF;
+			 
+			SET transdata.isSecretTrans			= InReq.*:deal.*:isSecretDeal;
+			SET transdata.partnerRatingStatus	= RatingStatus(InReq.*:deal.*:partnerRatingStatus);
+			SET transdata.ProjectRatingStatus	= RatingStatus(InReq.*:deal.*:projectRatingStatus);
+			
+			IF EXISTS(initemfintr.*:deal.*:decision[]) THEN
+				DECLARE decision REFERENCE TO transdata;
+				CREATE LASTCHILD OF transdata AS decision NAME 'Decision';
+					SET decision.DecisionLevel			= initemfintr.*:deal.*:decision.*:decisionLevel;
+					SET decision.DecisionDocumentNumber	= initemfintr.*:deal.*:decision.*:decisionDocumentNumber;
+					SET decision.DecisionFormat			= initemfintr.*:deal.*:decision.*:decisionFormat;
+					SET decision.LimitApproveDate		= initemfintr.*:deal.*:decision.*:limitApproveDate;
+			END IF;
+			END IF;
+			
+			IF EXISTS(initemfintr.*:product[]) THEN
+			DECLARE proddata REFERENCE TO fintransaction;
+			CREATE LASTCHILD OF fintransaction AS proddata NAME 'ProductData';
+			IF EXISTS(initemfintr.*:product.*:contractInfo[]) THEN
+			DECLARE contractinfo REFERENCE TO proddata;
+			CREATE LASTCHILD OF proddata AS contractinfo NAME 'ContractInfo';
+			SET contractinfo.BeginDate = initemfintr.*:product.*:contractInfo.*:contractStartDate;
+			SET contractinfo.EndDate = initemfintr.*:product.*:contractInfo.*:contractEndDate;
+			SET contractinfo.ContractSignificance = initemfintr.*:product.*:contractInfo.*:contractSignificance;
+			SET contractinfo.ContractCurrency = initemfintr.*:product.*:contractInfo.*:contractCurrency;
+			SET contractinfo.FinancingType = initemfintr.*:product.*:contractInfo.*:financingType;
+			SET contractinfo.GeneralAgreementId = initemfintr.*:product.*:contractInfo.*:generalAgreementId;
+			SET contractinfo.isGeneralAgreement = initemfintr.*:product.*:contractInfo.*:isGeneralAgreement;
+			SET contractinfo.AbsContractId	= initemfintr.*:product.*:contractInfo.*:absContractId;
+			END IF;
+			
+			DECLARE creditinfo REFERENCE TO proddata;
+			CREATE LASTCHILD OF proddata AS creditinfo NAME 'CreditInfo';
+			SET creditinfo.CreditMode = CreditModeFunc(initemfintr.*:product.*:creditInfo.*:creditMode);			
+			SET creditinfo.CreditInstrument = CreditInstrumentFunc(initemfintr.*:product.*:creditInfo.*:creditMode); 
+			SET creditinfo.CreditPeriod = initemfintr.*:product.*:creditInfo.*:creditPeriod;
+			SET creditinfo.RateType = ''; --initemfintr.*:product.*:creditInfo.*:rateType; На время
+			SET creditinfo.RepaymentScheduleType = '';--initemfintr.*:product.*:creditInfo.*:repaymentScheduleType; На время
+			SET creditinfo.FirstCountry = initemfintr.*:product.*:creditInfo.*:firstCountry;
+			SET creditinfo.LastCountry = initemfintr.*:product.*:creditInfo.*:lastCountry;
+			SET creditinfo.isUseCRMOnLimitCalc = initemfintr.*:product.*:creditInfo.*:isUseCRMOnLimitCalc;
+			
+			FOR inpercitem AS initemfintr.*:product.*:creditInfo.*:percentage.*:item[] DO
+				DECLARE percentagef REFERENCE TO creditinfo;
+				CREATE LASTCHILD OF creditinfo AS percentagef NAME 'IntRate';
+				SET percentagef.SeqNo = inpercitem.*:seqNo;
+				SET percentagef.BeginDate = inpercitem.*:validFrom;
+				SET percentagef.EndDate = inpercitem.*:validTo;								
+				SET percentagef.Category = inpercitem.*:category;
+				IF inpercitem.*:category = 'ZLGDP' THEN
+					DECLARE a DECIMAL;
+					DECLARE b DECIMAL;
+					SET a = CAST(inpercitem.*:percentage AS DECIMAL);
+					SET b = ROUND(a/100, 2);
+					SET percentagef.Rate = b;
+				ELSE
+					SET percentagef.Rate = inpercitem.*:percentage;
+				END IF;
+								
+			END FOR;
+			
+			FOR inamountitem AS initemfintr.*:product.*:creditInfo.*:amount.*:item[] DO
+				DECLARE amountf REFERENCE TO creditinfo;
+				CREATE LASTCHILD OF creditinfo AS amountf NAME 'Amount';
+				SET amountf.SeqNo = inamountitem.*:seqNo;
+				SET amountf.BeginDate = inamountitem.*:validFrom;
+				SET amountf.EndDate = inamountitem.*:validTo;
+				SET amountf.Category = inamountitem.*:category;
+				SET amountf.Amount = inamountitem.*:amount;
+				SET amountf.Currency = inamountitem.*:currency;
+			END FOR;
+			
+			
+			DECLARE productinfo REFERENCE TO proddata;
+			CREATE LASTCHILD OF proddata AS productinfo NAME 'ProductInfo';
+			--SET productinfo.ProductGroup = initemfintr.*:product.*:productInfo.*:productCode;
+			SET productinfo.ProductCode = initemfintr.*:product.*:productInfo.*:productCode;
+			SET productinfo.ProductId = initemfintr.*:product.*:productInfo.*:productId;
+			SET productinfo.PrevProductId = initemfintr.*:product.*:productInfo.*:prevProductId;
+			SET productinfo.ProductStatus = initemfintr.*:product.*:productInfo.*:productStatus;
+			SET productinfo.LimitId = initemfintr.*:product.*:productInfo.*:limitId;
+			
+			SET proddata.RatingSource = TypeRateFunc(initemfintr.*:product.*:ratingSource);
+			END IF;
+		END FOR;		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertCalcMarkerDebtCapacityRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRef REFERENCE TO InputRoot.XMLNSC.*:*[<];
+		DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'CalcMarkerDebtCapacityRq';
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.CalcMarkerDebtCapacityRq;
+		DECLARE InReq REFERENCE TO InputRoot.XMLNSC.*:Envelope.*:Body.*:calcMarkerDebtCapacityRq.*:basicParams;
+			SET outRef.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+			SET outRef.RqUID 	= InRef.*:Header.*:"message-id";
+			SET outRef.RqTm 	= SUBSTRING(InRef.*:Header.*:"request-time" FROM 0 FOR 20)||'+03:00';
+			SET outRef.OperUID 	= InRef.*:Header.*:"operation-name";
+			SET outRef.SPName 	= 'urn:sbrfsystems:kz-bpmnkp';--InRef.*:Header.*:"eis-name";	
+			SET outRef.SystemId = 'urn:sbrfsystems:99-saplm';--InRef.*:Header.*:"system-id";
+		
+		DECLARE bankinfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS bankinfo NAME 'BankInfo';
+			SET bankinfo.RegionId = 'kz';
+			SET bankinfo.AgencyId = '';
+		
+		DECLARE sourcekey REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS sourcekey NAME 'SourceKey';
+			SET sourcekey.SourceSystem = 'BPMKZ';
+			SET sourcekey.LegalEntity = 'SBKZ';
+			
+			SET outRef.BpId			= 'CRMKZ_' || InReq.*:bpId;
+			SET outRef.DealId		= InReq.*:dealId;
+			SET outRef.DcMarkerCur	= InReq.*:dcMarkerCurrency;
+			SET outRef.DcFreeCy		= InReq.*:dcFreeCurrentYear;
+			SET outRef.DcFreeNy		= InReq.*:dcFreeNextYear;
+			SET outRef.DcFreeMaxCy	= InReq.*:dcFreeMaxCurrentYear;
+			SET outRef.DcFreeMaxNy	= InReq.*:dcFreeMaxNextYear;
+			SET outRef.DcMarkerCy	= InReq.*:dcMarkerCurrentYear;
+			SET outRef.DcMarkerNy	= InReq.*:dcMarkerNextYear;
+			SET outRef.FlSecretDeal	= InReq.*:flagSecretDeal;		
+		
+		RETURN TRUE;
+	END;
+END MODULE; 
+ 
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2_withoutmapping
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDVALUE(OutputRoot.XMLNSC.*:Envelope.*:Header.*:"operation-name");
+
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_noaggr
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDVALUE(InputRoot.XMLNSC.*:*[<].*:Header.*:"operation-name");
+		
+		--SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;
+END MODULE;

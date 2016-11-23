@@ -1,0 +1,217 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.router.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE GetBillingResponseFinish_PrepareReply
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders();
+		
+		IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+			CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		END IF;
+		SET OutputRoot.MQMD				= InputRoot.ComIbmAggregateReplyBody.ECHO.MQMD;
+		
+		IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE LASTCHILD OF OutputRoot DOMAIN('MQRFH2') NAME 'MQRFH2';
+		END IF;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE inRef REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].Body.*[<];
+		DECLARE inRoot REFERENCE TO InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC.*[<];
+		
+		DECLARE labelName CHARACTER;
+		
+		IF inRoot.*[<].*[<].Status.RespCode = '0' OR FIELDVALUE(inRoot.(XMLNSC.Attribute)"resp_code") = '0' THEN 
+
+			SET OutputRoot.XMLNSC			= InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC;
+			
+			-- Восстанавливаем идентификаторы ответного сообщения 
+			SET OutputRoot.MQMD.CorrelId	= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.MsgId AS BLOB);
+			SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+			
+			CALL SetCommonMQReplyHeaders(OutputRoot);
+			SET OutputLocalEnvironment = InputLocalEnvironment;	
+			--Адресат ответного сообщения
+			CALL SetMQReplyDestination(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source, OutputLocalEnvironment);	
+		
+			PROPAGATE TO TERMINAL 'out';
+			
+			RETURN FALSE;
+		
+		ELSE
+			
+			DECLARE outRoot REFERENCE TO OutputRoot;
+					
+			CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg_Error';
+
+			IF EXISTS(inRoot.*[<].*[<].Status[]) THEN		
+				SET outRoot.Status.StatusCode	= inRoot.*[<].*[<].Status.RespCode;
+				SET outRoot.Status.StatusDesc	= inRoot.*[<].*[<].Status.RespText;	
+			ELSE
+				SET outRoot.Status.StatusCode	= FIELDVALUE(inRoot.(XMLNSC.Attribute)"resp_code");
+				SET outRoot.Status.StatusDesc	= FIELDVALUE(inRoot.(XMLNSC.Attribute)"resp_text");	
+			END IF;
+										
+			-- Восстанавливаем идентификаторы ответного сообщения 
+			SET OutputRoot.MQMD.CorrelId	= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.MsgId AS BLOB);
+			SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+					
+			CALL SetCommonMQReplyHeaders(OutputRoot);
+			SET OutputLocalEnvironment = InputLocalEnvironment;	
+			--Адресат ответного сообщения
+			CALL SetMQReplyDestination(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source, OutputLocalEnvironment);
+					
+			PROPAGATE TO TERMINAL 'out';			
+			
+			SET OutputRoot.XMLNSC	=  inRef;
+			
+			SET labelName = 'KZWAYAuthRevRqAccCreditRq';
+			
+		END IF;
+		 
+		SET Environment.UserProperties.Source.MQMD 			= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 		= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQRFH2;
+		SET Environment.UserProperties.Source.Properties	= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.Properties;
+		SET Environment.UserProperties.Source.Body 			= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.Body;
+		 	
+	 	SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		PROPAGATE TO TERMINAL 'out1';
+		
+		RETURN FALSE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE GetBillingResponseFinish_FillMqRfh2usr_NOAGGR
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE GetBillingResponseFinish_ConvertMDO2WAY_WAYAuthRevRqAccCreditRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders();
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWAYAuthRevAdvRq';
+		
+		/*SET outRoot.RqUID 			= inRoot.RqUID;
+		SET outRoot.RqTm  			= inRoot.RqTm;	
+		SET outRoot.RegNumber 		= inRoot.MadeOperationId;
+		SET outRoot.ContractNumber  = inRoot.ContractNumber;
+		SET outRoot.Currency		= 'KZT';
+		SET outRoot.Amount			= THE(SELECT ITEM acct.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS acct WHERE acct.NameBS = 'Amount');
+		SET outRoot.Purpose			= inRoot.RecipientRec.CodeRecipientBS;*/
+		
+		SET outRoot 		= 	inRoot;
+		
+		RETURN TRUE;
+	END;
+	 
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+	
+END MODULE;
+
+
+CREATE COMPUTE MODULE GetBillingResponseFinish_PrepareReplyTimeoutReverse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRef REFERENCE TO InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].Body.*[<];
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		--DECLARE qpragmaorig REFERENCE TO InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].Body.*[<];
+		--DECLARE Operation CHARACTER FIELDNAME(InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].Body.*[<]);
+		 
+		DECLARE labelName CHARACTER;
+		
+		SET labelName = 'KZWAYAuthRevRqAccCreditRq';				 			
+				
+		IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+			CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		END IF;
+		SET OutputRoot.MQMD				=  InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.MQMD;
+		
+		CREATE FIRSTCHILD OF OutputRoot.XMLNSC 
+                  		PARSE ( 
+                        InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.Body
+                        CCSID 1208
+                        OPTIONS FolderBitStream + ValidateNone);
+         
+        --SET OutputRoot.XMLNSC = inRef;                
+		 
+		SET Environment.UserProperties.Source.MQMD 			= InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 		= InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQRFH2;
+		SET Environment.UserProperties.Source.Properties	= InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.Properties;
+		SET Environment.UserProperties.Source.Body 			= InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.Body;
+		 	
+	 	SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;		
+		
+		PROPAGATE TO TERMINAL 'out1';
+		 
+			DECLARE outRoot REFERENCE TO OutputRoot;
+			
+			-- Восстанавливаем идентификаторы ответного сообщения 
+			SET OutputRoot.MQMD.CorrelId	= CAST(InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.MsgId AS BLOB);
+			SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+					
+			CALL SetCommonMQReplyHeaders(OutputRoot);
+			SET OutputLocalEnvironment = InputLocalEnvironment;	
+					--Адресат ответного сообщения
+			CALL SetMQReplyDestination(InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source, OutputLocalEnvironment);
+					
+			CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg_Error';
+					
+			SET outRoot.Status.StatusCode	= inRoot.Status.*:StatusCode;
+			SET outRoot.Status.StatusDesc	= inRoot.Status.*:StatusDesc;				
+			
+			PROPAGATE TO TERMINAL 'out';
+		
+		RETURN TRUE;
+	END;
+END MODULE;

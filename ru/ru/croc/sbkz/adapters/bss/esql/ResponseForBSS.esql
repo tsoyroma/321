@@ -1,0 +1,270 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.bss.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Восстановление заголовка и тела исходного сообщения
+CREATE COMPUTE MODULE ResponseForBSS_AddOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+		CREATE FIRSTCHILD OF OutputRoot.XMLNSC NAME 'OrigMess';
+		SET OutputRoot.XMLNSC.OrigMess = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+-- Перенаправление на нужную ветку в соответствии с маршрутизацией
+CREATE COMPUTE MODULE ResponseForBSS_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZGetCurrencyRateRs' THEN
+			SET labelName = 'KZGetCurrencyRateRs';
+		WHEN 'KZLegalPayDocRs' THEN
+			SET labelName = 'KZLegalPayDocRs';
+		WHEN 'KZLegalCurrOperRs' THEN
+			SET labelName = 'KZLegalCurrOperRs'; 
+		WHEN 'KZLegalCanPayDocRs' THEN
+			SET labelName = 'KZLegalCanPayDocRs';
+		WHEN 'KZLegalGetPayDocStatusRs' THEN
+			SET labelName = 'KZLegalGetPayDocStatusRs';
+		WHEN 'KZLegalGetAccountStatementRs' THEN
+			SET labelName = 'KZLegalGetAccountStatementRs';
+		WHEN 'KZGetContractListRs' THEN
+			SET labelName = 'KZGetContractListRs';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown message format', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+	Ответ на запрос экспорта курсов валют.
+*/
+CREATE COMPUTE MODULE ResponseForBSS_ConvertMDO2BSS_CurrRate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillBSSStandardElements(InputRoot, OutputRoot, 'CURRENCYRATES', 'CURRENCYRATES');
+		CALL CopyCurrRatesFromMDO(InputRoot.XMLNSC.KZGetCurrencyRateRs,OutputRoot.XMLNSC.*:CURRENCYRATES);	
+		RETURN TRUE;
+	END;	
+END MODULE;
+
+
+/*
+	Ответ на платежное поручение ЮЛ.
+*/
+CREATE COMPUTE MODULE ResponseForBSS_ConvertMDO2BSS_PayDoc
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE rsMessage CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		DECLARE rqMessage CHARACTER LEFT(rsMessage, LENGTH(rsMessage) - 2) || 'Rq';
+		
+		DECLARE status CHARACTER COALESCE(FIELDVALUE(InputRoot.XMLNSC.{rsMessage}.Status.ifxca:StatusCode), '');
+		DECLARE statusDesc CHARACTER COALESCE(FIELDVALUE(InputRoot.XMLNSC.{rsMessage}.Status.ifxca:StatusDesc), '');
+		DECLARE docId CHARACTER COALESCE(FIELDVALUE(InputRoot.XMLNSC.{rsMessage}.CreatedDocId), '');
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		
+		IF status = '0' AND docId <> '' THEN
+			-- от МАБПК получен корректный ответ
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.{rqMessage}.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= 'Принят АБС'; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '17011';
+
+		ELSEIF status = '-400' THEN
+			-- операция завершилась таймаутом
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.{rqMessage}.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= CASE WHEN statusDesc <> '' THEN 'Операция завершилась таймаутом от МАБПК. Код ошибки МАБПК: ' || status || '; Описание ошибки МАБПК: ' || statusDesc 
+			ELSE 'Не заполнен CreatedDocId' END; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '15041';
+		
+		ELSEIF status = '-105' THEN
+			-- операция завершилась таймаутом
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.{rqMessage}.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= CASE WHEN statusDesc <> '' THEN 'Операция завершилась таймаутом от МАБПК. Код ошибки МАБПК: ' || status || '; Описание ошибки МАБПК: ' || statusDesc 
+			ELSE 'Не заполнен CreatedDocId' END; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '15041';
+		
+		ELSE			
+			-- от МАБПК получена ошибка или отсутствует CreatedDocId
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.{rqMessage}.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= CASE WHEN statusDesc <> '' THEN 'Код ошибки МАБПК: ' || status || '; Описание ошибки МАБПК: ' || statusDesc 
+			ELSE 'Не заполнен CreatedDocId' END; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '17021';
+		END IF;
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+/**
+ *  Формирование ответов на запрос статуса.
+ **/
+CREATE COMPUTE MODULE ResponseForBSS_ConvertMDO2BSS_Status
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalGetPayDocStatusRs;	
+		
+		DECLARE status CHARACTER COALESCE(FIELDVALUE(inRef.Status.ifxca:StatusCode), '');
+		DECLARE statusDesc CHARACTER COALESCE(FIELDVALUE(inRef.Status.ifxca:StatusDesc), '');
+		
+		IF status = '-2' AND statusDesc = 'Не найдено ни одного документа из запроса' THEN
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.KZLegalGetPayDocStatusRq.Doc.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= 'Не обнаружен в АБС'; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '17071';
+			RETURN TRUE;
+		ELSEIF status = '-3' THEN
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.KZLegalGetPayDocStatusRq.Doc.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= 'Не обнаружен в АБС'; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '17071';
+			RETURN TRUE;
+		ELSEIF status = '-400' THEN
+			-- операция завершилась таймаутом
+			/*
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.KZLegalGetPayDocStatusRq.Doc.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= 'Ошибка выгрузки'; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '15041';*/
+			RETURN FALSE;
+		ELSEIF status = '-105' THEN
+			-- операция завершилась таймаутом
+			/*
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.KZLegalGetPayDocStatusRq.Doc.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= 'Ошибка выгрузки'; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '15041';*/
+			RETURN FALSE;
+		ELSEIF status NOT IN ('0', '') THEN
+			-- неопределенная ошибка
+			/*
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.KZLegalGetPayDocStatusRq.Doc.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= statusDesc; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '17021'; */
+			RETURN FALSE;
+		ELSE 
+			FOR payDoc AS inRef.PayDocStatusInfo[] DO
+				SET OutputRoot = NULL;
+				CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+				CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');			
+				CALL CopyPayDocFromMDO(payDoc,OutputRoot.XMLNSC.*:KVT);	
+				PROPAGATE;
+			END FOR;	
+			RETURN FALSE;
+		END IF;
+	END;	
+END MODULE;
+
+/**
+ * Ответ на запрос выписки по счету ЮЛ.
+ **/
+CREATE COMPUTE MODULE ResponseForBSS_ConvertMDO2BSS_Statement
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillBSSStandardElements(InputRoot, OutputRoot, 'Statement', 'STATEMENT');
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalGetAccountStatementRs;
+		DECLARE stmt REFERENCE TO inRef.StatementInfo;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:Statement;
+		CALL CopyStatementFromMDO(stmt,outRef,FIELDVALUE(inRef.RqTm));		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+/*
+u07357 09.05.2015
+*/
+CREATE COMPUTE MODULE ResponseForBSS_ConvertMDO2BSS_KZGetContractListRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+ 		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		DECLARE outRq REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRq NAME 'CONTRACT_LIST';
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZGetContractListRs;	
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:CONTRACT_LIST;	
+		DECLARE conts REFERENCE TO outRef;		
+		DECLARE contl NAMESPACE 'CONTRACT_LIST';
+		DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';		
+
+		SET outRq.(XMLNSC.NamespaceDecl)xmlns:ns1 = contl;
+		SET outRq.(XMLNSC.NamespaceDecl)xmlns:xsi		= xsi;
+		SET outRq.(XMLNSC.Attribute)ID 					= InputRoot.XMLNSC.*:*[<].RqUID;
+		SET outRq.(XMLNSC.Attribute)DateTime 			= CAST(InputRoot.XMLNSC.*:*[<].RqTm AS DATE FORMAT XSD_DATE_TIME_FORMAT);	
+
+		DECLARE status CHARACTER COALESCE(FIELDVALUE(inRef.Status.ifxca:StatusCode), '');
+		DECLARE statusDesc CHARACTER COALESCE(FIELDVALUE(inRef.Status.ifxca:StatusDesc), '');
+		
+		FOR contrac AS inRef.Contract[] DO
+			CREATE LASTCHILD OF outRef AS conts NAME 'CONTRACT';
+			SET conts.BIN 			= contrac.BIN;		
+			SET conts.UNK 			= contrac.UNC;
+			SET conts.IntegrationID = contrac.IntegrationID;
+			SET conts.Id 			= contrac.Id;
+			SET conts.NUMBER 	 	= contrac.NUMBER;
+			SET conts.DATE 	 		= contrac.DATE; 
+			SET conts.AMOUNT  	 	= contrac.AMOUNT;
+			SET conts.CURRENCY   	= contrac.CURRENCY;
+		END FOR;
+		
+	 	IF NOT EXISTS(inRef.Contract[]) THEN
+			CREATE LASTCHILD OF outRef AS conts NAME 'CONTRACT';
+			SET conts.BIN 			= Environment.UserProperties.BIN;		
+	 	END IF;
+		 
+		RETURN TRUE;
+	END;
+END MODULE;

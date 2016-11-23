@@ -1,0 +1,7 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.bl.esql
+
+-- Статус при ошибке от AML
+DECLARE  STATUS_AML_ERR CONSTANT CHARACTER  '1001';
+-- Статус при неопределенном значении наличия клиента в черном списке
+DECLARE STATUS_UNDEFINED CONSTANT CHARACTER '1002';
+

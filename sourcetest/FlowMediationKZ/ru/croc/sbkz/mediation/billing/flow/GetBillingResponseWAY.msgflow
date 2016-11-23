@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmAggregateReply.msgnode="ComIbmAggregateReply.msgnode" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmMQInput.msgnode="ComIbmMQInput.msgnode" xmlns:ComIbmMQOutput.msgnode="ComIbmMQOutput.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow" xmlns:ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow="ru/croc/sbrf/bp/common/flow/ErrorHandlerSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow"
+    xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbkz/mediation/billing/flow/GetBillingResponseWAY.msgflow"
+    nsPrefix="ru_croc_sbkz_mediation_billing_flow_GetBillingResponseWAY.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <translation xmi:type="utility:TranslatableString" key="GetBillingResponseWAY" bundleName="ru/croc/sbkz/mediation/billing/flow/GetBillingResponseWAY" pluginId="FlowMediationKZ"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/FlowMediationKZ/icons/full/obj16/GetBillingResponseWAY.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/FlowMediationKZ/icons/full/obj30/GetBillingResponseWAY.gif"/>
+    <composition>
+      <nodes xmi:type="ComIbmMQInput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="39,84" queueName="ESB.MEDIATION.BILLING.WAYAUTH.RESPONSE" messageDomainProperty="XMLNSC">
+        <translation xmi:type="utility:ConstantString" string="ESB.MEDIATION.BILLING.WAYAUTH.RESPONSE"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_2" location="340,84" EventReceiverProp="BILLING_MEDIATION" EventSourceProp="ESB">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflow"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateReply.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_3" location="505,76" aggregateName="BILLING_MEDIATION_WAYAUTH" unsolicitedTimeout="5">
+        <translation xmi:type="utility:ConstantString" string="Aggregate Reply"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_4" location="646,77" CurrentOperation="Сообщение получено интеграционной логикой" CurrentEventSource="ESB" CurrentEventReceiver="BILLING_MEDIATION" SourceQueue="ESB.MEDIATION.BILLING.WAYAUTH.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="ESB -> BILLING_MEDIATION"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_8" location="870,77" computeExpression="esql://routine/ru.croc.sbkz.mediation.billing.esql#GetBillingResponseWAY_PrepareReply.Main">
+        <translation xmi:type="utility:ConstantString" string="PrepareReply"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_5" location="985,78" destinationMode="list">
+        <translation xmi:type="utility:ConstantString" string="QRESPONSE"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_6" location="1106,82" CurrentOperation="Сформирован окончательный ответ от интеграционной логики" CurrentEventSource="BODATE_MEDIATION" CurrentEventReceiver="ESB">
+        <translation xmi:type="utility:ConstantString" string="MEDIATION -> ESB"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.catch" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_8" targetNode="FCMComposite_1_8" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_8" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+    </composition>
+    <propertyOrganizer/>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

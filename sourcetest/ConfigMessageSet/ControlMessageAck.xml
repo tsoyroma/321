@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tns:ControlMessage xmlns:tns="http://www.croc.ru/sbrf/router/config/xml/ControlMessage" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.croc.ru/sbrf/router/config/xml/ControlMessage ControlMessage.xsd ">
+  <tns:Acknowledgement>
+	  <tns:Router>router1</tns:Router>
+	  <tns:Status>Synchronized successfully</tns:Status>
+	  <tns:Message>ok</tns:Message>
+	  <tns:SynchDate>2001-12-31T12:00:00</tns:SynchDate>
+  </tns:Acknowledgement>
+</tns:ControlMessage>

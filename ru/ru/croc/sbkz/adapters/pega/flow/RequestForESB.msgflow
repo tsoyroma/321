@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmAggregateControl.msgnode="ComIbmAggregateControl.msgnode" xmlns:ComIbmAggregateRequest.msgnode="ComIbmAggregateRequest.msgnode" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmLabel.msgnode="ComIbmLabel.msgnode" xmlns:ComIbmMQInput.msgnode="ComIbmMQInput.msgnode" xmlns:ComIbmMQOutput.msgnode="ComIbmMQOutput.msgnode" xmlns:ComIbmRouteToLabel.msgnode="ComIbmRouteToLabel.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow"
+    xmlns:ru_croc_sbrf_bp_common_flow_EchoAggrSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EchoAggrSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow="ru/croc/sbrf/bp/common/flow/ErrorHandlerSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow" xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbkz/adapters/pega/flow/RequestForESB.msgflow"
+    nsPrefix="ru_croc_sbkz_adapters_pega_flow_RequestForESB.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.aggregateName" name="aggregateName" lowerBound="1" defaultValueLiteral="A_PEGA_OUTPUT">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.timeoutInterval" name="timeoutInterval" lowerBound="1" defaultValueLiteral="30">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EInt"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="RequestForESB" bundleName="ru/croc/sbkz/adapters/pega/flow/RequestForESB" pluginId="AdaptersKZ"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/AdaptersKZ/icons/full/obj16/RequestForESB.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/AdaptersKZ/icons/full/obj30/RequestForESB.gif"/>
+    <composition>
+      <nodes xmi:type="ComIbmMQInput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="124,138" queueName="ESB.PEGA.IN" messageDomainProperty="XMLNSC">
+        <translation xmi:type="utility:ConstantString" string="ESB.PEGA.IN"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_2" location="220,138" EventReceiverProp="A_PEGA" EventSourceProp="PEGA">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflow"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_3" location="368,134" CurrentOperation="Сообщение получено адаптером PEGA" CurrentEventSource="PEGA" CurrentEventReceiver="A_PEGA" SourceQueue="ESB.PEGA.IN">
+        <translation xmi:type="utility:ConstantString" string="PEGA -> A_PEGA"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_4" location="540,134" computeExpression="esql://routine/ru.croc.sbkz.adapters.pega.esql#RequestForESB_DetectOperation.Main" computeMode="destination">
+        <translation xmi:type="utility:ConstantString" string="DetectOperation"/>
+      </nodes>
+      <nodes xmi:type="ComIbmRouteToLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_5" location="747,135">
+        <translation xmi:type="utility:ConstantString" string="Route To Label"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_6" location="129,228" labelName="PutLimitRq">
+        <translation xmi:type="utility:ConstantString" string="PutLimitRq"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_7" location="393,228" computeExpression="esql://routine/ru.croc.sbkz.adapters.pega.esql#RequestForESB_FillMqRfh2usr.Main">
+        <translation xmi:type="utility:ConstantString" string="FillMqRfh2usr"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateControl.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_8" location="560,229">
+        <translation xmi:type="utility:ConstantString" string="Aggregate Control"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_9" location="725,225" queueName="ROUTER.REQUEST" request="true" replyToQ="ESB.PEGA.AGGR.OUT">
+        <translation xmi:type="utility:ConstantString" string="ROUTER.REQUEST"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateRequest.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_10" location="866,229" folderName="REQUEST">
+        <translation xmi:type="utility:ConstantString" string="Aggregate Request"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_11" location="1010,229" CurrentOperation="Сообщение передано в интеграционную логику" CurrentEventSource="A_PEGA" CurrentEventReceiver="ESB">
+        <translation xmi:type="utility:ConstantString" string="A_PEGA -> ESB"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EchoAggrSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_12" location="719,304" queueName="ESB.PEGA.AGGR.ECHO" replyToQ="ESB.PEGA.AGGR.OUT">
+        <translation xmi:type="utility:ConstantString" string="EchoAggrSubflow"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_13" location="92,321" labelName="GetMarkerDebtCapacityRq">
+        <translation xmi:type="utility:ConstantString" string="GetMarkerDebtCapacityRq"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.catch" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_6" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_8" targetNode="FCMComposite_1_8" sourceNode="FCMComposite_1_7" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_9" targetNode="FCMComposite_1_9" sourceNode="FCMComposite_1_8" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_10" targetNode="FCMComposite_1_10" sourceNode="FCMComposite_1_9" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_11" targetNode="FCMComposite_1_11" sourceNode="FCMComposite_1_10" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_12" targetNode="FCMComposite_1_12" sourceNode="FCMComposite_1_8" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_13" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_13" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.Basic" configurable="true" describedAttribute="Property.aggregateName">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.aggregateName" bundleName="ComIbmAggregateControl" pluginId="com.ibm.etools.mft.ibmnodes"/>
+        <propertyDescriptor groupName="Group.Basic" describedAttribute="Property.timeoutInterval">
+          <propertyName xmi:type="utility:TranslatableString" key="Property.timeoutInterval" bundleName="ComIbmAggregateControl" pluginId="com.ibm.etools.mft.ibmnodes"/>
+        </propertyDescriptor>
+      </propertyDescriptor>
+    </propertyOrganizer>
+    <attributeLinks promotedAttribute="Property.aggregateName" overriddenNodes="FCMComposite_1_8">
+      <overriddenAttribute href="ComIbmAggregateControl.msgnode#Property.aggregateName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.timeoutInterval" overriddenNodes="FCMComposite_1_8">
+      <overriddenAttribute href="ComIbmAggregateControl.msgnode#Property.timeoutInterval"/>
+    </attributeLinks>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

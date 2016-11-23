@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmAggregateReply.msgnode="ComIbmAggregateReply.msgnode" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmLabel.msgnode="ComIbmLabel.msgnode" xmlns:ComIbmMQInput.msgnode="ComIbmMQInput.msgnode" xmlns:ComIbmRouteToLabel.msgnode="ComIbmRouteToLabel.msgnode" xmlns:ComIbmSOAPReply.msgnode="ComIbmSOAPReply.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow" xmlns:ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow="ru/croc/sbrf/bp/common/flow/ErrorHandlerSubflow.msgflow"
+    xmlns:ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_TimeoutAggrSubflow.msgflow="ru/croc/sbrf/bp/common/flow/TimeoutAggrSubflow.msgflow" xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbkz/adapters/aml/flow/SOAPResponseForAML.msgflow"
+    nsPrefix="ru_croc_sbkz_adapters_aml_flow_SOAPResponseForAML.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.AggrName" name="AggrName" lowerBound="1" defaultValueLiteral="A_SOAP_AML_OUT">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="SOAPResponseForAML" bundleName="ru/croc/sbkz/adapters/aml/flow/SOAPResponseForAML" pluginId="AdaptersKZ"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/AdaptersKZ/icons/full/obj16/SOAPResponseForAML.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/AdaptersKZ/icons/full/obj30/SOAPResponseForAML.gif"/>
+    <composition>
+      <nodes xmi:type="ComIbmMQInput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="69,96" queueName="ESB.AML.AGGR.OUT" messageDomainProperty="XMLNSC">
+        <translation xmi:type="utility:ConstantString" string="ESB.AML.AGGR.OUT"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_3" location="203,96" EventReceiverProp="A_SOAP_AML" EventSourceProp="ESB">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflow"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_TimeoutAggrSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_5" location="462,171" EventSource="ESB" EventReceiver="A_SOAP_AML" QueueName="ESB.AML.AGGR.OUT">
+        <translation xmi:type="utility:ConstantString" string="TimeoutAggrSubflow"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_6" location="501,89" CurrentOperation="Сообщение получено адаптером AML" CurrentEventSource="ESB" CurrentEventReceiver="A_SOAP_AML" IsAggregate="true" SourceQueue="ESB.AML.AGGR.OUT">
+        <translation xmi:type="utility:ConstantString" string="ESB -> A_SOAP_AML"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateReply.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_7" location="361,88" unsolicitedTimeout="5">
+        <translation xmi:type="utility:ConstantString" string="Aggregate Reply"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_8" location="672,89" computeExpression="esql://routine/ru.croc.sbkz.adapters.aml.esql#SOAPResponseForAML_Route.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="Route"/>
+      </nodes>
+      <nodes xmi:type="ComIbmSOAPReply.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_9" location="636,261">
+        <translation xmi:type="utility:ConstantString" string="SOAP Reply"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_10" location="758,265" CurrentOperation="Сообщение обработано адаптером и передано для дальнейшей обработки" CurrentEventSource="A_SOAP_AML" CurrentEventReceiver="AML" SourceQueue="ESB.AML.AGGR.OUT">
+        <translation xmi:type="utility:ConstantString" string="A_SOAP_AML -> AML"/>
+      </nodes>
+      <nodes xmi:type="ComIbmRouteToLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_2" location="811,90">
+        <translation xmi:type="utility:ConstantString" string="Route To Label"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_4" location="467,260" computeExpression="esql://routine/ru.croc.sbkz.adapters.aml.esql#SOAPResponseForAML_PrepareResponse.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="PrepareResponse"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_12" location="62,259" labelName="KZGetPersonInfoByIDRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetPersonInfoByIDRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_13" location="224,259" computeExpression="esql://routine/ru.croc.sbkz.adapters.aml.esql#SOAPResponseForAML_ConvertMDO2AML_CLIENTCARD.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertMDO2AML_CLIENTCARD"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_11" location="62,336" labelName="KZGetLegalInfoByAttrRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetLegalInfoByAttrRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_14" location="214,336" computeExpression="esql://routine/ru.croc.sbkz.adapters.aml.esql#SOAPResponseForAML_ConvertMDO2AML_CLIENTCARD_ORG.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertMDO2AML_CLIENTCARD_ORG"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.catch" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_8" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_9" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_7" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_10" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_7" sourceTerminalName="OutTerminal.timeout" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_11" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_7" sourceTerminalName="OutTerminal.unknown" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_12" targetNode="FCMComposite_1_8" sourceNode="FCMComposite_1_6" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_14" targetNode="FCMComposite_1_10" sourceNode="FCMComposite_1_9" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_8" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_9" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_15" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_12" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_16" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_13" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_14" sourceNode="FCMComposite_1_11" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_14" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.Basic" configurable="true" describedAttribute="Property.AggrName">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.AggrName" bundleName="ru/croc/sbkz/adapters/aml/flow/SOAPResponseForAML" pluginId="AdaptersKZ"/>
+      </propertyDescriptor>
+    </propertyOrganizer>
+    <attributeLinks promotedAttribute="Property.AggrName" overriddenNodes="FCMComposite_1_7">
+      <overriddenAttribute href="ComIbmAggregateReply.msgnode#Property.aggregateName"/>
+    </attributeLinks>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

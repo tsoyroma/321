@@ -1,0 +1,109 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.talliman.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Восстановление заголовка и тела исходного сообщения
+CREATE COMPUTE MODULE ResponseForTalliman_AddOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+		CREATE FIRSTCHILD OF OutputRoot.XMLNSC NAME 'OrigMess';
+		SET OutputRoot.XMLNSC.OrigMess = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body;
+		
+		DECLARE msgType CHARACTER FIELDVALUE(Environment.UserProperties.Operation);
+		
+		-- восстанавливаем исходный запрос
+		IF msgType IN ('KZGetCalcLoanDeptRq') THEN
+			CREATE FIRSTCHILD OF OutputRoot.XMLNSC 
+			PARSE ( 
+				CAST(
+					Environment.UserProperties.Source.Body AS BLOB CCSID OutputRoot.MQMD.CodedCharSetId
+				)
+				CCSID OutputRoot.MQMD.CodedCharSetId
+				OPTIONS FolderBitStream + ValidateNone);
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+-- Перенаправление на нужную ветку в соответствии с маршрутизацией
+CREATE COMPUTE MODULE ResponseForTalliman_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZGetCalcLoanDeptRs' THEN
+			SET labelName = 'KZGetCalcLoanDeptRs';
+		WHEN 'KZGetPersonInfoTest' THEN
+			SET labelName = 'KZGetPersonInfoTest';	
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown message format', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Ответ на запрос "Получение расчёта задолженности клиента"
+ **/
+CREATE COMPUTE MODULE ResponseForTalliman_ConvertMDO2Talliman_GetCalcLoan
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL FillStandardTallimanRq(InputRoot, OutputRoot, 'ClcResponse');
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZGetCalcLoanDeptRs;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:ClcResponse;
+		DECLARE sourceMsg REFERENCE TO InputRoot.XMLNSC.*:rootBlock;
+		
+		SET outRef.tns:generalBlock.tns:appId 					= COALESCE(FIELDVALUE(inRef.LoanId), FIELDVALUE(sourceMsg.*:generalBlock.*:appId));
+		SET outRef.tns:generalBlock.tns:processDate 			= FIELDVALUE(sourceMsg.*:generalBlock.*:processDate);
+		
+		DECLARE statusCode CHARACTER COALESCE(FIELDVALUE(inRef.Status.*:StatusCode));		
+		IF statusCode NOT IN ('', '0') THEN
+			SET outRef.tns:errorBlock.tns:resultCode 				= inRef.Status.*:StatusCode;
+			SET outRef.tns:errorBlock.tns:resultDescription 		= inRef.Status.*:StatusDesc;
+		END IF;
+		
+		IF EXISTS(SELECT dr.Amount FROM inRef.DebtInfo.DebtRec[] AS dr WHERE dr.BalType='B1') THEN
+			DECLARE block REFERENCE TO outRef;
+			CREATE LASTCHILD OF outRef AS block NAMESPACE tns NAME 'businessBlock';
+			DECLARE index INTEGER 0;
+			WHILE index < 14 DO
+				SET index = index + 1; 
+				DECLARE balIndex CHARACTER;
+				SET balIndex = 'B' || CAST(index AS CHARACTER);
+				SET block.tns:{balIndex} 		= THE(SELECT ITEM dr.Amount FROM inRef.DebtInfo.DebtRec[] AS dr WHERE dr.BalType=balIndex);
+			END WHILE;
+		END IF;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Тестовый сервис для Жанибека из отдела Ильса 21/07/2014 u06068
+ */
+CREATE COMPUTE MODULE ResponseForTalliman_ConvertMDO2Talliman_PersonInfo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL FillStandardTallimanRq(InputRoot, OutputRoot, 'GetPersonInfo_Input');
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZGetPersonInfoTest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:GetPersonInfo_Input;
+		
+		SET outRef.tns:FirstName = inRef.FirstName;
+		SET outRef.tns:LastName  = inRef.LastName;
+		SET outRef.tns:Birthday  = inRef.Birthday;
+		SET outRef.tns:INN		 = inRef.INN;
+
+		
+		RETURN TRUE;
+	END;
+END MODULE;

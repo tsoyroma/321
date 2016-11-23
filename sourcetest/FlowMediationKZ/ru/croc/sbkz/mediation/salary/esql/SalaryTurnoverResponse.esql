@@ -1,0 +1,86 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.salary.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+-- Внешняя переменная для указания даты 
+DECLARE SalaryPeriodSplitPoint EXTERNAL CHARACTER 'UNKNOWN';
+
+CREATE COMPUTE MODULE SalaryTurnoverResponse_CreateResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE origMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+		SET Environment.UserProperties = origMsg.UserProperties;
+		DECLARE inRef REFERENCE TO origMsg.Body.*[<];
+
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(origMsg, OutputLocalEnvironment);
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.KZGetSalaryTurnoverRs AS outRef;
+		--SET outRef.(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+		SET outRef.(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+		--SET outRef.(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+
+		SET outRef.RqUID	= inRef.RqUID;
+		SET outRef.RqTm		= inRef.RqTm;
+		
+		IF NOT EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMA[]) THEN
+			SET outRef.Status.ifxca:StatusCode	= '-100';
+			SET outRef.Status.ifxca:StatusDesc	= 'Не удалось получить ответ от АБПК в течение установленного временного интервала.';
+		ELSEIF	NOT EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMANEW[]) THEN
+			SET outRef.Status.ifxca:StatusCode	= '-100';
+			SET outRef.Status.ifxca:StatusDesc	= 'Не удалось получить ответ от МАБПК в течение установленного временного интервала.';
+		ELSE
+			
+			DECLARE pragmaRespValid BOOLEAN FALSE;
+			DECLARE pragmaNewRespValid BOOLEAN FALSE;
+			
+			IF COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMANEW.XMLNSC.*[<].Status.*:StatusCode, '') IN ('', '0') THEN
+				SET pragmaNewRespValid = TRUE;
+			END IF;
+			IF COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMA.XMLNSC.*[<].Status.*:StatusCode, '') IN ('', '0') THEN
+				SET pragmaRespValid = TRUE;
+			END IF;
+			
+			IF pragmaRespValid=FALSE AND pragmaNewRespValid=FALSE THEN
+				SET outRef.Status.ifxca:StatusCode	= FIELDVALUE(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMANEW.XMLNSC.*[<].Status.*:StatusCode);
+				SET outRef.Status.ifxca:StatusDesc	= COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMANEW.XMLNSC.*[<].Status.*:StatusDesc, '');
+			ELSE
+			
+				SET outRef.Status.ifxca:StatusCode	= '0';
+				SET outRef.Status.ifxca:StatusDesc	= '';
+				
+				DECLARE splitPoint DATE CAST(SalaryPeriodSplitPoint AS DATE FORMAT 'yyyy-MM-dd');
+				
+				DECLARE pragmaMsgRoot REFERENCE TO InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMA.XMLNSC.*[<];
+				DECLARE pragmaNewMsgRoot REFERENCE TO InputRoot.ComIbmAggregateReplyBody.REQUEST_PRAGMANEW.XMLNSC.*[<];
+				DECLARE newRec REFERENCE TO outRef;
+				
+				IF pragmaRespValid=TRUE THEN
+					FOR salaryRec AS pragmaMsgRoot.SalaryRecord[] DO 
+						DECLARE recDate DATE CAST(FIELDVALUE(salaryRec.DateRec) AS DATE FORMAT 'yyyy-MM-dd');
+						IF recDate < splitPoint THEN 
+							CREATE LASTCHILD OF outRef AS newRec NAME 'SalaryRecord';
+							SET newRec = salaryRec;
+						END IF;
+					END FOR;
+				END IF;
+				
+				IF pragmaNewRespValid=TRUE THEN
+					FOR salaryRec AS pragmaNewMsgRoot.SalaryRecord[] DO 
+						DECLARE recDate DATE CAST(FIELDVALUE(salaryRec.DateRec) AS DATE FORMAT 'yyyy-MM-dd');
+						IF recDate >= splitPoint THEN 
+							CREATE LASTCHILD OF outRef AS newRec NAME 'SalaryRecord';
+							SET newRec = salaryRec;
+						END IF;
+					END FOR;	
+				END IF;
+			
+			END IF;		
+		END IF;
+
+		RETURN TRUE;
+	END;
+END MODULE;

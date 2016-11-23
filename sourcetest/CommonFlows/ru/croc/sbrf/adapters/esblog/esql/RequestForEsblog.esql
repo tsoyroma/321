@@ -1,0 +1,68 @@
+BROKER SCHEMA ru.croc.sbrf.adapters.esblog.esql
+PATH ru.croc.sbrf.bp.common.esql;
+
+DECLARE LIST_EVENT_DATE_FORMAT		CONSTANT CHARACTER	'dd.MM.yyyy HH:mm:ss';
+DECLARE EVENTLIST_NS CONSTANT CHARACTER 'http://www.croc.ru/sbrf/esb/logging/xml/EventList';
+DECLARE evenlist_ns NAMESPACE EVENTLIST_NS;
+
+CREATE COMPUTE MODULE RequestForEsblog_Compute
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+
+		-- Установим время жизни ответного сообщения (2 мин)
+		SET OutputRoot.MQMD.Expiry = 1200;
+
+		DECLARE InRq REFERENCE TO InputRoot.XMLNSC.EventListRq;
+
+		DECLARE RqTmFrom TIMESTAMP CAST(InRq.RqTmFrom AS TIMESTAMP FORMAT LIST_EVENT_DATE_FORMAT);
+		DECLARE RqTmTo TIMESTAMP CAST(InRq.RqTmTo AS TIMESTAMP FORMAT LIST_EVENT_DATE_FORMAT);
+
+		DECLARE qry CHARACTER 'SELECT GET_EVENT_BY_RQ_UID(?, ?, ?) FROM dual;';
+		SET InputLocalEnvironment.XMLNSC.Data[] = PASSTHRU(qry VALUES(InRq.RqUID, RqTmFrom, RqTmTo));
+
+		DECLARE ref REFERENCE TO InputLocalEnvironment.XMLNSC.Data;
+		MOVE ref FIRSTCHILD;
+
+		DECLARE msgBlob BLOB CAST(FIELDVALUE(ref) AS BLOB CCSID 1208);
+		DELETE FIELD InputLocalEnvironment.XMLNSC;
+
+		CREATE LASTCHILD OF InputLocalEnvironment DOMAIN('XMLNSC') PARSE(msgBlob CCSID 1208);
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAMESPACE EVENTLIST_NS NAME 'EventList';
+
+		DECLARE EventListNoNs REFERENCE TO InputLocalEnvironment.XMLNSC.EventList;
+		DECLARE EventListNs REFERENCE TO OutputRoot.XMLNSC.evenlist_ns:EventList;
+
+		IF EXISTS(EventListNoNs.*:*[]) THEN
+			CALL setNamespaceInfoIgnoreAttrs (EventListNoNs, EventListNs, evenlist_ns);
+		END IF;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+
+/*
+ *	Процедура запроса записей таблицы esblog
+ */
+ /*
+CREATE PROCEDURE GET_EVENT_BY_RQ_UID(
+	IN prquid CHARACTER,
+	IN peventdatestart TIMESTAMP,
+	IN peventdatestart TIMESTAMP,
+	OUT prsdata CHARACTER
+)
+LANGUAGE DATABASE
+EXTERNAL NAME "GET_EVENT_BY_RQ_UID";
+*/

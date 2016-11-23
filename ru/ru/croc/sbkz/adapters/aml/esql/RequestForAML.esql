@@ -1,0 +1,197 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.aml.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+-- Внешняя переменная для указания URL веб-сервиса
+DECLARE HttpWebServiceUrl EXTERNAL CHARACTER 'UNKNOWN';
+-- Внешняя переменная для указания таймаута веб-сервиса
+DECLARE HttpWebServiceTimeout EXTERNAL CHARACTER 'UNKNOWN';
+
+/**
+ * Сохранение исходного сообщения в Environment.
+ **/
+CREATE COMPUTE MODULE RequestForAML_SaveOrigMess
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.Source.MQMD 		= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 	= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 		= InputBody;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+/**
+ * Формирование тела SOAP-запроса для получения
+ * факта наличия клиента в черном списке.
+ **/
+CREATE COMPUTE MODULE RequestForAML_MakeSOAPBodyForBlackListRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		DECLARE docRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		CREATE FIELD OutputRoot.XMLNSC.aml_ns:Out_OnlineSet AS docRoot; 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE baseCode CHARACTER '';
+		
+		IF inRef.SPName = 'Transact' THEN
+			SET baseCode	= '5';
+		ELSEIF inRef.SPName = 'CRMr' THEN
+			SET baseCode	= '6';
+		ELSEIF inRef.SPName = 'CAKD' THEN
+			SET baseCode	= '7';	
+		ELSEIF inRef.SPName = 'TransactMB' THEN
+			SET baseCode   	= '9';		
+		ELSEIF inRef.SPName = 'QP' THEN
+			SET baseCode   	= '4';		
+		END IF;
+		
+		IF inRef.SPName <> 'CAKD' THEN
+			
+			IF inRef.SPName <> 'QP' THEN
+				IF inRef.AMLOnly='1' AND inRef.ParentRqUID <> '' THEN
+					SET docRoot.aml_ns:in_BankOperationID = inRef.ParentRqUID;
+				ELSE 
+					SET docRoot.aml_ns:in_BankOperationID = inRef.RqUID;
+				END IF;
+				SET docRoot.aml_ns:in_IssueDBID = baseCode;
+				
+				IF NOT EXISTS(inRef.CompanyName[]) THEN -- u06068 15/10/2014 Условие в случае передачи юр. лиц.
+				   SET docRoot.aml_ns:in_SenderName = inRef.PersonInfo.inds:PersonName.inds:LastName || ' ' || inRef.PersonInfo.inds:PersonName.inds:FirstName;
+				   IF inRef.PersonInfo.inds:PersonName.inds:MiddleName IS NOT NULL THEN
+					 SET docRoot.aml_ns:in_SenderName = docRoot.aml_ns:in_SenderName || ' ' || inRef.PersonInfo.inds:PersonName.inds:MiddleName;
+				   END IF;
+				ELSE
+				   SET docRoot.aml_ns:in_SenderName = inRef.CompanyName;						
+				END IF;
+				
+				SET docRoot.aml_ns:in_BeneficiaryName = inRef.in_BeneficiaryName;
+				SET docRoot.aml_ns:in_OperationReason = inRef.in_OperationReason;
+			ELSE
+				SET docRoot.aml_ns:in_BankOperationID = InputRoot.XMLNSC.PragmaEnvelope.RequestData.in_BankOperationID;
+				SET docRoot.aml_ns:in_IssueDBID       = baseCode;
+				SET docRoot.aml_ns:in_SenderName      = InputRoot.XMLNSC.PragmaEnvelope.RequestData.in_SenderName;
+				
+				SET docRoot.aml_ns:in_BeneficiaryName = InputRoot.XMLNSC.PragmaEnvelope.RequestData.in_BeneficiaryName;
+				SET docRoot.aml_ns:in_OperationReason = InputRoot.XMLNSC.PragmaEnvelope.RequestData.in_OperationReason;
+			END IF;
+				
+		ELSE
+			 
+			SET docRoot.aml_ns:in_BankOperationID = inRef.RequestId;
+			SET docRoot.aml_ns:in_IssueDBID       = baseCode; 
+			SET docRoot.aml_ns:in_SenderName      =	inRef.Sname || ' ' || inRef.Fname;
+			IF inRef.Mname IS NOT NULL THEN
+			   SET docRoot.aml_ns:in_SenderName = docRoot.aml_ns:in_SenderName || ' ' || inRef.Mname;
+			END IF;
+			
+		END IF;
+		
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Формирование сообщения в формате МДО с информацией
+ * по статусу клиента.
+ **/
+CREATE COMPUTE MODULE RequestForAML_ConvertReponse2MDO
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		DECLARE outRs REFERENCE TO OutputRoot;
+		DECLARE amlStatus CHARACTER; 
+		SET amlStatus = InputRoot.XMLNSC.aml_ns:Out_OnlineSetResponse.aml_ns:responseClass.aml_ns:status;
+		
+		CREATE FIELD OutputRoot.XMLNSC.KZBlackListRs AS outRs;
+		CALL FillMDOStandartElementsRs(Environment.UserProperties.Source.Body, 
+				OutputRoot.XMLNSC, amlStatus);
+		
+		SET outRs.BLStatus 		= '';
+		--SET outRs.TerrStatus 	= CASE 
+		--		WHEN amlStatus IN ('1', '2') THEN '1'
+		--		WHEN amlStatus IN ('0') THEN '2'
+		--		WHEN amlStatus IN ('3') THEN '0'
+		--END;
+		
+		SET outRs.TerrStatus    = amlStatus;
+		SET outRs.AMLStatus = amlStatus;
+		
+		IF Environment.UserProperties.Source.Body.KZSBDKQP.Status.StatusCode <> 0 THEN   
+			DELETE FIELD OutputRoot.XMLNSC.KZBlackListRs.Status;		
+
+			SET outRs.Status.StatusCode VALUE = Environment.UserProperties.Source.Body.KZSBDKQP.Status.StatusCode;
+			SET outRs.Status.StatusDesc VALUE = Environment.UserProperties.Source.Body.KZSBDKQP.Status.StatusDesc;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Восстановление заголовков MQ для ответа.
+ **/
+CREATE COMPUTE MODULE RequestForAML_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+	
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(Environment.UserProperties.Source, OutputLocalEnvironment);
+		
+		SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

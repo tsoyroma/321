@@ -1,0 +1,47 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.adm.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsADMRq (IN userProps REFERENCE, IN inRoot REFERENCE, IN outRoot REFERENCE)
+BEGIN
+	
+	SET outRoot.*:*[<].RqUID	= userProps.RqUID;
+	SET outRoot.*:*[<].RqTm		= userProps.RqTm;
+	SET outRoot.*:*[<].SPName	= userProps.SPName;
+END;
+
+/**
+ * Заполнение стандартных полей ADM в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillADMStandartElementsRs (IN inRoot REFERENCE, IN outRoot REFERENCE)
+BEGIN
+    DECLARE varDt CHARACTER;
+    DECLARE varTi CHARACTER;
+	
+	SET varDt		= 	SUBSTRING(inRoot.*[<].RqTm FROM 1 FOR 10);
+	SET varTi		= 	SUBSTRING(inRoot.*[<].RqTm FROM 12 FOR 8);
+
+	SET outRoot.message.(XMLNSC.Attribute)"date-time"	= varDt || ' ' || varTi;
+	SET outRoot.message.(XMLNSC.Attribute)"uid"	        = inRoot.*[<].RqUID;
+
+	DECLARE labelName CHARACTER;
+    DECLARE Operation CHARACTER FIELDNAME(inRoot.*[<]);
+
+	CASE Operation
+	WHEN 'KZADMTechRequest' THEN
+		SET labelName = 'ADM001';
+	WHEN 'KZADMFinRequest' THEN
+		SET labelName = 'ADM002';
+	WHEN 'KZADMSyncRequest' THEN
+		SET labelName = 'ADM003';	
+		SET outRoot.message.(XMLNSC.Attribute)"uid" = cleanupPhoneNum(inRoot.*[<].RqUID);
+	ELSE
+		SET labelName = 'UNKNOWN';				
+	END CASE;
+
+	SET outRoot.message.(XMLNSC.Attribute)"xtype"		      = labelName;
+END;
+

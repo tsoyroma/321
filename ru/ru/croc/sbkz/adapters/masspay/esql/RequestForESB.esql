@@ -1,0 +1,280 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.masspay.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.adapters.ipt.esql;
+
+CREATE COMPUTE MODULE RequestForESB_Parse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC');
+		CREATE FIRSTCHILD OF OutputRoot.XMLNSC 
+		PARSE ( 
+			InputRoot.BLOB.BLOB
+			CCSID 1208
+			OPTIONS FolderBitStream + ValidateNone);
+		
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillHeaders
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+
+		-- дальнейшее взаимодействие происходит по MQ, поэтому убираем заголовок HTTP
+		SET OutputRoot.HTTPInputHeader = null;
+		
+		DECLARE outBody REFERENCE TO InputRoot.XMLNSC.mBilling;
+		
+		DECLARE MY_TIMESTAMP CHARACTER;
+		SET MY_TIMESTAMP = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd HH:mm:ss.SSSSSS');
+		--SET MY_TIMESTAMP   = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		-- сохраним заголовки в переменных среды, 		
+		SET Environment.UserProperties.RqUID			= FIELDVALUE(outBody.STAN);
+		SET Environment.UserProperties.RqTm				= MY_TIMESTAMP;--FIELDVALUE(outBody.DateTime);
+		SET Environment.UserProperties.SPName			= 'MASSPAY';
+		
+		DECLARE Operation CHARACTER;
+		SET Operation = FIELDVALUE(outBody.Request.(XMLNSC.Attribute)"type");
+					
+		CASE Operation
+		WHEN 'account' THEN
+			SET Environment.UserProperties.OperationName	= 'ACCOUNT_BILLING';
+		WHEN 'payment' THEN
+			SET Environment.UserProperties.OperationName	= 'PAYMENT_BILLING';				
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;	
+		
+
+		-- сохраним идентификатор запроса для дальнейшего ответа
+		SET Environment.UserProperties.HTTPRequestIdentifier = CAST(InputLocalEnvironment.Destination.HTTP.RequestIdentifier AS CHARACTER);
+
+		RETURN TRUE;
+
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE Operation CHARACTER Environment.UserProperties.OperationName;
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'ACCOUNT_BILLING' THEN
+			SET labelName = 'ACCOUNT_BILLING';
+		WHEN 'PAYMENT_BILLING' THEN
+			SET labelName = 'PAYMENT_BILLING';				
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE CreateErrorResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+		SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier = CAST(Environment.UserProperties.HTTPRequestIdentifier AS BLOB);
+
+		-- Получение описания ошибки
+		DECLARE sErrDescr CHARACTER;
+		DECLARE sErrNumber CHARACTER;
+		CALL ru.croc.sbrf.mdm.common.GetExcDescription(InputExceptionList, sErrDescr, sErrNumber);
+
+		-- Формирование структуры сообщения-ответа
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response.status		= fillStatusCode(sErrNumber);
+		SET outRef.response.err			= sErrDescr;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * 26.01.2016 Данный сервис будет обращаться из Masspay-а в систему в Billing по двум операциям. 
+ * Данный сервис будет проходить авторизацию в системе Billing
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertMASSPAY2MDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZBillingIPTtoBilling';
+		
+		--CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);		
+		
+		DECLARE MY_TIMESTAMP CHARACTER;
+		SET MY_TIMESTAMP = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd HH:mm:ss.SSSSSS');
+						
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE oRef REFERENCE TO outRef;
+				
+		SET outRef.RqUID = inRef.STAN; 
+		SET outRef.RqTm  = MY_TIMESTAMP;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'Billing';
+		SET oRef.(XMLNSC.Attribute)"UID" 	  =  inRef.STAN;
+		SET oRef.(XMLNSC.Attribute)"DateTime" =  MY_TIMESTAMP;
+		SET oRef.(XMLNSC.Attribute)"SystemId" = 'IPT_SBKZ';
+		
+		/*DECLARE request REFERENCE TO oRef;
+		
+		CREATE LASTCHILD OF oRef AS request NAME 'Request';
+		
+		SET request.(XMLNSC.Attribute)"type" = 'account';*/
+		
+		SET oRef.GroupId = inRef.Request.RRN;
+		SET oRef.Source  = inRef.Request.Terminal;
+		SET oRef.Target.(XMLNSC.Attribute)"clazz" = 'operation';
+		SET oRef.Target.(XMLNSC.Attribute)"id" = 'payment';
+		SET oRef.Target = 'prep';
+		/*SET oRef.Pay.(XMLNSC.Attribute)"Ref"    = inRef.Request.RRN;
+		SET oRef.Pay.(XMLNSC.Attribute)"Sign"   = '41';
+		SET oRef.Pay.(XMLNSC.Attribute)"Online" = 'true';
+		SET oRef.Pay.(XMLNSC.Attribute)"Type"   = '2';	*/
+		
+		SET oRef.Pay.Target   = inRef.Request.Target;
+		SET oRef.Pay.Amount   = inRef.Request.Amount;
+		SET oRef.Pay.Currency = inRef.Request.Currency;
+		SET oRef.Pay.DateTime = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		
+		SET oRef.Code = inRef.Request.BillCode;
+				
+		DECLARE body REFERENCE TO oRef;
+		DECLARE obj REFERENCE TO oRef;
+		
+		CREATE LASTCHILD OF oRef AS body NAME 'Body'; 
+		
+		SET body.(XMLNSC.Attribute)"name" = 'invoices';
+		SET body.(XMLNSC.Attribute)"type" = 'string';
+		
+		CREATE LASTCHILD OF body.objects AS obj NAME 'object';
+		SET obj.(XMLNSC.Attribute)"name"  = 'Target';
+		SET obj.(XMLNSC.Attribute)"title" = 'ЛИЦЕВОЙ СЧЕТ';
+		SET obj.(XMLNSC.Attribute)"type"  = 'string';
+		SET obj.(XMLNSC.Attribute)"value" = inRef.Request.Target;
+		
+		SET Environment.UserProperties.Account = inRef.Request.Account;
+		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * 26.01.2016 Данный сервис будет обращаться из Masspay-а в систему в Billing по двум операциям. 
+ * Данный сервис будет проводить финансовый платеж в системе Billing
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertMASSPAY2MDO2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZBillingIPTtoBilling';
+		
+		DECLARE MY_TIMESTAMP CHARACTER;
+		SET MY_TIMESTAMP = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd HH:mm:ss.SSSSSS');
+		
+		--CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+						
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		SET outRef.RqUID = inRef.STAN; 
+		SET outRef.RqTm  = MY_TIMESTAMP;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'Billing';
+		SET oRef.(XMLNSC.Attribute)"UID" 	  =  inRef.STAN;
+		SET oRef.(XMLNSC.Attribute)"DateTime" =  MY_TIMESTAMP;
+		SET oRef.(XMLNSC.Attribute)"SystemId" = 'IPT_SBKZ';
+		
+		/*DECLARE request REFERENCE TO oRef;
+		
+		CREATE LASTCHILD OF oRef AS request NAME 'Request';
+		
+		SET request.(XMLNSC.Attribute)"type" = 'payment';*/
+		
+		SET oRef.GroupId = inRef.Request.RRN;
+		SET oRef.Source  = inRef.Request.Terminal;
+		SET oRef.Code = inRef.Request.BillCode;
+		SET oRef.Result.Status.(XMLNSC.Attribute)"Id" = '1';
+		SET oRef.Result.Status = 'OK';
+		SET oRef.Result.Commission.(XMLNSC.Attribute)"currency" = 'KZT';
+		SET oRef.Result.Commission = '';		
+		SET oRef.Pay.(XMLNSC.Attribute)"Ref"    = inRef.Request.RRN;
+		--SET oRef.Pay.(XMLNSC.Attribute)"Sign"   = '207';
+		SET oRef.Pay.(XMLNSC.Attribute)"Online" = 'true';
+		--SET oRef.Pay.(XMLNSC.Attribute)"Type"   = '2';
+		
+		SET oRef.Pay.Target   = inRef.Request.Target;
+		SET oRef.Pay.Amount   = inRef.Request.Amount;
+		SET oRef.Pay.Currency = inRef.Request.Currency;
+		SET oRef.Pay.DateTime = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		
+		
+		
+		DECLARE obj REFERENCE TO oRef;
+		
+		CREATE LASTCHILD OF oRef.Body.objects AS obj NAME 'object';
+		SET obj.(XMLNSC.Attribute)"name"  = 'Target';
+		SET obj.(XMLNSC.Attribute)"title" = 'ЛИЦЕВОЙ СЧЕТ';
+		SET obj.(XMLNSC.Attribute)"type"  = 'string';
+		SET obj.(XMLNSC.Attribute)"value" = inRef.Request.Target;
+		
+		SET oRef.PID = '';
+		
+		RETURN TRUE;
+	END;
+END MODULE;

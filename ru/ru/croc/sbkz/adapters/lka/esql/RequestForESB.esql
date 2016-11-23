@@ -1,0 +1,50 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.lka.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode);
+		DECLARE labelName CHARACTER;		
+		CASE Operation
+		WHEN 'order_add' THEN
+			SET labelName = 'ORDER_ADD_RQ';
+		ELSE 
+			THROW USER EXCEPTION VALUES ('Unknown format XML for LKA', Operation);
+		END CASE;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		SET OutputRoot = InputRoot;		
+		DECLARE systemId, adapterType CHARACTER;		
+		SET systemId 	= 'urn:sbkzsystems:crmretail';
+		SET adapterType = 'urn:sbkztypes:esb:adapter';		
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertLKA2MDO
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		SET OutputRoot = InputRoot;
+		RETURN TRUE;
+	END;
+END MODULE;

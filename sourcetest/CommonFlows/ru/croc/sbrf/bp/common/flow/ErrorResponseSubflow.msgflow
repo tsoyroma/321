@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmFilter.msgnode="ComIbmFilter.msgnode" xmlns:ComIbmMQOutput.msgnode="ComIbmMQOutput.msgnode" xmlns:ComIbmSOAPReply.msgnode="ComIbmSOAPReply.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow" xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbrf/bp/common/flow/ErrorResponseSubflow.msgflow"
+    nsPrefix="ru_croc_sbrf_bp_common_flow_ErrorResponseSubflow.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.needIFXReply" name="needIFXReply" lowerBound="1" defaultValueLiteral="true">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EBoolean"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="ErrorResponseSubflow" bundleName="ru/croc/sbrf/bp/common/flow/ErrorResponseSubflow" pluginId="CommonFlows"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/CommonFlows/icons/full/obj16/ErrorResponseSubflow.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/CommonFlows/icons/full/obj30/ErrorResponseSubflow.gif"/>
+    <shortDescription xmi:type="utility:ConstantString" string="Возвращает IFX-ответ с описанием ошибки для полученного на вход исключения"/>
+    <longDescription xmi:type="utility:ConstantString" string="Предназначено для применения в:&#xD;&#xA;1) Флоу запроса, принимающих на входе IFX c ReplyToQ в заголовках&#xD;&#xA;2) Флоу ответа, возвращающих IFX и получающих исходные заголовки через аггрегацию&#xD;&#xA;&#xD;&#xA;Вход должен быть подключен к Catch-выходу ErrorHandlerSubflow"/>
+    <version xmi:type="utility:ConstantString" string="ESB_Version_Id"/>
+<composition>
+      <nodes xmi:type="eflow:FCMSource" xmi:id="InTerminal.Input" location="39,128">
+        <translation xmi:type="utility:TranslatableString" key="InTerminal.Catch" bundleName="ru/croc/sbrf/bp/common/flow/ErrorResponseSubflow" pluginId="CommonFlows"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="145,128" computeExpression="esql://routine/ru.croc.sbrf.bp.common.esql#ErrorResponseSubflow_CreateErrorResponse.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="Create Error Response"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_2" location="376,201" destinationMode="list">
+        <translation xmi:type="utility:ConstantString" string="MQOutput"/>
+      </nodes>
+      <nodes xmi:type="ComIbmFilter.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_3" location="296,201" filterExpression="esql://routine/ru.croc.sbrf.bp.common.esql#ErrorResponseSubflow_needIFXReply.Main">
+        <translation xmi:type="utility:ConstantString" string="Filter"/>
+      </nodes>
+      <nodes xmi:type="eflow:FCMSink" xmi:id="OutTerminal.Output" location="381,128">
+        <translation xmi:type="utility:TranslatableString" key="OutTerminal.Output" bundleName="ru/croc/sbrf/bp/common/flow/ErrorResponseSubflow" pluginId="CommonFlows"/>
+      </nodes>
+      <nodes xmi:type="ComIbmFilter.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_4" location="296,53" filterExpression="esql://routine/ru.croc.sbrf.bp.common.esql#ErrorResponseSubflow_needIFXReply.Main">
+        <translation xmi:type="utility:ConstantString" string="Filter1"/>
+      </nodes>
+      <nodes xmi:type="ComIbmSOAPReply.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_6" location="455,53">
+        <translation xmi:type="utility:ConstantString" string="SOAP Reply"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_7" location="376,53" computeExpression="esql://routine/ru.croc.sbrf.bp.common.esql#ErrorResponseSubflow_SetNS.Main">
+        <translation xmi:type="utility:ConstantString" string="SetNS"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_1" sourceNode="InTerminal.Input" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.true" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="OutTerminal.Output" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.false" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="OutTerminal.Output" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.false" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_8" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out1" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_10" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.true" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_11" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_7" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.Basic" configurable="true" userDefined="true" describedAttribute="Property.needIFXReply">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.needIFXReply" bundleName="ru/croc/sbrf/bp/common/flow/ErrorResponseSubflow" pluginId="CommonFlows"/>
+      </propertyDescriptor>
+    </propertyOrganizer>
+  </eClassifiers>
+</ecore:EPackage>

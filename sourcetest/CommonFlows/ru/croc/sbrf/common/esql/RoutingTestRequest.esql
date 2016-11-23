@@ -1,0 +1,115 @@
+BROKER SCHEMA ru.croc.sbrf.common.esql
+PATH ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE RoutingTest_Routing
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		-- Проставляем номер ТБ и идентификатор типа системы (urn:sbrftypes:system:test - тестовая система)
+		SET OutputLocalEnvironment.Variables.MQRFH2.usr.BankId = SUBSTRING(InputRoot.XMLNSC.RoutingTestRq.BankInfo.RbTbBrchId FROM 1 FOR 2);
+		SET OutputLocalEnvironment.Variables.MQRFH2.usr.TypeId = 'urn:sbrftypes:system:test';
+		-- Если ТМ не заполнена, необходимо ее инициализировать
+		IF not(isRoutingTableFull()) THEN
+			-- Считаем файл конфигурационный из очереди ROUTER.CONFIG при помощи узла MQGet
+			PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+			-- Если файл конфигурации считан, то выполняем инициализацию ТМ
+			IF EXISTS(Environment.Variables.RouterData.tns:ControlMessage.tns:RoutingConfig[]) THEN
+				-- Необходимо повторно проверить, что какой-либо поток параллельно уже не выполнил инициализацию
+				-- Открываем однопоточный блок, если параллельно несколько потоков будут пытаться инициализировать конфигурацию ТМ
+				-- Параллельно в таком же блоке может происходить обновление ТМ
+				INIT_TM_LOCK: BEGIN ATOMIC
+					IF not(isRoutingTableFull()) THEN
+						CALL InitRoutingTableCache(Environment.Variables.RouterData);
+					END IF;
+				END INIT_TM_LOCK;
+
+				CALL RoutingLogic();
+
+			ELSE
+
+				SET Environment.Variables.Status.StatusCode = '-110';
+				SET Environment.Variables.Status.StatusDesc = 'Таблица маршрутизации не инициализирована, конфигурационный файл отсутствует';
+				-- Файла конфигурации нет, ТМ не инициализирована
+				-- Надо выдать сообщение об ошибке
+				THROW USER EXCEPTION VALUES (Environment.Variables.Status.StatusDesc);
+
+			END IF;
+
+		ELSE
+			CALL RoutingLogic();
+		END IF;
+
+		RETURN FALSE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+	-------------------------------
+	--
+	-- Общая логика по маршрутизации
+	--
+	-------------------------------
+	CREATE PROCEDURE RoutingLogic()
+	BEGIN
+		-- решаем нужно ли использовать таблицу маршрутизации для выбора адаптера:
+		IF InputRoot.XMLNSC.RoutingTestRq.TestInfo.UseRoutingTable='true' THEN
+			CREATE FIELD OutputLocalEnvironment.Variables.Adapters;
+			CALL FindDestination(OutputLocalEnvironment.Variables.MQRFH2.usr,OutputLocalEnvironment.Variables.Adapters);
+			DECLARE countAdapter INTEGER CARDINALITY(OutputLocalEnvironment.Variables.Adapters.Adapter[]);
+
+			IF countAdapter = 0 THEN
+
+				SET Environment.Variables.Status.StatusCode = '-111';
+				SET Environment.Variables.Status.StatusDesc = 'Сообщение с параметрами ' || MakeRoutingList(OutputLocalEnvironment.Variables.MQRFH2.usr) || ' не может быть смаршрутизировано по имеющейся таблице';
+				-- Надо выдать сообщение об ошибке
+				THROW USER EXCEPTION VALUES (Environment.Variables.Status.StatusDesc);
+			ELSE
+
+				DECLARE I INTEGER 1;
+				CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+				SET OutputRoot.MQMD.Format = 'MQHRF2  ';
+				FOR countAdapter AS OutputLocalEnvironment.Variables.Adapters.Adapter[] DO
+					-- Формируем сообщение
+					SET OutputRoot.MQRFH2.usr.SystemId = countAdapter.Name;
+					SET OutputRoot.MQRFH2.usr.TypeId = 'urn:sbrftypes:esb:adapter';
+					SET OutputRoot.XMLNSC.RoutingTestRq.TestInfo.AdpOutput.TestOperation.RqTm = getLocalTimeStamp();
+					SET OutputRoot.XMLNSC.RoutingTestRq.TestInfo.AdpOutput.TestOperation.AdpInput.SystemId = countAdapter.Name;
+					PROPAGATE TO TERMINAL 'out' DELETE NONE;
+				END FOR;
+
+			END IF;
+			--Составим отдельное сообщение для передачи списка всех опрашиваемых систем
+			SET OutputRoot.XMLNSC.RoutingTestRq.AdapterList = OutputLocalEnvironment.Variables.Adapters;
+			PROPAGATE TO TERMINAL 'out2';
+		
+		ELSE
+			--не используем таблицу маршрутизации
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+			SET OutputRoot.MQMD.Format = 'MQHRF2  ';
+			SET OutputRoot.MQRFH2.usr.SystemId = 'urn:sbrfsystems:'||InputRoot.XMLNSC.RoutingTestRq.TestInfo.AdpBankId||'-test';
+			SET OutputRoot.MQRFH2.usr.TypeId = 'urn:sbrftypes:esb:adapter';
+			SET OutputRoot.XMLNSC.RoutingTestRq.TestInfo.AdpOutput.TestOperation.RqTm = getLocalTimeStamp();
+			SET OutputRoot.XMLNSC.RoutingTestRq.TestInfo.AdpOutput.TestOperation.AdpInput.SystemId = 'urn:sbrfsystems:'||InputRoot.XMLNSC.RoutingTestRq.TestInfo.AdpBankId||'-test';
+			PROPAGATE TO TERMINAL 'out' DELETE NONE;
+		END IF;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RoutingTest_Stub
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		RETURN TRUE;
+	END;
+END MODULE;

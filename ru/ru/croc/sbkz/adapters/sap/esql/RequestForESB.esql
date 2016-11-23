@@ -1,0 +1,1230 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sap.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+/**
+ * Маршрутизация потока в соответствии с операцией АБПК Прагма.
+ **/
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.UserProperties.Operation;
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'SAP_ABC_PP' THEN
+			SET labelName = 'SAP_ABC_PP';
+		WHEN 'SAP_ABC_MO' THEN
+			SET labelName = 'SAP_ABC_MO';
+		WHEN 'SAP_ABC_BALANCE' THEN
+			SET labelName = 'SAP_ABC_BALANCE';
+		WHEN 'SAP_ABC_HRB_REESTR' THEN
+			SET labelName = 'SAP_ABC_HRB_REESTR';
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown format XML in SAP(RequestForESB)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;	END;
+END MODULE;
+
+/**
+ * Задание параметров маршрутизации в заголовке MQRFH2.
+ * Случай для запросов с агрегацией. Связка адаптер - ПМИЛ.
+ **/
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+	Исходящее платежное поручение
+	Исходящий мемориальный ордер
+*/
+CREATE COMPUTE MODULE RequestForESB_ConvertSAP2MDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.FILE;
+		CREATE FIELD OutputRoot.XMLNSC.KZComplexPayDocRq AS outRef;
+
+		DECLARE vCORRECT INTEGER;
+
+		DECLARE vMO     CHARACTER;
+		DECLARE vATTACH CHARACTER;
+
+		DECLARE vAMOUNT DECIMAL;
+		DECLARE vWRBTR  DECIMAL;
+
+		SET outRef.(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+		SET outRef.(XMLNSC.NamespaceDecl)xmlns:orgs = orgs;
+		
+		SET outRef.RqUID					= Environment.UserProperties.RqUID;
+		SET outRef.RqTm						= Environment.UserProperties.RqTm;
+		SET outRef.SPName					= 'SAP';
+		SET outRef.TransType				= Environment.UserProperties.Operation;
+		SET outRef.BankInfo.banks:BranchId	= FIELDVALUE(inRef.DOCUMENT.(XMLNSC.Attribute)BUKRS);
+		
+		-- сохраним для обработки ответа
+		SET Environment.UserProperties.TransType = outRef.TransType;
+
+		CREATE FIELD Environment.UserProperties.BELNRs;
+		-- 15.05.2014 u06068 Сериализую оригинальное сообщение, чтобы сохранить его исходное сообщение	
+	    SET Environment.UserProperties.StartMessage = CAST(ASBITSTREAM(InputRoot.XMLNSC CCSID 1208) AS CHARACTER CCSID 1208);
+		
+        SET vMO = 'NO'; 
+		DECLARE outPayDoc REFERENCE TO outRef;
+		FOR inDOCUMENT AS inRef.DOCUMENT[] DO
+			FOR inMO AS inDOCUMENT.MO[] DO
+                SET vATTACH = FIELDVALUE(inMO.(XMLNSC.Attribute)ATTACH); 
+
+				IF vATTACH <> '' THEN
+		           SET Environment.UserProperties.BELNR_MO = FIELDVALUE(inMO.(XMLNSC.Attribute)BELNR_MO);
+		           CALL MO_ATTACH(vATTACH,outRef,vCORRECT);		
+		           SET Environment.UserProperties.CORRECT = vCORRECT;
+
+				   SET vAMOUNT = outRef.ATTACH.AMOUNT;
+				   ---SET vAMOUNT = outRef.ATTACH.ClientInf.AMOUNT; --- !!! или так ? 
+				   SET vWRBTR  = FIELDVALUE(inMO.(XMLNSC.Attribute)WRBTR);
+
+				   IF vAMOUNT <> vWRBTR THEN
+		             PROPAGATE TO TERMINAL 'out1' DELETE NONE; -- AMOUNT
+				   ELSE
+		             PROPAGATE TO TERMINAL 'out2' DELETE NONE; -- PAYDOC
+				   END IF; 
+                ELSE	 
+                    SET vMO = 'YES'; 
+					CREATE LASTCHILD OF outRef AS outPayDoc NAME 'PayDoc';
+					
+					SET outPayDoc.PayerInfo.AcctInfo.AcctId					= CASE outRef.TransType 
+						WHEN 'SAP_ABC_PP' THEN FIELDVALUE(inMO.(XMLNSC.Attribute)BANKN_A)
+						WHEN 'SAP_ABC_MO' THEN FIELDVALUE(inMO.(XMLNSC.Attribute)HKONT_S)
+						ELSE NULL
+					END;
+					SET outPayDoc.PayerInfo.AcctInfo.ExtAcctId.Key			= 'BECODE';
+					SET outPayDoc.PayerInfo.AcctInfo.ExtAcctId.Value		= FIELDVALUE(inMO.(XMLNSC.Attribute)BUKRS_A);
+					SET outPayDoc.PayerInfo.OrgInfo.orgs:Name				= FIELDVALUE(inMO.(XMLNSC.Attribute)NAME_A);
+					SET outPayDoc.PayerInfo.OrgInfo.OrgIdExt[1].Key			= 'RNN';
+					SET outPayDoc.PayerInfo.OrgInfo.OrgIdExt[1].Value		= FIELDVALUE(inMO.(XMLNSC.Attribute)STCD_A);
+					SET outPayDoc.PayerInfo.OrgInfo.OrgIdExt[2].Key			= 'CODE';
+					SET outPayDoc.PayerInfo.OrgInfo.OrgIdExt[2].Value		= FIELDVALUE(inMO.(XMLNSC.Attribute)KOD);
+	
+					SET outPayDoc.ReceiverInfo.AcctInfo.AcctId				= CASE outRef.TransType 
+						WHEN 'SAP_ABC_PP' THEN FIELDVALUE(inMO.(XMLNSC.Attribute)BANKN_B)
+						WHEN 'SAP_ABC_MO' THEN FIELDVALUE(inMO.(XMLNSC.Attribute)HKONT_H)
+						ELSE NULL
+					END;
+					IF outRef.TransType = 'SAP_ABC_MO' THEN
+						SET outPayDoc.ReceiverInfo.AcctInfo.ExtAcctId.Key	= 'BECODE';
+						SET outPayDoc.ReceiverInfo.AcctInfo.ExtAcctId.Value	= FIELDVALUE(inMO.(XMLNSC.Attribute)BUKRS_B);
+					END IF;
+					SET outPayDoc.ReceiverInfo.OrgInfo.orgs:Name			= FIELDVALUE(inMO.(XMLNSC.Attribute)NAME_B);
+					SET outPayDoc.ReceiverInfo.OrgInfo.OrgIdExt[1].Key		= 'RNN';
+					SET outPayDoc.ReceiverInfo.OrgInfo.OrgIdExt[1].Value	= FIELDVALUE(inMO.(XMLNSC.Attribute)STCD_B);
+					SET outPayDoc.ReceiverInfo.OrgInfo.OrgIdExt[2].Key		= 'CODE';
+					SET outPayDoc.ReceiverInfo.OrgInfo.OrgIdExt[2].Value	= FIELDVALUE(inMO.(XMLNSC.Attribute)KBE);
+					SET outPayDoc.ReceiverInfo.BankInfo.banks:BankId		= FIELDVALUE(inMO.(XMLNSC.Attribute)BANKL_B);
+	
+					SET outPayDoc.PayDocInfo.PurposeCode					= FIELDVALUE(inMO.(XMLNSC.Attribute)PURP_CODE);
+					SET outPayDoc.PayDocInfo.DocNum							= FIELDVALUE(inMO.(XMLNSC.Attribute)BELNR_MO);
+					
+					IF outPayDoc.PayDocInfo.DocNum <> '' THEN
+						-- сохраним для обработки ответа
+						CREATE LASTCHILD OF Environment.UserProperties.BELNRs NAME 'BELNR' VALUE outPayDoc.PayDocInfo.DocNum;
+					END IF;
+					
+					SET outPayDoc.PayDocInfo.DocDate						= convertFromSAPDate(FIELDVALUE(inDOCUMENT.(XMLNSC.Attribute)BLDAT));
+					SET outPayDoc.PayDocInfo.Assign							= CASE 
+						WHEN FIELDVALUE(inMO.(XMLNSC.Attribute)ORDER) <> '' THEN FIELDVALUE(inMO.(XMLNSC.Attribute)ORDER)
+						ELSE FIELDVALUE(inMO.(XMLNSC.Attribute)TEXT)
+					END;
+					SET outPayDoc.PayDocInfo.DocRef							= FIELDVALUE(inDOCUMENT.(XMLNSC.Attribute)BELNR);
+					SET outPayDoc.PayDocInfo.RefDate						= convertFromSAPDate(FIELDVALUE(inDOCUMENT.(XMLNSC.Attribute)BUDAT));
+					SET outPayDoc.PayDocInfo.DocCreatorName					= FIELDVALUE(inMO.(XMLNSC.Attribute)USNAM_SAP);
+					SET outPayDoc.PayDocInfo.OrderPayment					= FIELDVALUE(inMO.(XMLNSC.Attribute)OPER_CODE);
+					SET outPayDoc.PayDocInfo.CBCPayment						= FIELDVALUE(inMO.(XMLNSC.Attribute)BUD_CODE);
+					SET outPayDoc.PayDocInfo.DBCurrCode						= CodToIsoCur(FIELDVALUE(inMO.(XMLNSC.Attribute)WAERS));
+					SET outPayDoc.PayDocInfo.DBAmount						= FIELDVALUE(inMO.(XMLNSC.Attribute)WRBTR);
+					SET outPayDoc.PayDocInfo.CRCurrCode						= CodToIsoCur(FIELDVALUE(inMO.(XMLNSC.Attribute)WAERS));
+					SET outPayDoc.PayDocInfo.CRAmount						= FIELDVALUE(inMO.(XMLNSC.Attribute)WRBTR);
+					SET outPayDoc.PayDocInfo.CurrRate						= FIELDVALUE(inDOCUMENT.(XMLNSC.Attribute)KURSF);
+					SET outPayDoc.PayDocInfo.DocType						= CASE outRef.TransType 
+						WHEN 'SAP_ABC_PP' THEN '01'
+						WHEN 'SAP_ABC_MO' THEN '06'
+						ELSE NULL
+					END;
+
+				END IF;               
+				
+			END FOR;
+		END FOR;
+
+		IF vMO = 'YES' THEN
+		   RETURN TRUE;
+		ELSE
+		   RETURN FALSE;
+		END IF;
+		
+	END;
+END MODULE;
+
+/* Сальдо и обороты по счетам */
+CREATE COMPUTE MODULE RequestForESB_ConvertSAP2MDO_Balance
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.FILE;
+		CREATE FIELD OutputRoot.XMLNSC.KZSAPSaldoRq AS outRef;	
+		
+		SET outRef.RqUID		= Environment.UserProperties.RqUID;
+		SET outRef.RqTm			= Environment.UserProperties.RqTm;
+		SET outRef.SPName		= 'SAP';
+		SET outRef.BUKRS 		= inRef.BUKRS;
+		DECLARE vTYPE CHARACTER;
+		SET vTYPE	            = inRef.TYPE;
+		SET outRef.TransType	= vTYPE;
+		-- сохраним для обработки ответа
+		SET Environment.UserProperties.TransType = vTYPE;		
+
+		DECLARE vBUDAT CHARACTER;
+		
+		DECLARE outSaldo REFERENCE TO outRef;
+		FOR inBALANCE AS inRef.BALANCE[] DO
+			CREATE LASTCHILD OF outRef AS outSaldo NAME 'Saldo';				
+			
+			SET outSaldo.HKONT 			              				= FIELDVALUE(inBALANCE.(XMLNSC.Attribute)HKONT);
+			SET outSaldo.WAERS 			              				= FIELDVALUE(inBALANCE.(XMLNSC.Attribute)WAERS);
+				
+			SET outSaldo.STARTDATE 		              				= convertFromSAPDate(inRef.BUDAT);
+			SET outSaldo.ENDDATE     	            				= convertFromSAPDate(inRef.BUDAT);
+
+			SET vBUDAT	                                            = convertFromSAPDate(inRef.BUDAT);			
+		END FOR;
+		
+		-- сохраним для обработки ответа
+		SET Environment.UserProperties.BUDAT = vBUDAT;		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* u00671 09/07/2014 костыль для сервиса SAP_ABC_PP */
+CREATE COMPUTE MODULE RequestForESB_ConvertSAP_PAYDOC
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZComplexPayDocRq.ATTACH;
+		CREATE FIELD OutputRoot.XMLNSC.KZLegalPayDocRq AS outRef;	
+		
+		SET outRef.RqUID		= Environment.UserProperties.RqUID;
+		SET outRef.RqTm			= Environment.UserProperties.RqTm;
+		SET outRef.OperUID	    = '';
+		SET outRef.SPName		= 'SAP'; 
+
+		IF Environment.UserProperties.CORRECT = 1 THEN
+          PROPAGATE TO TERMINAL 'out1' DELETE NONE; -- FORMAT
+	      RETURN FALSE;
+		END IF;  
+
+		IF inRef.OPERREF IS NOT NULL THEN 
+		  SET outRef.SAP_MSGUID	= inRef.OPERREF || Environment.UserProperties.RqUID;
+		ELSE  
+		  SET outRef.SAP_MSGUID	= '';
+		END IF;  
+		
+		CALL CopyPayDocToMDO_SAP(inRef,outRef,Environment.UserProperties.BELNR_MO);		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+	
+/* u00671 09/07/2014 костыль для сервиса SAP_ABC_PP */
+CREATE PROCEDURE CopyPayDocToMDO_SAP(
+		IN inRef REFERENCE, 
+		IN outRef REFERENCE, 
+		IN vBELNR_MO CHARACTER)
+BEGIN 	
+	SET outRef.TransType                        = inRef.TYPE;
+	SET outRef.PayerInfo.AcctInfo.AcctId 		= inRef.Payer.Account;
+	SET outRef.PayerInfo.AcctInfo.AcctCur		= inRef.Payer.CURRCODE;
+	SET outRef.PayerInfo.OrgInfo.orgs:Name		= inRef.Payer.NAME;
+		
+	DECLARE orgId REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef.PayerInfo.OrgInfo AS orgId NAME 'OrgIdExt';
+	SET orgId.Key 								= 'RNN';
+	SET orgId.Value 							= inRef.Payer.RNN;
+	CREATE LASTCHILD OF outRef.PayerInfo.OrgInfo AS orgId NAME 'OrgIdExt';
+	SET orgId.Key 								= 'BIC';
+	SET orgId.Value 							= inRef.PAYERBIC;
+		
+	DECLARE orgAttr REFERENCE TO outRef;
+	DECLARE person REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef.PayerInfo.OrgInfo AS orgAttr NAME 'OrgAttr';
+	CREATE LASTCHILD OF orgAttr AS person NAME 'KeyPerson';
+	SET person.PositionKey 						= 'CHIEF';
+	SET person.PersonInfo.inds:FullName			= inRef.Payer.CHIEF;
+	CREATE LASTCHILD OF orgAttr AS person NAME 'KeyPerson';
+	SET person.PositionKey 						= 'ACC';
+	SET person.PersonInfo.inds:FullName			= inRef.Payer.MAINBK;
+		
+	SET orgAttr.Resident 						= inRef.Payer.IRS; 
+	SET orgAttr.EcSector 						= inRef.Payer.SECO; 
+		
+	SET outRef.PayerInfo.ChkPay					= inRef.Payer.CHKPAY;
+	SET outRef.PayerInfo.AcctComId.AcctId 		= inRef.Payer.AccountCom;
+	SET outRef.PayerInfo.AcctComId.AcctCur 		= inRef.Payer.CurrCom;
+		
+	SET outRef.ReceiverInfo.AcctInfo.AcctId 	= inRef.Receiver.Account;
+	SET outRef.ReceiverInfo.AcctInfo.AcctCur 	= inRef.Receiver.CURRCODE;
+		
+	SET outRef.ReceiverInfo.OrgInfo.orgs:Name 	= inRef.Receiver.NAME;
+	DECLARE contInfo REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef.ReceiverInfo.OrgInfo AS contInfo NAMESPACE orgs NAME 'CompositeContactInfo';
+	SET contInfo.ifxca:ContactInfoType								= 'LegalAddress';
+	SET contInfo.ifxca:ContactInfo.ifxca:PostAddr.commons:Addr1 	= inRef.Receiver.ADDRESS;
+	SET contInfo.ifxca:ContactInfo.ifxca:PostAddr.commons:Country 	= inRef.Receiver.COUNTRY;
+	
+	SET outRef.ReceiverInfo.OrgInfo.orgs:KPPInfo.ifxca:TaxId 		= inRef.Receiver.KPP;
+		
+	CREATE LASTCHILD OF outRef.ReceiverInfo.OrgInfo AS orgId NAME 'OrgIdExt';
+	SET orgId.Key 								= 'RNN';
+	SET orgId.Value 							= inRef.Receiver.RNN;
+	CREATE LASTCHILD OF outRef.ReceiverInfo.OrgInfo AS orgId NAME 'OrgIdExt';
+	SET orgId.Key 								= 'BIC';
+	SET orgId.Value 							= inRef.RECEIVERBIC;
+		
+	CREATE LASTCHILD OF outRef.ReceiverInfo.OrgInfo AS orgAttr NAME 'OrgAttr';
+	SET orgAttr.Resident 						= inRef.Receiver.IRS; 
+	SET orgAttr.EcSector 						= inRef.Receiver.SECO; 
+	SET orgAttr.Country 						= inRef.Receiver.COUNTRY; 
+		
+	DECLARE bankInfo REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef.ReceiverInfo AS bankInfo name 'BankInfo';
+	SET bankInfo.banks:BankId 					= inRef.Receiverbic; 
+	SET bankInfo.banks:CorAcctId 				= inRef.CorAccount; 
+	SET bankInfo.banks:Name 					= inRef.NAME; 
+	SET bankInfo.banks:PostAddr.commons:Addr1	= inRef.ADDRESS; 
+	SET bankInfo.banks:PostAddr.commons:Country	= inRef.COUNTRY; 
+		
+	CREATE FIELD outRef.PayDocInfo.CorrBankInfo AS bankInfo;
+	SET bankInfo.banks:BankId 					= inRef.Receiverbic;
+	SET bankInfo.banks:CorAcctId 				= inRef.CorAccount;
+	SET bankInfo.banks:Name		 				= inRef.NAME;
+	SET bankInfo.banks:PostAddr.commons:Addr1	= inRef.ADDRESS;
+	SET bankInfo.banks:PostAddr.commons:Country	= inRef.COUNTRY;
+		
+	DECLARE payDoc REFERENCE TO outRef.PayDocInfo;
+	SET payDoc.PurposeCode						= inRef.Details.KNP;
+	SET payDoc.OperKind							= inRef.Details.VO;
+
+	--SET payDoc.DocNum							= inRef.Details.NUM;
+	SET payDoc.DocNum							= vBELNR_MO;
+	
+	SET payDoc.DocDate							= inRef.Details.DATE;
+	SET payDoc.ContractNum						= inRef.Details.NumCont;
+	SET payDoc.ContractDate						= inRef.Details.DateCont;
+	SET payDoc.ContractUN						= inRef.Details.UNK;
+	SET payDoc.Invoice							= inRef.Details.Invoice;
+	SET payDoc.ContractUNDate					= inRef.Details.DateUnk;
+	SET payDoc.SendMethod						= inRef.Details.SEND;
+	SET payDoc.SpecialService					= inRef.Details.PSO;
+	SET payDoc.IncomeCode						= inRef.Details.BCLASS;
+	SET payDoc.Urgent							= inRef.Details.URGENT;
+	SET payDoc.IsLoanPay						= inRef.Details.LON;
+	SET payDoc.OperTypeCode						= inRef.Details.CodeTypeOper;
+	SET payDoc.Assign							= inRef.Details.ASSIGN;
+	SET payDoc.Note								= inRef.Notification;
+	SET payDoc.DocRef							= inRef.OPERREF;
+	SET payDoc.RefDate							= inRef.DATE;
+	SET payDoc.CurrCode							= inRef.CURRCODE;
+	SET payDoc.Amount							= inRef.AMOUNT;
+	SET payDoc.PayerCommission					= inRef.PAYERCOM;
+	
+	CREATE FIELD outRef.ClientList;
+	DECLARE clientData REFERENCE TO outRef;
+	FOR clientInf AS inRef.ClientInf[] DO
+		CREATE LASTCHILD OF outRef.ClientList AS clientData NAME 'ClientData';
+		SET clientData.PersonInfo.inds:PersonName.inds:LastName		= clientInf.SURNAME;
+		SET clientData.PersonInfo.inds:PersonName.inds:FirstName	= clientInf.NAME;
+		SET clientData.PersonInfo.inds:PersonName.inds:MiddleName	= clientInf.FIRSTNAME;
+		SET clientData.PersonInfo.inds:BirthDt						= clientInf.DATE;
+		SET clientData.Amount										= clientInf.AMOUNT;
+		SET clientData.RegData										= clientInf.RegData;
+		SET clientData.AcctId										= clientInf.LIC;
+		SET clientData.CurrCode										= clientInf.CURRCODE;
+		SET clientData.Period										= clientInf.PERIOD;
+	END FOR;
+END;
+
+
+CREATE PROCEDURE MO_ATTACH(
+		IN ATTACH REFERENCE, 
+		IN outRef REFERENCE,
+		OUT vFORMAT INTEGER)
+BEGIN
+		DECLARE vATTACH CHARACTER;
+
+		DECLARE vB01         INTEGER;
+		DECLARE vB02         INTEGER;
+
+		DECLARE vAT01         INTEGER;
+		DECLARE vAT02         INTEGER;
+		DECLARE vAT03         CHARACTER;
+		DECLARE vITEMS        CHARACTER;		
+		DECLARE vReceiver     CHARACTER;
+		DECLARE vDetails      CHARACTER;
+		DECLARE vNotification CHARACTER;
+		DECLARE vClientInf    CHARACTER;
+
+        DECLARE outClientInf  REFERENCE TO outRef;				   
+
+        SET vFORMAT = 0;
+
+	    SET vATTACH = ATTACH;
+
+				IF vATTACH <> '' THEN
+				   SET vB01		= POSITION('<TYPE>' IN vATTACH);
+				   SET vB02		= POSITION('</TYPE>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('TYPE>' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('TYPE') + 1;
+				   SET vAT02		= POSITION('/TYPE' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.TYPE = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<Account>' IN vATTACH);
+				   SET vB02		= POSITION('</Account>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('Account' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('Account') + 1;
+				   SET vAT02		= POSITION('/Account' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Payer.Account = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<CURRCODE>' IN vATTACH);
+				   SET vB02		= POSITION('</CURRCODE>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('CURRCODE' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('CURRCODE') + 1;
+				   SET vAT02		= POSITION('/CURRCODE' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Payer.CURRCODE = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<RNN>' IN vATTACH);
+				   SET vB02		= POSITION('</RNN>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('RNN' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('RNN') + 1;
+				   SET vAT02		= POSITION('/RNN' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Payer.RNN = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<CHIEF>' IN vATTACH);
+				   SET vB02		= POSITION('</CHIEF>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('CHIEF' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('CHIEF') + 1;
+				   SET vAT02		= POSITION('/CHIEF' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Payer.CHIEF = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<MAINBK>' IN vATTACH);
+				   SET vB02		= POSITION('</MAINBK>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('MAINBK' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('MAINBK') + 1;
+				   SET vAT02		= POSITION('/MAINBK' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Payer.MAINBK = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<IRS>' IN vATTACH);
+				   SET vB02		= POSITION('</IRS>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('IRS' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('IRS') + 1;
+				   SET vAT02		= POSITION('/IRS' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Payer.IRS = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<SECO>' IN vATTACH);
+				   SET vB02		= POSITION('</SECO>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('SECO' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('SECO') + 1;
+				   SET vAT02		= POSITION('/SECO' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Payer.SECO = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<NAME>' IN vATTACH);
+				   SET vB02		= POSITION('</NAME>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('NAME' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('NAME') + 1;
+				   SET vAT02		= POSITION('/NAME' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Payer.NAME = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<PAYERBIC>' IN vATTACH);
+				   SET vB02		= POSITION('</PAYERBIC>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('PAYERBIC' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('PAYERBIC') + 1;
+				   SET vAT02		= POSITION('/PAYERBIC' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.PAYERBIC = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<RECEIVERBIC>' IN vATTACH);
+				   SET vB02		= POSITION('</RECEIVERBIC>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('RECEIVERBIC' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('RECEIVERBIC') + 1;
+				   SET vAT02		= POSITION('/RECEIVERBIC' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.RECEIVERBIC = vAT03;
+				   /* ------------------------------------------------------------------------------------------------ */
+				   SET vB01		= POSITION('<Receiver>' IN vATTACH);
+				   SET vB02		= POSITION('</Receiver>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('Receiver' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('Receiver') + 1;
+				   SET vAT02		= POSITION('/Receiver' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET vReceiver = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<Account>' IN vReceiver);
+				   SET vB02		= POSITION('</Account>' IN vReceiver);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('Account' IN vReceiver);
+				   SET vAT01		= vAT01 + LENGTH('Account') + 1;
+				   SET vAT02		= POSITION('/Account' IN vReceiver);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vReceiver FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Receiver.Account = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<CURRCODE>' IN vReceiver);
+				   SET vB02		= POSITION('</CURRCODE>' IN vReceiver);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('CURRCODE' IN vReceiver);
+				   SET vAT01		= vAT01 + LENGTH('CURRCODE') + 1;
+				   SET vAT02		= POSITION('/CURRCODE' IN vReceiver);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vReceiver FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Receiver.CURRCODE = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<RNN>' IN vReceiver);
+				   SET vB02		= POSITION('</RNN>' IN vReceiver);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('RNN' IN vReceiver);
+				   SET vAT01		= vAT01 + LENGTH('RNN') + 1;
+				   SET vAT02		= POSITION('/RNN' IN vReceiver);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vReceiver FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Receiver.RNN = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<IRS>' IN vReceiver);
+				   SET vB02		= POSITION('</IRS>' IN vReceiver);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('IRS' IN vReceiver);
+				   SET vAT01		= vAT01 + LENGTH('IRS') + 1;
+				   SET vAT02		= POSITION('/IRS' IN vReceiver);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vReceiver FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Receiver.IRS = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<SECO>' IN vReceiver);
+				   SET vB02		= POSITION('</SECO>' IN vReceiver);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('SECO' IN vReceiver);
+				   SET vAT01		= vAT01 + LENGTH('SECO') + 1;
+				   SET vAT02		= POSITION('/SECO' IN vReceiver);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vReceiver FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Receiver.SECO = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<NAME>' IN vReceiver);
+				   SET vB02		= POSITION('</NAME>' IN vReceiver);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('NAME' IN vReceiver);
+				   SET vAT01		= vAT01 + LENGTH('NAME') + 1;
+				   SET vAT02		= POSITION('/NAME' IN vReceiver);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vReceiver FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Receiver.NAME = vAT03;
+				   /* ------------------------------------------------------------------------------------------------ */
+				   SET vB01		= POSITION('<Details>' IN vATTACH);
+				   SET vB02		= POSITION('</Details>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('Details' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('Details') + 1;
+				   SET vAT02		= POSITION('/Details' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET vDetails = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<KNP>' IN vDetails);
+				   SET vB02		= POSITION('</KNP>' IN vDetails);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('KNP' IN vDetails);
+				   SET vAT01		= vAT01 + LENGTH('KNP') + 1;
+				   SET vAT02		= POSITION('/KNP' IN vDetails);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vDetails FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Details.KNP = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<NUM>' IN vDetails);
+				   SET vB02		= POSITION('</NUM>' IN vDetails);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('NUM' IN vDetails);
+				   SET vAT01		= vAT01 + LENGTH('NUM') + 1;
+				   SET vAT02		= POSITION('/NUM' IN vDetails);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vDetails FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Details.NUM = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<DATE>' IN vDetails);
+				   SET vB02		= POSITION('</DATE>' IN vDetails);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('DATE' IN vDetails);
+				   SET vAT01		= vAT01 + LENGTH('DATE') + 1;
+				   SET vAT02		= POSITION('/DATE' IN vDetails);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vDetails FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Details.DATE = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<SEND>' IN vDetails);
+				   SET vB02		= POSITION('</SEND>' IN vDetails);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('SEND' IN vDetails);
+				   SET vAT01		= vAT01 + LENGTH('SEND') + 1;
+				   SET vAT02		= POSITION('/SEND' IN vDetails);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vDetails FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Details.SEND = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<PSO>' IN vDetails);
+				   SET vB02		= POSITION('</PSO>' IN vDetails);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('PSO' IN vDetails);
+				   SET vAT01		= vAT01 + LENGTH('PSO') + 1;
+				   SET vAT02		= POSITION('/PSO' IN vDetails);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vDetails FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Details.PSO = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<BCLASS>' IN vDetails);
+				   SET vB02		= POSITION('</BCLASS>' IN vDetails);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('BCLASS' IN vDetails);
+				   SET vAT01		= vAT01 + LENGTH('BCLASS') + 1;
+				   SET vAT02		= POSITION('/BCLASS' IN vDetails);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vDetails FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Details.BCLASS = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<URGENT>' IN vDetails);
+				   SET vB02		= POSITION('</URGENT>' IN vDetails);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('URGENT' IN vDetails);
+				   SET vAT01		= vAT01 + LENGTH('URGENT') + 1;
+				   SET vAT02		= POSITION('/URGENT' IN vDetails);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vDetails FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Details.URGENT = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<LON>' IN vDetails);
+				   SET vB02		= POSITION('</LON>' IN vDetails);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('LON' IN vDetails);
+				   SET vAT01		= vAT01 + LENGTH('LON') + 1;
+				   SET vAT02		= POSITION('/LON' IN vDetails);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vDetails FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Details.LON = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<ASSIGN>' IN vDetails);
+				   SET vB02		= POSITION('</ASSIGN>' IN vDetails);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('ASSIGN' IN vDetails);
+				   SET vAT01		= vAT01 + LENGTH('ASSIGN') + 1;
+				   SET vAT02		= POSITION('/ASSIGN' IN vDetails);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vDetails FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.Details.ASSIGN = vAT03;
+				   /* ------------------------------------------------------------------------------------------------ */
+				   SET vB01		= POSITION('<Notification>' IN vATTACH);
+				   SET vB02		= POSITION('</Notification>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('Notification' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('Notification') + 1;
+				   SET vAT02		= POSITION('/DocumentData' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET vNotification = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<OPERREF>' IN vNotification);
+				   SET vB02		= POSITION('</OPERREF>' IN vNotification);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('OPERREF' IN vNotification);
+				   SET vAT01		= vAT01 + LENGTH('OPERREF') + 1;
+				   SET vAT02		= POSITION('/OPERREF' IN vNotification);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vNotification FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.OPERREF = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<DATE>' IN vNotification);
+				   SET vB02		= POSITION('</DATE>' IN vNotification);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('DATE' IN vNotification);
+				   SET vAT01		= vAT01 + LENGTH('DATE') + 1;
+				   SET vAT02		= POSITION('/DATE' IN vNotification);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vNotification FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.DATE = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<CURRCODE>' IN vNotification);
+				   SET vB02		= POSITION('</CURRCODE>' IN vNotification);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('CURRCODE' IN vNotification);
+				   SET vAT01		= vAT01 + LENGTH('CURRCODE') + 1;
+				   SET vAT02		= POSITION('/CURRCODE' IN vNotification);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vNotification FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.CURRCODE = vAT03;
+				   /* ----------------------------------------------------- */
+				   SET vB01		= POSITION('<AMOUNT>' IN vNotification);
+				   SET vB02		= POSITION('</AMOUNT>' IN vNotification);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('AMOUNT' IN vNotification);
+				   SET vAT01		= vAT01 + LENGTH('AMOUNT') + 1;
+				   SET vAT02		= POSITION('/AMOUNT' IN vNotification);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vNotification FROM vAT01 FOR vAT02);
+		           
+				   SET outRef.ATTACH.AMOUNT = vAT03;
+				   /* ------------------------------------------------------------------------------------------------ */
+				   SET vB01		= POSITION('<ITEMS>' IN vATTACH);
+				   SET vB02		= POSITION('</ITEMS>' IN vATTACH);
+
+				   IF vB01 = 0 or vB02 = 0 THEN
+                     SET vFORMAT = 1;
+					 RETURN;
+				   END IF;
+
+				   SET vAT01		= POSITION('ITEMS' IN vATTACH);
+				   SET vAT01		= vAT01 + LENGTH('ITEMS') + 1;
+				   SET vAT02		= POSITION('/ITEMS' IN vATTACH);
+				   SET vAT02		= (vAT02 - vAT01) - 1;
+				   SET vAT03		= SUBSTRING(vATTACH FROM vAT01 FOR vAT02);
+		           
+				   SET vITEMS = vAT03;
+
+				   DECLARE N INTEGER 0;
+				   DECLARE LEN_ITEM INTEGER;
+				   DECLARE Z INTEGER 0;
+				   DECLARE M INTEGER 0;
+				   DECLARE K INTEGER 1;
+            	   DECLARE vEXIT INTEGER 0;
+ 
+				   WHILE vEXIT <> 1 DO
+
+   				       IF K = 0 AND Z = 1 THEN 
+						 SET vEXIT = 1;
+   				       ELSE 
+		     		     SET LEN_ITEM     = LENGTH(vITEMS);
+				         SET M            = POSITION('/ClientInf' IN vITEMS) + LENGTH('/ClientInf'); -- последний символ -f в теге '/ClientInf' 
+				         SET K            = LEN_ITEM - M; -- оставшаяся длинна строки  
+
+   				         IF K <= 0 THEN 
+						   SET Z = 1;  
+					     END IF;
+
+							   /* -------------------------------------------------------------------------- */
+							   SET vB01		= POSITION('<ClientInf>' IN vITEMS);
+							   SET vB02		= POSITION('</ClientInf>' IN vITEMS);
+			
+							   IF vB01 = 0 or vB02 = 0 THEN
+			                     SET vFORMAT = 1;
+								 RETURN;
+							   END IF;
+			
+							   SET vAT01		= POSITION('ClientInf' IN vITEMS);
+							   SET vAT01		= vAT01 + LENGTH('ClientInf') + 1;
+							   SET vAT02		= POSITION('/ClientInf' IN vITEMS);
+							   SET vAT02		= (vAT02 - vAT01) - 1;
+							   SET vClientInf	= SUBSTRING(vITEMS FROM vAT01 FOR vAT02);
+	
+		 	                   CREATE LASTCHILD OF outRef.ATTACH AS outClientInf NAME 'ClientInf'; 
+	
+							   /* ----------------------------------------------------- */
+							   SET vB01		= POSITION('<SURNAME>' IN vClientInf);
+							   SET vB02		= POSITION('</SURNAME>' IN vClientInf);
+			
+							   IF vB01 = 0 or vB02 = 0 THEN
+			                     SET vFORMAT = 1;
+								 RETURN;
+							   END IF;
+			
+							   SET vAT01		= POSITION('SURNAME' IN vClientInf);
+							   SET vAT01		= vAT01 + LENGTH('SURNAME') + 1;
+							   SET vAT02		= POSITION('/SURNAME' IN vClientInf);
+							   SET vAT02		= (vAT02 - vAT01) - 1;
+							   SET vAT03		= SUBSTRING(vClientInf FROM vAT01 FOR vAT02);
+					           				           
+							   SET outClientInf.SURNAME = vAT03;
+							   /* ----------------------------------------------------- */
+							   SET vB01		= POSITION('<NAME>' IN vClientInf);
+							   SET vB02		= POSITION('</NAME>' IN vClientInf);
+			
+							   IF vB01 = 0 or vB02 = 0 THEN
+			                     SET vFORMAT = 1;
+								 RETURN;
+							   END IF;
+			
+							   SET vAT01		= POSITION('<NAME' IN vClientInf);
+							   SET vAT01		= vAT01 + LENGTH('<NAME') + 1;
+							   SET vAT02		= POSITION('/NAME' IN vClientInf);
+							   SET vAT02		= (vAT02 - vAT01) - 1;
+							   SET vAT03		= SUBSTRING(vClientInf FROM vAT01 FOR vAT02);
+					           
+							   SET outClientInf.NAME = vAT03;
+							   /* ----------------------------------------------------- */
+							   SET vB01		= POSITION('<FIRSTNAME>' IN vClientInf);
+							   SET vB02		= POSITION('</FIRSTNAME>' IN vClientInf);
+			
+							   IF vB01 = 0 or vB02 = 0 THEN
+			                     SET vFORMAT = 1;
+								 RETURN;
+							   END IF;
+			
+							   SET vAT01		= POSITION('FIRSTNAME' IN vClientInf);
+							   SET vAT01		= vAT01 + LENGTH('FIRSTNAME') + 1;
+							   SET vAT02		= POSITION('/FIRSTNAME' IN vClientInf);
+							   SET vAT02		= (vAT02 - vAT01) - 1;
+							   SET vAT03		= SUBSTRING(vClientInf FROM vAT01 FOR vAT02);
+					           
+							   SET outClientInf.FIRSTNAME = vAT03;
+							   /* ----------------------------------------------------- */
+							   SET vB01		= POSITION('<DATE>' IN vClientInf);
+							   SET vB02		= POSITION('</DATE>' IN vClientInf);
+			
+							   IF vB01 = 0 or vB02 = 0 THEN
+			                     SET vFORMAT = 1;
+								 RETURN;
+							   END IF;
+			
+							   SET vAT01		= POSITION('DATE' IN vClientInf);
+							   SET vAT01		= vAT01 + LENGTH('DATE') + 1;
+							   SET vAT02		= POSITION('/DATE' IN vClientInf);
+							   SET vAT02		= (vAT02 - vAT01) - 1;
+							   SET vAT03		= SUBSTRING(vClientInf FROM vAT01 FOR vAT02);
+					           
+							   SET outClientInf.DATE = vAT03;
+							   /* ----------------------------------------------------- */
+							   SET vB01		= POSITION('<AMOUNT>' IN vClientInf);
+							   SET vB02		= POSITION('</AMOUNT>' IN vClientInf);
+			
+							   IF vB01 = 0 or vB02 = 0 THEN
+			                     SET vFORMAT = 1;
+								 RETURN;
+							   END IF;
+			
+							   SET vAT01		= POSITION('AMOUNT' IN vClientInf);
+							   SET vAT01		= vAT01 + LENGTH('AMOUNT') + 1;
+							   SET vAT02		= POSITION('/AMOUNT' IN vClientInf);
+							   SET vAT02		= (vAT02 - vAT01) - 1;
+							   SET vAT03		= SUBSTRING(vClientInf FROM vAT01 FOR vAT02);
+					           
+							   SET outClientInf.AMOUNT = vAT03;
+							   /* ----------------------------------------------------- */
+							   SET vB01		= POSITION('<RegData>' IN vClientInf);
+							   SET vB02		= POSITION('</RegData>' IN vClientInf);
+			
+							   IF vB01 = 0 or vB02 = 0 THEN
+			                     SET vFORMAT = 1;
+								 RETURN;
+							   END IF;
+			
+							   SET vAT01		= POSITION('RegData' IN vClientInf);
+							   SET vAT01		= vAT01 + LENGTH('RegData') + 1;
+							   SET vAT02		= POSITION('/RegData' IN vClientInf);
+							   SET vAT02		= (vAT02 - vAT01) - 1;
+							   SET vAT03		= SUBSTRING(vClientInf FROM vAT01 FOR vAT02);
+					           
+							   SET outClientInf.RegData = vAT03;
+							   /* ----------------------------------------------------- */
+							   SET vB01		= POSITION('<PERIOD>' IN vClientInf);
+							   SET vB02		= POSITION('</PERIOD>' IN vClientInf);
+			
+							   IF vB01 = 0 or vB02 = 0 THEN
+			                     SET vFORMAT = 1;
+								 RETURN;
+							   END IF;
+			
+							   SET vAT01		= POSITION('PERIOD' IN vClientInf);
+							   SET vAT01		= vAT01 + LENGTH('PERIOD') + 1;
+							   SET vAT02		= POSITION('/PERIOD' IN vClientInf);
+							   SET vAT02		= (vAT02 - vAT01) - 1;
+							   SET vAT03		= SUBSTRING(vClientInf FROM vAT01 FOR vAT02);
+					           
+							   SET outClientInf.PERIOD = vAT03;
+							   /* ----------------------------------------------------- */
+
+    	 		               SET vITEMS     = SUBSTRING(vITEMS AFTER '/ClientInf'); -- вырежем остаток строки
+
+					   END IF;
+
+				   END WHILE;
+				   /* ------------------------------------------------------------------------------------------------ */
+				END IF;               
+
+END;
+	
+/* Сумма финансового документа */
+CREATE COMPUTE MODULE RequestForESB_ConvertSAP_AMOUNT
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZComplexPayDocRq.ATTACH;
+		CREATE FIELD OutputRoot.XMLNSC.KZSAPAMOUNTRs AS outRef;	
+		
+		SET outRef.RqUID		= Environment.UserProperties.RqUID;
+		SET outRef.RqTm			= Environment.UserProperties.RqTm;
+		SET outRef.SPName		= 'SAP';
+
+		SET outRef.TYPE		    = 'E';
+		SET outRef.MESSAGE	    = 'Сумма документа и сумма в прикрепленном списке не совпадают';
+		SET outRef.BELNR	    = Environment.UserProperties.BELNR_MO; 
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/* Ошибку переадать в SAP */
+CREATE COMPUTE MODULE RequestForESB_ConvertSAP_ERROR
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		-- Получение описания ошибки
+		DECLARE sErrDescr CHARACTER;
+		DECLARE sErrNumber CHARACTER;
+		CALL ru.croc.sbrf.mdm.common.GetExcDescription(InputExceptionList, sErrDescr, sErrNumber);
+
+		-- Формирование структуры сообщения-ответа
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.KZSAPAMOUNTRs AS outRef;	
+		
+		SET outRef.RqUID		= Environment.UserProperties.RqUID;
+		SET outRef.RqTm			= Environment.UserProperties.RqTm;
+		SET outRef.SPName		= 'SAP';
+
+		SET outRef.TYPE		    = 'E'; -- sErrNumber
+		SET outRef.MESSAGE	    = sErrDescr;
+		SET outRef.BELNR	    = Environment.UserProperties.BELNR_MO; 
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Ошибку формата переадать в SAP */
+CREATE COMPUTE MODULE RequestForESB_ConvertSAP_FORMAT
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZComplexPayDocRq.ATTACH;
+		CREATE FIELD OutputRoot.XMLNSC.KZSAPAMOUNTRs AS outRef;	
+		
+		SET outRef.RqUID		= Environment.UserProperties.RqUID;
+		SET outRef.RqTm			= Environment.UserProperties.RqTm;
+		SET outRef.SPName		= 'SAP';
+
+		SET outRef.TYPE		    = 'E';
+		SET outRef.MESSAGE	    = 'Ошибка формата сообщения';
+		SET outRef.BELNR	    = Environment.UserProperties.BELNR_MO; 
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usrNOAGGR
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	 	-- Сообщение для ResponseForSAP
+	 	CALL CopyWholeMessage(InputRoot, OutputRoot);		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:sapout';
+	 	PROPAGATE;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertSAP2MDO_SAP_ABC_HRB_REESTR
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE outBody REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outBody NAME 'KZLegalPayDocRq';
+		SET outBody.RqUID		= Environment.UserProperties.RqUID;
+		SET outBody.RqTm		= SUBSTRING(Environment.UserProperties.RqTm FROM 1 FOR 19);
+		SET outBody.OperUID		= '';
+		SET outBody.SPName		= 'SAP';
+		SET outBody.BankInfo	= '';
+		SET outBody.OperationType = 'SAP_ABC_HRB_REESTR';
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.FILE.*:PAYDOC;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZLegalPayDocRq;
+		
+		CALL CopyPayDocToMDOSAP(inRef,outRef);		
+		
+		-- сохраним для обработки ответа
+		SET Environment.UserProperties.DocNum = outRef.PayDocInfo.DocNum;		
+
+		RETURN TRUE;			
+	END;
+END MODULE;

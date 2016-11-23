@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="UTF-8"?><xsd:schema targetNamespace="http://croc.ru/sbkz/adapters/gcvp/file" xmlns:tns="http://croc.ru/sbkz/adapters/gcvp/file" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <xsd:complexType name="RequestGCVPIIN">
+        <xsd:annotation>
+      <xsd:appinfo source="WMQI_APPINFO">
+        <tdsStructRep groupTerminator="" messageSetDefaultRep="CSV"/>
+      </xsd:appinfo>
+    </xsd:annotation>
+        <xsd:sequence>
+      <xsd:element name="line">
+        <xsd:complexType>
+                    <xsd:annotation>
+            <xsd:appinfo source="WMQI_APPINFO">
+              <tdsStructRep groupTerminator="&lt;LF&gt;" messageSetDefaultRep="CSV"/>
+            </xsd:appinfo>
+          </xsd:annotation>
+                    <xsd:sequence maxOccurs="1" minOccurs="1">
+            <xsd:element name="fileName" type="xsd:string"/>
+            <xsd:element name="requestDate" type="xsd:date">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep format="dd/MM/yyyy" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="IIN" type="xsd:string"/>
+            <xsd:element name="surName" type="xsd:string"/>
+            <xsd:element name="firstName" type="xsd:string"/>
+            <xsd:element name="middleName" type="xsd:string"/>
+            <xsd:element name="birthDate" type="xsd:date">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep format="dd/MM/yyyy" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element minOccurs="0" name="persNumber" nillable="true" type="xsd:string">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep encodingNull="NullLiteralValue" encodingNullValue="" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element minOccurs="0" name="persDate" nillable="true" type="xsd:date">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep encodingNull="NullLiteralValue" encodingNullValue="" format="dd/MM/yyyy" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element minOccurs="1" name="depositorClaimNum" nillable="false" type="xsd:string">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep encodingNull="NullLiteralValue" encodingNullValue="" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element minOccurs="1" name="depositorClaimDate" nillable="false" type="xsd:date">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep format="dd/MM/yyyy" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="requestType" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+    </xsd:sequence>
+  </xsd:complexType>
+  <xsd:complexType name="ResponseGCVPIIN">
+        <xsd:annotation>
+      <xsd:appinfo source="WMQI_APPINFO">
+        <tdsStructRep dataElementSeparation="AllElementsDelimited" delimiter="&lt;LF&gt;" groupTerminator="&lt;LF&gt;&lt;LF&gt;" messageSetDefaultRep="CSV"/>
+      </xsd:appinfo>
+    </xsd:annotation>
+        <xsd:sequence maxOccurs="1" minOccurs="1">
+      <xsd:element name="firstLine">
+        <xsd:complexType>
+                    <xsd:annotation>
+            <xsd:appinfo source="WMQI_APPINFO">
+              <tdsStructRep groupTerminator="" messageSetDefaultRep="CSV"/>
+            </xsd:appinfo>
+          </xsd:annotation>
+                    <xsd:sequence maxOccurs="1" minOccurs="1">
+            <xsd:element name="requestNumber" type="xsd:string"/>
+            <xsd:element name="IIN" type="xsd:string"/>
+            <xsd:element name="surName" type="xsd:string"/>
+            <xsd:element name="firstName" type="xsd:string"/>
+            <xsd:element name="middleName" type="xsd:string"/>
+            <xsd:element name="birthDate" type="xsd:date">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep format="dd.MM.yyyy" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="status" type="xsd:string"/>
+            <xsd:element name="enumNum" type="xsd:string"/>
+            <xsd:element name="avgOVPSumm" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+            <xsd:element maxOccurs="unbounded" name="dataLine">
+        <xsd:complexType>
+                    <xsd:annotation>
+            <xsd:appinfo source="WMQI_APPINFO">
+              <tdsStructRep groupTerminator="" messageSetDefaultRep="CSV"/>
+            </xsd:appinfo>
+          </xsd:annotation>
+                    <xsd:sequence maxOccurs="1" minOccurs="1">
+            <xsd:element name="incomeDate" type="xsd:date">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep format="dd.MM.yyyy" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="senderName" type="xsd:string"/>
+            <xsd:element name="senderRNN" type="xsd:string"/>
+            <xsd:element name="senderBIN" type="xsd:string"/>
+                        <xsd:element name="sumMon" type="xsd:string"/>
+                    </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+        </xsd:sequence>
+  </xsd:complexType>
+  <xsd:element name="requestWithIINIdentity" type="tns:RequestGCVPIIN">
+    <xsd:annotation>
+      <xsd:appinfo source="WMQI_APPINFO">
+        <MRMessage messageDefinition="/0/requestWithIINIdentity;XSDElementDeclaration$MRObject"/>
+      </xsd:appinfo>
+    </xsd:annotation>
+  </xsd:element>
+  <xsd:element name="responseWithIINIdentity" type="tns:ResponseGCVPIIN">
+    <xsd:annotation>
+      <xsd:appinfo source="WMQI_APPINFO">
+        <MRMessage messageDefinition="/0/responseWithIINIdentity;XSDElementDeclaration=1$MRObject"/>
+      </xsd:appinfo>
+    </xsd:annotation>
+  </xsd:element>
+    <xsd:complexType name="RequestGCVPSIK">
+        <xsd:annotation>
+      <xsd:appinfo source="WMQI_APPINFO">
+        <tdsStructRep groupTerminator="" messageSetDefaultRep="CSV"/>
+      </xsd:appinfo>
+    </xsd:annotation>
+        <xsd:sequence>
+      <xsd:element name="line">
+        <xsd:complexType>
+                    <xsd:annotation>
+            <xsd:appinfo source="WMQI_APPINFO">
+              <tdsStructRep groupTerminator="&lt;LF&gt;" messageSetDefaultRep="CSV"/>
+            </xsd:appinfo>
+          </xsd:annotation>
+                    <xsd:sequence maxOccurs="1" minOccurs="1">
+            <xsd:element name="fileName" type="xsd:string"/>
+            <xsd:element name="requestDate" type="xsd:date">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep format="dd/MM/yyyy" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="SIK" type="xsd:string"/>
+            <xsd:element name="surName" type="xsd:string"/>
+            <xsd:element name="firstName" type="xsd:string"/>
+            <xsd:element name="middleName" type="xsd:string"/>
+            <xsd:element name="birthDate" type="xsd:date">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep format="dd/MM/yyyy" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element minOccurs="0" name="persNumber" type="xsd:string">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep encodingNull="NullLiteralValue" encodingNullValue="" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element minOccurs="0" name="persDate" type="xsd:date">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep encodingNull="NullLiteralValue" encodingNullValue="" format="dd/MM/yyyy" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element minOccurs="0" name="IIN" type="xsd:string"/>
+            <xsd:element name="depositorClaimNum" type="xsd:string"/>
+            <xsd:element name="depositorClaimDate" type="xsd:date">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep format="dd/MM/yyyy" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="requestType" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+    </xsd:sequence>
+  </xsd:complexType>
+    <xsd:complexType name="ResponseGCVPSIK">
+        <xsd:annotation>
+      <xsd:appinfo source="WMQI_APPINFO">
+        <tdsStructRep delimiter="&lt;LF&gt;" groupTerminator="&lt;LF&gt;&lt;LF&gt;" messageSetDefaultRep="CSV"/>
+      </xsd:appinfo>
+    </xsd:annotation>
+        <xsd:sequence>
+      <xsd:element name="firstLine">
+        <xsd:complexType>
+                    <xsd:annotation>
+            <xsd:appinfo source="WMQI_APPINFO">
+              <tdsStructRep groupTerminator="" messageSetDefaultRep="CSV"/>
+            </xsd:appinfo>
+          </xsd:annotation>
+                    <xsd:sequence maxOccurs="1" minOccurs="1">
+            <xsd:element name="requestNumber" type="xsd:string"/>
+            <xsd:element name="SIK" type="xsd:string"/>
+            <xsd:element minOccurs="0" name="IIN" nillable="true" type="xsd:string">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep encodingNull="NullLiteralValue" encodingNullValue="" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="surName" type="xsd:string"/>
+            <xsd:element name="firstName" type="xsd:string"/>
+            <xsd:element name="middleName" type="xsd:string"/>
+            <xsd:element name="birthDate" type="xsd:date">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep format="dd.MM.yyyy" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="status" type="xsd:string"/>
+            <xsd:element name="enumNum" type="xsd:string"/>
+            <xsd:element name="avgOVPSumm" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+      <xsd:element maxOccurs="unbounded" name="dataLine">
+        <xsd:complexType>
+                    <xsd:annotation>
+            <xsd:appinfo source="WMQI_APPINFO">
+              <tdsStructRep groupTerminator="" messageSetDefaultRep="CSV"/>
+            </xsd:appinfo>
+          </xsd:annotation>
+                    <xsd:sequence maxOccurs="1" minOccurs="1">
+            <xsd:element name="incomeDate" type="xsd:date">
+              <xsd:annotation>
+                <xsd:appinfo source="WMQI_APPINFO">
+                  <tdsElemRep format="dd.MM.yyyy" messageSetDefaultRep="CSV" precision="-1"/>
+                </xsd:appinfo>
+              </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="senderName" type="xsd:string"/>
+            <xsd:element name="senderRNN" type="xsd:string"/>
+            <xsd:element name="senderBIK" type="xsd:string"/>
+                        <xsd:element name="sumMon" type="xsd:string"/>
+                    </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+    </xsd:sequence>
+  </xsd:complexType>
+    <xsd:element name="requestWithSIKIdentity" type="tns:RequestGCVPSIK">
+    <xsd:annotation>
+      <xsd:appinfo source="WMQI_APPINFO">
+        <MRMessage messageDefinition="/0/requestWithSIKIdentity;XSDElementDeclaration=2$MRObject"/>
+      </xsd:appinfo>
+    </xsd:annotation>
+  </xsd:element>
+    <xsd:element name="responseWithSIKIdentity" type="tns:ResponseGCVPSIK">
+    <xsd:annotation>
+      <xsd:appinfo source="WMQI_APPINFO">
+        <MRMessage messageDefinition="/0/responseWithSIKIdentity;XSDElementDeclaration=3$MRObject"/>
+      </xsd:appinfo>
+    </xsd:annotation>
+  </xsd:element>
+</xsd:schema>

@@ -1,0 +1,102 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.saplm.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+/**
+ * Маршрутизация потока в соответствии с операцией АБПК Прагма.
+ **/
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.UserProperties.Operation;
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'GetLimitRq' THEN
+			SET labelName = 'GetLimitRq';
+		WHEN 'SendMasterDataNf' THEN 
+			SET labelName = 'SendMasterDataNf';
+		WHEN 'PutLimitMasterDataRq' THEN
+			SET labelName = 'PutLimitMasterDataRq';			
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown format XML in SAP(RequestForESB)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;	
+	END;
+END MODULE;
+
+/**
+ * Задание параметров маршрутизации в заголовке MQRFH2.
+ * Случай для запросов с агрегацией. Связка адаптер - ПМИЛ.
+ **/
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usrNOAGGR
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	 	-- Сообщение для ResponseForSAP
+	 	CALL CopyWholeMessage(InputRoot, OutputRoot);		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:sapout';
+	 	PROPAGATE;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE RequestForESB_ConvertToCRM_KZGetLimitRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRq REFERENCE TO InputRoot.XMLNSC.GetLimitRq;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE OutRq REFERENCE TO OutputRoot;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS OutRq NAME 'KZGetLimitRqFromSAPLMtoCRM';
+		SET OutRq = InRq;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertToSAPLM_KZSendMasterDataNf
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRq REFERENCE TO InputRoot.XMLNSC.SendMasterDataNf;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE OutRq REFERENCE TO OutputRoot;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS OutRq NAME 'KZSendMasterDataNftoCRM';
+		SET OutRq = InRq;
+		RETURN TRUE;
+	END;
+END MODULE;

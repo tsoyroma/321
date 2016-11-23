@@ -1,0 +1,369 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.router.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE GetBillingStatResponse_PrepareReply
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders();
+		
+		IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+			CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		END IF;
+		SET OutputRoot.MQMD				= InputRoot.ComIbmAggregateReplyBody.ECHO.MQMD;
+		
+		IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE LASTCHILD OF OutputRoot DOMAIN('MQRFH2') NAME 'MQRFH2';
+		END IF;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE inRef REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].Body.*[<];
+		DECLARE inRoot REFERENCE TO InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC.*[<];
+		
+		DECLARE labelName CHARACTER;
+		
+		IF FIELDVALUE(inRoot.Result.Status.(XMLNSC.Attribute)"Id") = '1' THEN						
+		/*IF personNum = 1 AND docPriority IS NOT NULL THEN*/		
+			SET OutputRoot.XMLNSC	=  inRef;	
+			SET labelName			=  'WayPayRequest';
+		ELSEIF FIELDVALUE(inRoot.Result.Status.(XMLNSC.Attribute)"Id") = '-5' THEN 
+			
+			-- Восстанавливаем идентификаторы ответного сообщения
+			SET OutputRoot.MQMD.SourceQueue = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.SourceQueue;
+			SET OutputRoot.MQMD.MsgId		= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.MsgId AS BLOB); 
+			SET OutputRoot.MQMD.CorrelId	= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.CorrelId AS BLOB);
+			SET OutputRoot.MQMD.MsgType		= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.MsgType AS INTEGER);
+			SET OutputRoot.MQMD.ReplyToQ	= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.ReplyToQ;
+			SET OutputRoot.MQMD.ReplyToQMgr	= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.ReplyToQMgr;
+			SET OutputRoot.MQMD.Report		= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.Report AS INTEGER);	
+			SET OutputRoot.MQMD.Expiry		= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.Expiry AS INTEGER);
+			--SET OutputRoot.MQMD.AccountingToken = CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.AccountingToken AS INTEGER);
+			SET OutputRoot.MQMD.PutApplType		= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.PutApplType AS INTEGER);
+			SET OutputRoot.MQMD.PutApplName		=	InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.PutApplName;
+			
+			
+			--CALL CopyMessageHeaders(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD, OutputRoot);
+					
+			--CALL SetCommonMQReplyHeaders(OutputRoot);
+			--SET OutputLocalEnvironment = InputLocalEnvironment;	
+			--Адресат ответного сообщения
+			--CALL SetMQReplyDestination(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source, OutputLocalEnvironment);						
+			
+			SET OutputRoot.XMLNSC	=  inRef;			
+			
+			SET labelName			=  'EXEC';		
+			
+		ELSEIF FIELDVALUE(inRoot.Result.Status.(XMLNSC.Attribute)"Id") = '-1' THEN 
+			DECLARE outRoot REFERENCE TO OutputRoot;
+					
+			CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing_Error';
+
+			SET outRoot.Status.StatusCode	= FIELDVALUE(inRoot.Result.Status.(XMLNSC.Attribute)"Id");
+			SET outRoot.Status.StatusDesc	= FIELDVALUE(inRoot.Result.Status);	
+										
+			-- Восстанавливаем идентификаторы ответного сообщения 
+			SET OutputRoot.MQMD.CorrelId	= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.MsgId AS BLOB);
+			SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+					
+			CALL SetCommonMQReplyHeaders(OutputRoot);
+			SET OutputLocalEnvironment = InputLocalEnvironment;	
+			--Адресат ответного сообщения
+			CALL SetMQReplyDestination(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source, OutputLocalEnvironment);
+					
+			PROPAGATE TO TERMINAL 'out1' DELETE NONE;			
+			
+			SET OutputRoot.XMLNSC	=  NULL;
+			SET OutputRoot.XMLNSC   = inRef;
+			
+			SET labelName = 'KZWAYAuthRevRqAccCreditRq';
+		
+		ELSE
+			
+			DECLARE outRoot REFERENCE TO OutputRoot;
+					
+			CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing_Error';
+
+			SET outRoot.Status.StatusCode	= FIELDVALUE(inRoot.Result.Status.(XMLNSC.Attribute)"Id");
+			SET outRoot.Status.StatusDesc	= FIELDVALUE(inRoot.Result.Status);	
+										
+			-- Восстанавливаем идентификаторы ответного сообщения 
+			SET OutputRoot.MQMD.CorrelId	= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.MsgId AS BLOB);
+			SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+					
+			CALL SetCommonMQReplyHeaders(OutputRoot);
+			SET OutputLocalEnvironment = InputLocalEnvironment;	
+			--Адресат ответного сообщения
+			CALL SetMQReplyDestination(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source, OutputLocalEnvironment);
+			
+			PROPAGATE TO TERMINAL 'out1';
+			
+			RETURN FALSE;
+			
+		END IF; 
+		
+		 
+		SET Environment.UserProperties.Source.MQMD 			= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 		= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQRFH2;
+		SET Environment.UserProperties.Source.Properties	= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.Properties;
+		SET Environment.UserProperties.Source.Body 			= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.Body;
+		 	
+	 	SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;	
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE GetBillingStatResponse_PrepareReplyTimeoutReverse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRef REFERENCE TO InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].Body.*[<];
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		--DECLARE qpragmaorig REFERENCE TO InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].Body.*[<];
+		--DECLARE Operation CHARACTER FIELDNAME(InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].Body.*[<]);
+		 
+		--DECLARE labelName CHARACTER;
+		
+		--SET labelName = 'EXEC';				 			
+				
+		IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+			CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		END IF;
+		SET OutputRoot.MQMD				=  InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.MQMD;
+		
+		/*CREATE FIRSTCHILD OF OutputRoot.XMLNSC 
+                  		PARSE ( 
+                        InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.Body
+                        CCSID 1208
+                        OPTIONS FolderBitStream + ValidateNone);*/
+        --SET OutputRoot.XMLNSC = inRef;               
+		 
+		--SET Environment.UserProperties.Source.MQMD 			= InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD;
+		--SET Environment.UserProperties.Source.MQRFH2 		= InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQRFH2;
+		--SET Environment.UserProperties.Source.Properties	= InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.Properties;
+		--SET Environment.UserProperties.Source.Body 			= InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.Body;
+		 	
+	 	--SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;		
+		
+		--PROPAGATE TO TERMINAL 'out';
+		 
+			DECLARE outRoot REFERENCE TO OutputRoot;
+			
+			-- Восстанавливаем идентификаторы ответного сообщения 
+			SET OutputRoot.MQMD.CorrelId	= CAST(InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source.MQMD.MsgId AS BLOB);
+			SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+					
+			CALL SetCommonMQReplyHeaders(OutputRoot);
+			SET OutputLocalEnvironment = InputLocalEnvironment;	
+					--Адресат ответного сообщения
+			CALL SetMQReplyDestination(InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.*[<].UserProperties.Source, OutputLocalEnvironment);
+					
+			CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing_Error';
+					
+			SET outRoot.Status.StatusCode	= inRoot.Status.*:StatusCode;
+			SET outRoot.Status.StatusDesc	= inRoot.Status.*:StatusDesc;				
+			
+			PROPAGATE TO TERMINAL 'out1';
+		
+		RETURN FALSE;
+
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE GetBillingStatResponse_ConvertMDO2WAY_WayPayRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		--DECLARE wayResp REFERENCE TO InputRoot.XMLNSC.*[<];
+		   
+		CALL CopyMessageHeaders();
+		
+		--SET Environment.Variables.InputMQMD = NULL;
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		/*CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZBillingPayExecRq';*/
+		
+		/*CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWAYAuthRetailRq';*/
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWAYFinAdvRq';
+		
+		SET outRoot	= inRoot;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE GetBillingStatResponse_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+
+CREATE COMPUTE MODULE GetBillingStatResponse_ConvertMDO2WAY_WAYAuthRevRqAccCreditRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders();
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWAYAuthRevAdvRq';
+		
+		/*SET outRoot.RqUID 			= inRoot.RqUID;
+		SET outRoot.RqTm  			= inRoot.RqTm;	
+		SET outRoot.RegNumber 		= inRoot.MadeOperationId;
+		SET outRoot.ContractNumber  = inRoot.ContractNumber;
+		SET outRoot.Currency		= 'KZT';
+		SET outRoot.Amount			= THE(SELECT ITEM acct.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS acct WHERE acct.NameBS = 'Amount');
+		SET outRoot.Purpose			= inRoot.RecipientRec.CodeRecipientBS;*/
+		
+		SET outRoot 		= 	inRoot;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE GetBillingStatResponse_FillMqRfh2usr_NOAGGR
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+	
+	
+	
+END MODULE;
+
+
+CREATE COMPUTE MODULE GetBillingStatResponse_EXEC_Convert
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		--DECLARE wayResp REFERENCE TO InputRoot.XMLNSC.*[<];
+		   
+		CALL CopyMessageHeaders();
+		
+		--SET Environment.Variables.InputMQMD = NULL;
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot; 
+		
+		/*CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZBillingPayExecRq';*/
+		
+		/*CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWAYAuthRetailRq';*/
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetBillingPayRq';
+		
+		SET outRoot	= inRoot;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

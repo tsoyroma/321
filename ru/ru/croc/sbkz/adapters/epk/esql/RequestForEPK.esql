@@ -1,0 +1,946 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.epk.esql
+
+PATH ru.croc.sbkz.utils;
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE RequestForEPK_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]); 
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZGetMDMPersonInfoByAttrRq' THEN
+			SET labelName = 'KZGetMDMPersonInfoByAttrRq';
+		WHEN 'KZSendMDMPrivateClientDataRq' THEN
+			SET labelName = 'KZSendMDMPrivateClientDataRq';
+		WHEN 'KZGetMDMLegalInfoByAttrRq' THEN
+			SET labelName = 'KZGetMDMLegalInfoByAttrRq';
+		WHEN 'KZSendMDMLegalClientDataRq' THEN
+			SET labelName = 'KZSendMDMLegalClientDataRq';
+		WHEN 'KZCheckMDMPersonInfoRq' THEN
+			SET labelName = 'KZCheckMDMPersonInfoRq';
+		WHEN 'KZExpMDMPrivateClientDataCommitRq' THEN
+			SET labelName = 'KZExpMDMPrivateClientDataCommitRq';
+		WHEN 'KZGetAllClassifiersRq' THEN
+			SET labelName = 'KZGetAllClassifiersRq';
+		WHEN 'KZGetClassifierRq' THEN
+			SET labelName = 'KZGetClassifierRq';
+		WHEN 'KZUpdClassifierRq' THEN
+			SET labelName = 'KZUpdClassifierRq';
+		WHEN 'KZExpClassifierResultRq' THEN
+			SET labelName = 'KZExpClassifierResultRq';
+		WHEN 'KZSetPersonNoneClients' THEN
+			SET labelName = 'KZSetPersonNoneClients';
+		WHEN 'KZEPKCompanyRequest' THEN
+			SET labelName = 'KZEPKCompanyRequest'; 
+		WHEN 'KZEPKIndividualRequest' THEN
+			SET labelName = 'KZEPKIndividualRequest'; 
+		WHEN 'KZLSBOORequest' THEN
+			SET labelName = 'KZLSBOORequest'; 
+		WHEN 'KZOrgSetDataRich' THEN
+			SET labelName = 'KZOrgSetDataRich'; 
+		WHEN 'KZSendMDMPrivateClientDataFromCAKDRq' THEN
+			SET labelName = 'KZSendMDMPrivateClientDataFromCAKDRq';
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForEPK', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в ЕПК "Запрос на поиск клиента - ФЛ": KZGetMDMPersonInfoByAttrRq -> PragmaEnvelope:PersonGetData
+ **/
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO2EPK1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'PERSONGETDATA');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Clients.Client;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.Clients.Client;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+
+		DECLARE cifId CHARACTER NULL;
+		DECLARE surrogates ROW;
+		DECLARE rnn CHARACTER NULL;
+		DECLARE iin CHARACTER NULL;
+		DECLARE spName CHARACTER FIELDVALUE(inRef.SPName);
+
+		FOR inPersonIdExt AS inRef.PersonInfo.PersonIdExt[] DO
+			CASE
+			WHEN inPersonIdExt.Key = 'CIF' THEN
+				SET cifId = inPersonIdExt.Value;
+			WHEN inPersonIdExt.Key = spName THEN
+				SET surrogates.{inPersonIdExt.Key} = inPersonIdExt.Value;
+			WHEN isExchangeSystem(inPersonIdExt.Key) THEN
+				SET surrogates.{inPersonIdExt.Key} = inPersonIdExt.Value;
+			WHEN inPersonIdExt.Key = 'RNN' THEN
+				SET rnn = inPersonIdExt.Value;
+			WHEN inPersonIdExt.Key = 'IIN' THEN
+				SET iin = inPersonIdExt.Value;
+			END CASE;
+		END FOR;
+
+		SET outRef.CifId							= cifId;
+		
+		CREATE FIELD outRef.Sources;
+		DECLARE outSource REFERENCE TO outRef;
+		FOR surrogate AS surrogates.*[] DO
+			CREATE LASTCHILD OF outRef.Sources AS outSource NAME 'Source';
+			SET outSource.Surrogate			= FIELDVALUE(surrogate);
+			SET outSource.ObjectType		= 'PERSON';
+			SET outSource.SourceSystemCode	= FIELDNAME(surrogate);
+			SET outSource.TimeStamp			= InputRoot.XMLNSC.*[<].RqTm;
+			SET outSource.User				= '';
+		END FOR;
+		
+		SET outRef.Person.NameLast			= inRef.PersonInfo.*:PersonName.*:LastName;
+		SET outRef.Person.NameFirst			= inRef.PersonInfo.*:PersonName.*:FirstName;
+		SET outRef.Person.NameFather		= inRef.PersonInfo.*:PersonName.*:MiddleName;
+		SET outRef.Person.BirthDate			= inRef.PersonInfo.*:BirthDt;
+		SET outRef.Person.RNN				= rnn;
+		SET outRef.Person.IIN				= iin;
+
+		SET outRef.Documents.Document.Type			= recodeDocumentTypeToEPK(inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType);
+		SET outRef.Documents.Document.Id			= '';
+		SET outRef.Documents.Document.Series		= '';
+		SET outRef.Documents.Document.Number		= inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum;
+		SET outRef.Documents.Document.DateIssued	= '';
+		SET outRef.Documents.Document.DateValid		= '';
+		SET outRef.Documents.Document.Issuer		= '';
+		SET outRef.Documents.Document.IssuerCode	= '';
+		SET outRef.Documents.Document.Country		= '';
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в ЕПК "Запрос на сохранение клиента - ФЛ": KZSendMDMPrivateClientDataRq -> PragmaEnvelope:PersonSetData
+ **/
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO2EPK2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'PERSONSETDATA');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Clients;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.Clients;
+		
+		FOR inRef AS InputRoot.XMLNSC.*[<].PersonInfo[] DO
+		
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<].RequestData.Clients AS outRef NAME 'Client';
+					
+			DECLARE cifId CHARACTER NULL;
+			DECLARE surrogates ROW;
+			DECLARE rnn CHARACTER NULL;
+			DECLARE iin CHARACTER NULL;
+			DECLARE sic CHARACTER NULL;
+			DECLARE unk CHARACTER NULL;
+	
+			FOR inPersonIdExt AS inRef.PersonIdExt[] DO
+				CASE
+				WHEN inPersonIdExt.Key = 'CIF' THEN
+					SET cifId = inPersonIdExt.Value;
+				WHEN isExchangeSystem(inPersonIdExt.Key) THEN
+					SET surrogates.{inPersonIdExt.Key} = inPersonIdExt.Value;
+				WHEN inPersonIdExt.Key = 'RNN' THEN
+					SET rnn = inPersonIdExt.Value;
+				WHEN inPersonIdExt.Key = 'IIN' THEN
+					SET iin = inPersonIdExt.Value;
+				WHEN inPersonIdExt.Key = 'SIC' THEN
+					SET sic = inPersonIdExt.Value;
+				WHEN inPersonIdExt.Key = 'UNK' THEN
+					SET unk = inPersonIdExt.Value;
+				END CASE;
+			END FOR;
+	
+			SET outRef.CifId							= cifId;
+			SET outRef.ObjectType						= 'PERSON';			
+			SET outRef.IsDuplicate						= '';
+			SET outRef.Status							= recodeAcceptanceStatusToEPK(inRef.IsAccepted);
+			SET outRef.Department						= InputRoot.XMLNSC.*[<].KodFilial;
+			SET outRef.Manager							= inRef.ABSManager;
+			SET outRef.DateCreated						= inRef.DateOpen;
+			SET outRef.UNK								= unk;
+			SET outRef.Manager							= FIELDVALUE(inRef.*:Manager);
+			
+			CREATE FIELD outRef.Sources;
+			DECLARE outSource REFERENCE TO outRef;
+			FOR surrogate AS surrogates.*[] DO
+				CREATE LASTCHILD OF outRef.Sources AS outSource NAME 'Source';
+				SET outSource.Surrogate			= FIELDVALUE(surrogate);
+				SET outSource.ObjectType		= 'PERSON';
+				SET outSource.SourceSystemCode	= FIELDNAME(surrogate);
+				SET outSource.TimeStamp			= inRef.DTModify;
+				SET outSource.User				= '';
+			END FOR;
+			
+			SET outRef.Person.NameLast			= FIELDVALUE(inRef.*:PersonName.*:LastName);
+			SET outRef.Person.NameFirst			= FIELDVALUE(inRef.*:PersonName.*:FirstName);
+			SET outRef.Person.NameFather		= FIELDVALUE(inRef.*:PersonName.*:MiddleName);
+			SET outRef.Person.BirthDate			= FIELDVALUE(inRef.*:BirthDt);
+			SET outRef.Person.RNN				= rnn;
+			SET outRef.Person.IIN				= iin;
+			SET outRef.Person.Gender			= FIELDVALUE(inRef.*:Gender);
+			SET outRef.Person.BirthPlace		= FIELDVALUE(inRef.*:BirthPlace);
+			SET outRef.Person.Country			= FIELDVALUE(inRef.*:Citizenship);
+			SET outRef.Person.NameLastLat		= inRef.LatLastName;
+			SET outRef.Person.NameFirstLat		= parseFormerName(inRef.LatFirstName);
+			SET outRef.Person.NameFatherLat		= parseLatterName(inRef.LatFirstName);
+			SET outRef.Person.Comment			= inRef.Comment;
+	
+			CREATE FIELD outRef.Reaches;
+			DECLARE outReach REFERENCE TO outRef;
+			FOR inPhone AS inRef.Phones.Phone[] DO
+				CREATE LASTCHILD OF outRef.Reaches AS outReach NAME 'Reach';
+				SET outReach.Type			= recodeContactTypeToEPK(inPhone.PhoneType);
+				SET outReach.Id				= '';
+				SET outReach.Classifier		= inPhone.PhoneProvider;
+				SET outReach.Value			= inPhone.PhoneNum;
+				SET outReach.IsPriority		= '';
+				SET outReach.IsBlocked		= CAST(NOT CAST(inPhone.IsActive AS BOOLEAN) AS CHARACTER);
+				SET outReach.TimeStart		= inPhone.From;
+				SET outReach.TimeStop		= inPhone.Till;
+				SET outReach.IsAllowed		= inPhone.Allowed;
+			END FOR;
+			FOR inEMail AS inRef.EMails.EMail[] DO
+				CREATE LASTCHILD OF outRef.Reaches AS outReach NAME 'Reach';
+				SET outReach.Type			= 'email';
+				SET outReach.Value			= inEMail.EMailAddr;
+				SET outReach.IsBlocked		= CAST(NOT CAST(inEMail.Active AS BOOLEAN) AS CHARACTER);
+				SET outReach.IsAllowed		= inEMail.Allowed;
+			END FOR;
+	
+			CREATE FIELD outRef.Documents;
+			DECLARE outDocument REFERENCE TO outRef.Documents;
+			FOR inIdentityCard AS inRef.*:IdentityCards.*:IdentityCard[] DO
+				CREATE LASTCHILD OF outRef.Documents AS outDocument NAME 'Document';
+				SET outDocument.Type				= recodeDocumentTypeToEPK(inIdentityCard.*:IdType);
+				SET outDocument.Id					= '';
+				SET outDocument.Series				= inIdentityCard.*:IdSeries;
+				SET outDocument.Number				= inIdentityCard.*:IdNum;
+				SET outDocument.DateIssued			= SUBSTRING(inIdentityCard.*:IssueDt FROM 1 FOR 10);
+				SET outDocument.DateValid			= SUBSTRING(inIdentityCard.*:ValidTo FROM 1 FOR 10);
+				SET outDocument.Issuer				= inIdentityCard.*:IssuedBy;
+				SET outDocument.IssuerCode			= inIdentityCard.*:Code;
+				SET outDocument.Country				= inIdentityCard.*:Country;
+			END FOR;
+	
+			CREATE FIELD outRef.Addresses;
+			DECLARE outAddress REFERENCE TO outRef.Addresses;
+			FOR inPostAddress AS inRef.*:ContactInfo.*:PostAddr[] DO
+				CREATE LASTCHILD OF outRef.Addresses AS outAddress NAME 'Address';
+				SET outAddress.Type					= recodeAddressTypeToEPK(inPostAddress.*:AddrType);
+				SET outAddress.Id					= '';
+				SET outAddress.Unstructured			= inPostAddress.*:Addr1;
+				SET outAddress.PostCode				= inPostAddress.*:PostalCode;
+				SET outAddress.Country				= inPostAddress.*:Country;
+				SET outAddress.Region				= inPostAddress.*:County;
+				SET outAddress.City					= inPostAddress.*:City;
+				SET outAddress.District				= inPostAddress.*:StateProv;
+				SET outAddress.Street				= inPostAddress.*:Street;
+				SET outAddress.House				= inPostAddress.*:House;
+				SET outAddress.Building				= inPostAddress.*:Buiding;
+				SET outAddress.Apartment			= inPostAddress.*:Flat;
+			END FOR;
+	
+			CREATE FIELD outRef.Links;
+			DECLARE outLink REFERENCE TO outRef.Links;
+			FOR inRelPerson AS inRef.RelPersons.RelPerson[] DO
+				CREATE LASTCHILD OF outRef.Links AS outLink NAME 'Link';
+				DECLARE linkedSubjectId CHARACTER;
+				FOR inRelPersonId AS inRelPerson.RelPersonId[] DO
+					IF inRelPersonId.Key = 'MABPK' THEN
+						SET linkedSubjectId	= inRelPersonId.Value;
+					END IF;
+				END FOR;
+				SET outLink.LinkedId				= '';
+				SET outLink.LinkedSurrogate			= linkedSubjectId;
+				SET outLink.LinkedObjectType		= 'ORGANIZATION';
+				SET outLink.Type					= inRelPerson.RelationshipType;
+				SET outLink.Since					= inRelPerson.StartDate;
+				SET outLink.Until					= inRelPerson.EndDate;
+			END FOR;
+	
+			CREATE FIELD outRef.Procuracies;
+			DECLARE outProcuracy REFERENCE TO outRef.Procuracies;
+			FOR inAuthority AS inRef.AuthorityList.Authority[] DO
+				CREATE LASTCHILD OF outRef.Procuracies AS outProcuracy NAME 'Procuracy';
+				SET outProcuracy.IsActive			= inAuthority.IsActive;
+				SET outProcuracy.Number				= inAuthority.WarrantNumber;
+				SET outProcuracy.RegDate			= inAuthority.RegDate;
+				SET outProcuracy.IssueDate			= inAuthority.IssueDate;
+				SET outProcuracy.EndDate			= inAuthority.ExpDate;
+				DECLARE notaryCifId CHARACTER;
+				DECLARE notarySurrogate CHARACTER;
+				FOR inNotaryId AS inAuthority.NotaryInfo.NotaryId[] DO
+					IF inNotaryId.Key = 'CIF' THEN
+						SET notaryCifId	= inNotaryId.Value;
+					END IF;
+					IF inNotaryId.Key = 'NSURR' THEN
+						SET notarySurrogate	= inNotaryId.Value;
+					END IF;
+				END FOR;
+				SET outProcuracy.NotaryCifId			= notaryCifId;
+				SET outProcuracy.NotaryDate				= inAuthority.NotaryDate;
+				SET outProcuracy.NotaryAddress			= inAuthority.NotaryInfo.NotaryAddress;
+				SET outProcuracy.NotaryLicenseNumber	= inAuthority.NotaryInfo.NotaryLicense;
+				SET outProcuracy.NotaryLicenseIssued	= inAuthority.NotaryInfo.NotaryLicenseDate;
+				SET outProcuracy.NotaryPhone			= inAuthority.NotaryInfo.NotaryPhone;
+				SET outProcuracy.NotaryName				= inAuthority.NotaryInfo.NotaryName;
+				SET outProcuracy.NotarySurrogate		= notarySurrogate;
+				SET outProcuracy.NotaryObjectType		= 'PERSON';
+			END FOR;
+	
+			CREATE FIELD outRef.Signs;
+			DECLARE outSign REFERENCE TO outRef.Signs;
+			IF inRef.Branches.Branch.BankInfo.*:BranchId <> '' THEN
+				DECLARE branchList CHARACTER '';
+				FOR inBranch AS inRef.Branches.Branch[] DO
+					SET branchList = branchList || inBranch.BankInfo.*:BranchId || ',';
+				END FOR;
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'BranchList';
+				SET outSign.Value	= SUBSTRING(branchList FROM 1 FOR LENGTH(branchList) - 1);
+			END IF;
+			IF inRef.*:MaritalStatus <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'MaritalStatus';
+				SET outSign.Value	= recodeMaritalStatusToEPK(inRef.*:MaritalStatus);
+			END IF;
+			IF inRef.Segment <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'Segment';
+				SET outSign.Value	= inRef.Segment;
+			END IF;
+			IF sic <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'SIC';
+				SET outSign.Value	= sic;
+			END IF;
+			IF inRef.IsForeignPP <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'IsForeignPublicPerson';
+				SET outSign.Value	= inRef.IsForeignPP;
+			END IF;
+			IF inRef.ClientJobTitle <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'WorkPositionHeld';
+				SET outSign.Value	= inRef.ClientJobTitle;
+			END IF;
+			IF inRef.ClientCategory <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'Category';
+				SET outSign.Value	= inRef.ClientCategory;
+			END IF;
+			IF inRef.ClientWorkPlaceCat <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'EmployerCategory';
+				SET outSign.Value	= inRef.ClientWorkPlaceCat;
+			END IF;
+			IF inRef.PersonStatus <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'ContactStatus';
+				SET outSign.Value	= inRef.PersonStatus;
+			END IF;
+			IF inRef.WorkPositionType <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'WorkPositionType';
+				SET outSign.Value	= inRef.WorkPositionType;
+			END IF;
+			IF inRef.SecretWord <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'CodeWord';
+				SET outSign.Value	= inRef.SecretWord;
+			END IF;
+			IF inRef.ClientWorkPlace <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'WorkPlace';
+				SET outSign.Value	= inRef.ClientWorkPlace;
+			END IF;
+			IF InputRoot.*[<].*[<].KodUdo <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'KodUdo';
+				SET outSign.Value	= FIELDVALUE(InputRoot.*[<].*[<].KodUdo);
+			END IF;	
+			
+			IF inRef.CustCategory <> '' OR inRef.StatusVIP='1' OR inRef.StatusLSBOO='1' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'customer_cat';
+				IF inRef.CustCategory <> '' THEN 
+					SET outSign.Value	= inRef.CustCategory;
+				ELSEIF inRef.StatusVIP='1' THEN
+					SET outSign.Value	= 'VIP';
+				ELSEIF inRef.StatusLSBOO='1' THEN 
+					SET outSign.Value	= 'CSO';
+				END IF;
+			END IF;
+			
+			IF inRef.CustCategory <> '' OR inRef.StatusVIP='1' OR inRef.StatusLSBOO='1' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'Category';
+				IF inRef.CustCategory <> '' THEN 
+					SET outSign.Value	= inRef.CustCategory;
+				ELSEIF inRef.StatusVIP='1' THEN
+					SET outSign.Value	= 'VIP';
+				ELSEIF inRef.StatusLSBOO='1' THEN 
+					SET outSign.Value	= 'CSO';
+				END IF;
+			END IF;	
+		
+		END FOR;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+	Поиск клиента ЮЛ в ЕПК - KZGetMDMLegalInfoByAttrRq
+*/
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO2EPK_GetLegalInfo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'ORGGETDATA');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Clients;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		FOR inRef AS InputRoot.XMLNSC.*[<].OrgInfo[] DO
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<].RequestData.Clients AS outRef NAME 'Client';
+			CALL CopyOrgInfo2Client(inRef, outRef);
+		END FOR;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос на сохранение клиента ЮЛ в ЕПК - KZSendMDMLegalClientDataRq - 789
+*/
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO2EPK_SendLegalClient
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'ORGSETDATA');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Clients;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		FOR inRef AS InputRoot.XMLNSC.*[<].OrgInfo[] DO
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<].RequestData.Clients AS outRef NAME 'Client';
+			CALL CopyOrgInfo2Client(inRef, outRef);
+		END FOR;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос "Проверка идентификатора клиента в ЕПК": KZCheckMDMPersonInfoRq -> PragmaEnvelope:PERSONCHECKIIN
+ **/
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO2EPK_CheckPersonInfo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'PERSONCHECKIIN');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Clients;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.Clients;
+		DECLARE client REFERENCE TO outRef;
+		
+		FOR personInfo AS InputRoot.XMLNSC.*[<].PersonInfo[] DO
+			CREATE LASTCHILD OF outRef AS client NAME 'Client';
+			SET client.Person.IIN 			= THE(SELECT ITEM idExt.Value FROM personInfo.PersonIdExt[] AS idExt WHERE idExt.Key='IIN');
+		END FOR;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос информации о наличии НСИ: KZGetClassifierRq -> PragmaEnvelope:CLASSIFIERGETDATA
+ * Запрос информации обо всех НСИ: KZGetAllClassifiersRq -> PragmaEnvelope:CLASSIFIERGETALLDATA
+ * Запрос на обновление НСИ: KZUpdClassifierRq -> PragmaEnvelope:CLASSIFIERUPDATEDATA
+ **/
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO2EPK_GetClassifier
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE msgType CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE serviceCode CHARACTER '';
+		IF msgType = 'KZGetAllClassifiersRq' THEN 
+			SET serviceCode 	= 'CLASSIFIERGETALLDATA';
+		ELSEIF msgType = 'KZGetClassifierRq' THEN 
+			SET serviceCode 	= 'CLASSIFIERGETDATA';
+		ELSEIF msgType = 'KZUpdClassifierRq' THEN 
+			SET serviceCode 	= 'CLASSIFIERUPDATEDATA';
+		END IF;
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, serviceCode);	
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Classifiers;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData;
+		
+		DECLARE classifier REFERENCE TO outRef;
+		DECLARE record REFERENCE TO outRef;
+		DECLARE attribute REFERENCE TO outRef;
+
+		FOR cInfo AS inRef.ClassifierInfo[] DO
+			CREATE LASTCHILD OF outRef.Classifiers AS classifier NAME 'Classifier';
+			SET classifier.Code					= cInfo.Code;
+			SET classifier.ParentCode			= cInfo.ParentCode;
+			CREATE FIELD classifier.Records;
+			FOR dataRecord AS cInfo.DataRecord[] DO 
+				CREATE LASTCHILD OF classifier.Records AS record NAME 'Record';
+				SET record.Code					= dataRecord.Code;
+				SET record.ParentCode			= dataRecord.ParentCode;
+				SET record.Name					= dataRecord.Name;
+				SET record.Value				= dataRecord.Value;				
+				SET record.OpenDate				= dataRecord.OpenDate;
+				SET record.IsClosed				= recodeBooleanForEPK(dataRecord.IsClosed);
+				SET record.Note					= dataRecord.Note;
+				
+				CREATE FIELD record.Attributes;
+				FOR attr AS dataRecord.Attr[] DO 
+					CREATE LASTCHILD OF record.Attributes AS attribute NAME 'Attribute';
+					SET attribute.Code					= attr.Code;
+					SET attribute.Value					= attr.Value;
+					SET attribute.OpenDate				= attr.OpenDate;
+					SET attribute.IsClosed				= recodeBooleanForEPK(attr.IsClosed);
+					SET attribute.Note					= attr.Note;
+					SET attribute.DiffCode				= attr.DiffCode;
+				END FOR;
+				
+				SET record.DiffCode				= dataRecord.DiffCode;				
+				SET record.Timestamp			= dataRecord.Timestamp;
+			END FOR;
+		END FOR;
+		
+		SET outRef.Conditions.targetDate		= inRef.Date;
+		SET outRef.Conditions.includeClosed		= recodeBooleanForEPK(inRef.Closed);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Подтверждение успешного сохранения НСИ: KZExpClassifierResultRq -> PragmaEnvelope:CLASSIFIERSYNCRESULT
+ **/
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO2EPK_ClassifierResult
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'CLASSIFIERSYNCRESULT');	
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Classifiers;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.Classifiers;
+		
+		DECLARE classifier REFERENCE TO outRef;
+		
+		FOR cStatus AS inRef.ClassifierStatus[] DO
+			CREATE LASTCHILD OF outRef AS classifier NAME 'Classifier';
+			SET classifier.Code					= cStatus.Code;
+			SET classifier.SyncTimestamp		= cStatus.SyncTimestamp;
+			SET classifier.SyncMessage			= cStatus.SyncMessage;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO2EPK_KZSetPersonNoneClients
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		-- CALL CopyEntireMessage();
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';	
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'PragmaEnvelope';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef = InputRoot.XMLNSC.*[<].PragmaEnvelope; 
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* microbiz */
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO_EPKCompanyRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'ORGGETDATA');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Clients;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.Clients.Client;
+		
+		FOR inRef AS InputRoot.XMLNSC.*[<].PersonInfo[] DO
+		
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<].RequestData.Clients AS outRef NAME 'Client';
+		
+			SET outRef.Organization.Country					= inRef.CompaniesNumberInRequest;
+			SET outRef.Organization.BIN						= inRef.DealMemberID;
+
+		END FOR;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* microbiz */
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO_EPKIndividualRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'PERSONGETDATA');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Clients;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.Clients.Client;
+
+		FOR inRef AS InputRoot.XMLNSC.*[<].PersonInfo[] DO
+		
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<].RequestData.Clients AS outRef NAME 'Client';
+		
+			SET outRef.Person.IIN						= inRef.DealMemberID;
+
+		END FOR;	
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* microbiz - KZLSBOORequest */
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO_LSBOORequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'LSBOO');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.GSLRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.GSLRequest;
+		
+		FOR inRef AS InputRoot.XMLNSC.*[<].PersonInfo[] DO
+		
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<].RequestData.GSLRequest AS outRef NAME 'DealMemberRequestAttributes';
+			SET outRef.DealMemberID							= inRef.DealMemberID;
+			SET outRef.DealMemberRole						= inRef.DealMemberType;
+		
+		END FOR;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* KZOrgSetDataRich */
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO2EPK_OrgSetDataRich
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'OrgSetDataRich');
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Clients;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		FOR inRef AS InputRoot.XMLNSC.*[<].OrgInfo[] DO
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<].RequestData.Clients AS outRef NAME 'Client';
+			--CALL CopyOrgSetDataRich(inRef, outRef);
+			CALL CopyOrgSetDataRichTEST(inRef, outRef);		
+		END FOR;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+u07357 - 07.04.2015
+*/
+CREATE COMPUTE MODULE RequestForEPK_ConvertMDO2EPK2FROMCAKD
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'PERSONSETDATA');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Clients;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.Clients;
+		
+		FOR inRef AS InputRoot.XMLNSC.*[<].PersonInfo[] DO
+		
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<].RequestData.Clients AS outRef NAME 'Client';
+					
+			DECLARE cifId CHARACTER NULL;
+			DECLARE surrogates ROW;
+			DECLARE rnn CHARACTER NULL;
+			DECLARE iin CHARACTER NULL;
+			DECLARE sic CHARACTER NULL;
+			DECLARE unk CHARACTER NULL;
+	
+			FOR inPersonIdExt AS inRef.PersonIdExt[] DO
+				CASE
+				WHEN inPersonIdExt.Key = 'CIF' THEN
+					SET cifId = inPersonIdExt.Value;
+				WHEN isExchangeSystem(inPersonIdExt.Key) THEN
+					SET surrogates.{inPersonIdExt.Key} = inPersonIdExt.Value;
+				WHEN inPersonIdExt.Key = 'RNN' THEN
+					SET rnn = inPersonIdExt.Value;
+				WHEN inPersonIdExt.Key = 'IIN' THEN
+					SET iin = inPersonIdExt.Value;
+				WHEN inPersonIdExt.Key = 'SIC' THEN
+					SET sic = inPersonIdExt.Value;
+				WHEN inPersonIdExt.Key = 'UNK' THEN
+					SET unk = inPersonIdExt.Value;
+				END CASE;
+			END FOR;
+	
+			SET outRef.CifId							= cifId;
+			SET outRef.ObjectType						= 'PERSON';
+			SET outRef.IsDuplicate						= '';
+			SET outRef.Status							= recodeAcceptanceStatusToEPK(inRef.IsAccepted);
+			--SET outRef.Department						= inRef.FirstContactBankInfo.*:BranchId;
+			SET outRef.Department						= InputRoot.XMLNSC.*[<].KodFilial;
+			SET outRef.Manager							= InputRoot.XMLNSC.*[<].Manager;
+			SET outRef.DateCreated						= inRef.DateOpen;
+			SET outRef.UNK								= unk;
+			
+			CREATE FIELD outRef.Sources;
+			DECLARE outSource REFERENCE TO outRef;
+			FOR surrogate AS surrogates.*[] DO
+				CREATE LASTCHILD OF outRef.Sources AS outSource NAME 'Source';
+				SET outSource.Surrogate			= FIELDVALUE(surrogate);
+				SET outSource.ObjectType		= 'PERSON';
+				SET outSource.SourceSystemCode	= FIELDNAME(surrogate);
+				SET outSource.TimeStamp			= inRef.DTModify;
+				SET outSource.User				= '';
+			END FOR;
+			
+			SET outRef.Person.NameLast			= FIELDVALUE(inRef.*:PersonName.*:LastName);
+			SET outRef.Person.NameFirst			= FIELDVALUE(inRef.*:PersonName.*:FirstName);
+			SET outRef.Person.NameFather		= FIELDVALUE(inRef.*:PersonName.*:MiddleName);
+			SET outRef.Person.BirthDate			= FIELDVALUE(inRef.*:BirthDt);
+			SET outRef.Person.RNN				= rnn;
+			SET outRef.Person.IIN				= iin;
+			SET outRef.Person.Gender			= FIELDVALUE(inRef.*:Gender);
+			SET outRef.Person.BirthPlace		= FIELDVALUE(inRef.*:BirthPlace);
+			SET outRef.Person.Country			= FIELDVALUE(inRef.*:Citizenship);
+			SET outRef.Person.NameLastLat		= inRef.LatLastName;
+			SET outRef.Person.NameFirstLat		= parseFormerName(inRef.LatFirstName);
+			SET outRef.Person.NameFatherLat		= parseLatterName(inRef.LatFirstName);
+			SET outRef.Person.Comment			= inRef.Comment;
+	
+			CREATE FIELD outRef.Reaches;
+			DECLARE outReach REFERENCE TO outRef;
+			FOR inPhone AS inRef.Phones.Phone[] DO
+				CREATE LASTCHILD OF outRef.Reaches AS outReach NAME 'Reach';
+				SET outReach.Type			= recodeContactTypeToEPK(inPhone.PhoneType);
+				SET outReach.Id				= '';
+				SET outReach.Classifier		= inPhone.PhoneProvider;
+				SET outReach.Value			= inPhone.PhoneNum;
+				SET outReach.IsPriority		= '';
+				SET outReach.IsBlocked		= CAST(NOT CAST(inPhone.IsActive AS BOOLEAN) AS CHARACTER);
+				SET outReach.TimeStart		= inPhone.From;
+				SET outReach.TimeStop		= inPhone.Till;
+				SET outReach.IsAllowed		= inPhone.Allowed;
+			END FOR;
+			FOR inEMail AS inRef.EMails.EMail[] DO
+				CREATE LASTCHILD OF outRef.Reaches AS outReach NAME 'Reach';
+				SET outReach.Type			= 'email';
+				SET outReach.Value			= inEMail.EMailAddr;
+				SET outReach.IsBlocked		= CAST(NOT CAST(inEMail.Active AS BOOLEAN) AS CHARACTER);
+				SET outReach.IsAllowed		= inEMail.Allowed;
+			END FOR;
+	
+			CREATE FIELD outRef.Documents;
+			DECLARE outDocument REFERENCE TO outRef.Documents;
+			FOR inIdentityCard AS inRef.*:IdentityCards.*:IdentityCard[] DO
+				CREATE LASTCHILD OF outRef.Documents AS outDocument NAME 'Document';
+				SET outDocument.Type				= recodeDocumentTypeToEPK(inIdentityCard.*:IdType);
+				SET outDocument.Id					= '';
+				SET outDocument.Series				= inIdentityCard.*:IdSeries;
+				SET outDocument.Number				= inIdentityCard.*:IdNum;
+				SET outDocument.DateIssued			= SUBSTRING(inIdentityCard.*:IssueDt FROM 1 FOR 10);
+				SET outDocument.DateValid			= SUBSTRING(inIdentityCard.*:ValidTo FROM 1 FOR 10);
+				SET outDocument.Issuer				= inIdentityCard.*:IssuedBy;
+				SET outDocument.IssuerCode			= inIdentityCard.*:Code;
+				SET outDocument.Country				= inIdentityCard.*:Country;
+			END FOR;
+	
+			CREATE FIELD outRef.Addresses;
+			DECLARE outAddress REFERENCE TO outRef.Addresses;
+			FOR inPostAddress AS inRef.*:ContactInfo.*:PostAddr[] DO
+				CREATE LASTCHILD OF outRef.Addresses AS outAddress NAME 'Address';
+				SET outAddress.Type					= recodeAddressTypeToEPK(inPostAddress.*:AddrType);
+				SET outAddress.Id					= '';
+				SET outAddress.Unstructured			= inPostAddress.*:Addr1;
+				SET outAddress.PostCode				= inPostAddress.*:PostalCode;
+				SET outAddress.Country				= inPostAddress.*:Country;
+				SET outAddress.Region				= inPostAddress.*:County;
+				--SET outAddress.Region				= inPostAddress.*:StateProv;
+				SET outAddress.City					= inPostAddress.*:City;
+				SET outAddress.District				= inPostAddress.*:StateProv;
+				--SET outAddress.District				= inPostAddress.*:District;
+				SET outAddress.Street				= inPostAddress.*:Street;
+				SET outAddress.House				= inPostAddress.*:House;
+				SET outAddress.Building				= inPostAddress.*:Buiding;
+				SET outAddress.Apartment			= inPostAddress.*:Flat;
+			END FOR;
+	
+			CREATE FIELD outRef.Links;
+			DECLARE outLink REFERENCE TO outRef.Links;
+			FOR inRelPerson AS inRef.RelPersons.RelPerson[] DO
+				CREATE LASTCHILD OF outRef.Links AS outLink NAME 'Link';
+				DECLARE linkedSubjectId CHARACTER;
+				FOR inRelPersonId AS inRelPerson.RelPersonId[] DO
+					IF inRelPersonId.Key = 'CIF' THEN
+						SET outLink.LinkedId	= inRelPersonId.Value;
+					END IF;
+				END FOR;
+				--SET outLink.LinkedId				= inRelPerson.Value;
+				SET outLink.LinkedSurrogate			= linkedSubjectId;
+				SET outLink.LinkedObjectType		= 'PERSON';--recodeSubjectTypeToEPK(inRelPerson.SubjectType);
+				SET outLink.Type					= inRelPerson.RelationshipType;
+				SET outLink.Since					= inRelPerson.StartDate;
+				SET outLink.Until					= inRelPerson.EndDate;
+			END FOR;
+	
+			CREATE FIELD outRef.Procuracies;
+			DECLARE outProcuracy REFERENCE TO outRef.Procuracies;
+			FOR inAuthority AS inRef.AuthorityList.Authority[] DO
+				CREATE LASTCHILD OF outRef.Procuracies AS outProcuracy NAME 'Procuracy';
+				SET outProcuracy.IsActive			= inAuthority.IsActive;
+				SET outProcuracy.Number				= inAuthority.WarrantNumber;
+				SET outProcuracy.RegDate			= inAuthority.RegDate;
+				SET outProcuracy.IssueDate			= inAuthority.IssueDate;
+				SET outProcuracy.EndDate			= inAuthority.ExpDate;
+				DECLARE notaryCifId CHARACTER;
+				DECLARE notarySurrogate CHARACTER;
+				FOR inNotaryId AS inAuthority.NotaryInfo.NotaryId[] DO
+					IF inNotaryId.Key = 'CIF' THEN
+						SET notaryCifId	= inNotaryId.Value;
+					END IF;
+					IF inNotaryId.Key = 'NSURR' THEN
+						SET notarySurrogate	= inNotaryId.Value;
+					END IF;
+				END FOR;
+				SET outProcuracy.NotaryCifId			= notaryCifId;
+				SET outProcuracy.NotaryDate				= inAuthority.NotaryDate;
+				SET outProcuracy.NotaryAddress			= inAuthority.NotaryInfo.NotaryAddress;
+				SET outProcuracy.NotaryLicenseNumber	= inAuthority.NotaryInfo.NotaryLicense;
+				SET outProcuracy.NotaryLicenseIssued	= inAuthority.NotaryInfo.NotaryLicenseDate;
+				SET outProcuracy.NotaryPhone			= inAuthority.NotaryInfo.NotaryPhone;
+				SET outProcuracy.NotaryName				= inAuthority.NotaryInfo.NotaryName;
+				SET outProcuracy.NotarySurrogate		= notarySurrogate;
+				SET outProcuracy.NotaryObjectType		= 'PERSON';
+			END FOR;
+	
+			CREATE FIELD outRef.Signs;
+			DECLARE outSign REFERENCE TO outRef.Signs;
+			IF inRef.Branches.Branch.BankInfo.*:BranchId <> '' THEN
+				DECLARE branchList CHARACTER '';
+				FOR inBranch AS inRef.Branches.Branch[] DO
+					SET branchList = branchList || inBranch.BankInfo.*:BranchId || ',';
+				END FOR;
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'BranchList';
+				SET outSign.Value	= SUBSTRING(branchList FROM 1 FOR LENGTH(branchList) - 1);
+			END IF;
+			IF inRef.*:MaritalStatus <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'MaritalStatus';
+				SET outSign.Value	= recodeMaritalStatusToEPK(inRef.*:MaritalStatus);
+			END IF;
+			IF inRef.Segment <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'Segment';
+				SET outSign.Value	= inRef.Segment;
+			END IF;
+			IF sic <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'SIC';
+				SET outSign.Value	= sic;
+			END IF;
+			IF inRef.IsForeignPP <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'IsForeignPublicPerson';
+				SET outSign.Value	= inRef.IsForeignPP;
+			END IF;
+			IF inRef.ClientJobTitle <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'WorkPositionHeld';
+				SET outSign.Value	= inRef.ClientJobTitle;
+			END IF;
+			IF inRef.ClientCategory <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'Category';
+				SET outSign.Value	= inRef.ClientCategory;
+			END IF;
+			IF inRef.ClientWorkPlaceCat <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'EmployerCategory';
+				SET outSign.Value	= inRef.ClientWorkPlaceCat;
+			END IF;
+			IF inRef.PersonStatus <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'ContactStatus';
+				SET outSign.Value	= inRef.PersonStatus;
+			END IF;
+			IF inRef.WorkPositionType <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'WorkPositionType';
+				SET outSign.Value	= inRef.WorkPositionType;
+			END IF;
+			IF inRef.SecretWord <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'CodeWord';
+				SET outSign.Value	= inRef.SecretWord;
+			END IF;
+			IF inRef.ClientWorkPlace <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'WorkPlace';
+				SET outSign.Value	= inRef.ClientWorkPlace;
+			END IF;
+			IF InputRoot.*[<].*[<].KodUdo <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'KodUdo';
+				SET outSign.Value	= FIELDVALUE(InputRoot.*[<].*[<].KodUdo);
+			END IF;	
+			
+			IF inRef.CustCategory <> '' OR inRef.StatusVIP='1' OR inRef.StatusLSBOO='1' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'customer_cat';
+				IF inRef.CustCategory <> '' THEN 
+					SET outSign.Value	= inRef.CustCategory;
+				ELSEIF inRef.StatusVIP='1' THEN
+					SET outSign.Value	= 'VIP';
+				ELSEIF inRef.StatusLSBOO='1' THEN 
+					SET outSign.Value	= 'CSO';
+				END IF;
+			END IF;
+			
+			IF inRef.CustCategory <> '' OR inRef.StatusVIP='1' OR inRef.StatusLSBOO='1' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'Category';
+				IF inRef.CustCategory <> '' THEN 
+					SET outSign.Value	= inRef.CustCategory;
+				ELSEIF inRef.StatusVIP='1' THEN
+					SET outSign.Value	= 'VIP';
+				ELSEIF inRef.StatusLSBOO='1' THEN 
+					SET outSign.Value	= 'CSO';
+				END IF;
+			END IF;	
+			
+			IF inRef.*:Resident <> '' THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+				SET outSign.Type	= 'ResidentFlag';
+				SET outSign.Value	= IsResidentForEPK(inRef.*:Resident);
+			END IF;
+			
+		END FOR;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;

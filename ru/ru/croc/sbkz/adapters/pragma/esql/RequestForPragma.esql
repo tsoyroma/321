@@ -1,0 +1,994 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pragma.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE RequestForPragma_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZBlackListRq' THEN
+			SET labelName = 'KZBlackListRq';
+		WHEN 'KZGetCardInfoRq' THEN
+			SET labelName = 'KZGetCardInfoRq';
+		WHEN 'KZGetDepInfoRq' THEN
+			SET labelName = 'KZGetDepInfoRq';
+		WHEN 'KZGetSalaryTurnoverRq' THEN
+			SET labelName = 'KZGetSalaryTurnoverRq';
+		WHEN 'KZCheckPersonIdRq' THEN
+			SET labelName = 'KZCheckPersonIdRq';
+		WHEN 'KZGetCreditHistoryRq' THEN
+			SET labelName = 'KZGetCreditHistoryRq';
+		WHEN 'KZGetBackOfficeDateRq' THEN
+			SET labelName = 'KZGetBackOfficeDateRq';
+		WHEN 'KZGetAverageDailyBalanceRq' THEN
+			SET labelName = 'KZGetAverageDailyBalanceRq';
+		WHEN 'KZGetFinAccountNetTurnoverRq' THEN
+			SET labelName = 'KZGetFinAccountNetTurnoverRq';
+		WHEN 'KZGetFinAccountTurnoverRq' THEN
+			SET labelName = 'KZGetFinAccountTurnoverRq';
+		WHEN 'KZGetInstantLoanDeptRq' THEN
+			SET labelName = 'KZGetInstantLoanDeptRq';
+		WHEN 'KZGetInterestIncomeRq' THEN
+			SET labelName = 'KZGetInterestIncomeRq';
+		WHEN 'KZGetNonInterestIncomeRq' THEN
+			SET labelName = 'KZGetNonInterestIncomeRq';
+		WHEN 'KZComplexPayDocRq' THEN
+			SET labelName = 'KZComplexPayDocRq';
+		WHEN 'KZExpPayDocStatusRq' THEN
+			SET labelName = 'KZExpPayDocStatusRq';
+		WHEN 'KZSAPSaldoRq' THEN
+			SET labelName = 'KZSAPSaldoRq';
+		WHEN 'KZGetCreditHistoryCorpRq'	THEN
+			SET labelName = 'KZGetCreditHistoryCorpRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Проверка наличия клиента в чёрном списке": KZBlackListRq -> BlackListRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'BlackListRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZBlackListRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.BlackListRq;
+		
+		SET OutRq.PersonIdType 	= InpRq.PersonInfo.PersonIdType;
+		SET OutRq.PersonId 		= InpRq.PersonInfo.PersonId;
+		SET OutRq.LastName 		VALUE	= InpRq.PersonInfo.inds:PersonName.inds:LastName;
+		SET OutRq.FirstName 	VALUE 	= InpRq.PersonInfo.inds:PersonName.inds:FirstName;
+		SET OutRq.MiddleName 	VALUE 	= InpRq.PersonInfo.inds:PersonName.inds:MiddleName;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение информации по карте": KZGetCardInfoRq -> GetCardInfoRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetCardInfoRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetCardInfoRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.GetCardInfoRq;
+		
+		SET OutRq.CardNum 		= InpRq.CardAcctId.cards:CardNum;
+		SET OutRq.IdEpk 		= COALESCE(THE(SELECT ITEM idExt.Value FROM InpRq.PersonInfo.PersonIdExt[] AS idExt WHERE idExt.Key='CIF'),'');
+		SET OutRq.DtOpenCrd		= COALESCE(InpRq.CardAcctId.CardStart,'');
+		SET OutRq.DtPeriodCrd	= COALESCE(InpRq.CardAcctId.CardEnd,'');
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение информации по депозиту": KZGetDepInfoRq -> GetDepInfoRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetDepInfoRq';		
+
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetDepInfoRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.GetDepInfoRq;
+
+		SET OutRq.AcctId 		= InpRq.DepAcctId.AcctId;
+		SET OutRq.PersonIdType 	= InpRq.PersonInfo.PersonIdType;
+		SET OutRq.RegionId		= FIELDVALUE(InpRq.BankInfo.*:RegionId);
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение инфрмации по зарплатным оборотам": KZGetSalaryTurnoverRq -> GetSalaryTurnoverRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetSalaryTurnoverRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetSalaryTurnoverRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.GetSalaryTurnoverRq;
+		
+		SET OutRq.CardNum 		= InpRq.CardAcctId.*:CardNum;
+		SET OutRq.IdEpk 		= THE(SELECT ITEM idExt.Value FROM InpRq.PersonInfo.PersonIdExt[] AS idExt WHERE idExt.Key='CIF');
+		SET OutRq.DtOpenCrd		= InpRq.CardAcctId.CardStart;
+		SET OutRq.DtPeriodCrd	= InpRq.CardAcctId.CardEnd;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Проверка идентификатора клиента": KZCheckPersonIdRq -> CheckPersonIdRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma5
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'CheckPersonIdRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZCheckPersonIdRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.CheckPersonIdRq;
+		
+		SET OutRq.PersonIdType 		= InpRq.PersonInfo.PersonIdType;
+		SET OutRq.PersonId 			= InpRq.PersonInfo.PersonId;
+		SET OutRq.LastName 		VALUE	= InpRq.PersonInfo.inds:PersonName.inds:LastName;
+		SET OutRq.FirstName 	VALUE	= InpRq.PersonInfo.inds:PersonName.inds:FirstName;
+		SET OutRq.MiddleName 	VALUE	= InpRq.PersonInfo.inds:PersonName.inds:MiddleName;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение кредитной истории клиента": KZGetCreditHistoryRq -> GetCreditHistoryRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma6
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetCreditHistoryRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetCreditHistoryRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.GetCreditHistoryRq;
+		
+		SET OutRq.ApplicationNumber = InpRq.ApplicationNumber;
+		SET OutRq.BKI 				= InpRq.BKI;
+		SET OutRq.PersonIdType 		= InpRq.PersonInfo.PersonIdType;
+		SET OutRq.PersonId 			= InpRq.PersonInfo.PersonId;
+		SET OutRq.LastName 		VALUE	= InpRq.PersonInfo.inds:PersonName.inds:LastName;
+		SET OutRq.FirstName 	VALUE	= InpRq.PersonInfo.inds:PersonName.inds:FirstName;
+		SET OutRq.MiddleName 	VALUE	= InpRq.PersonInfo.inds:PersonName.inds:MiddleName;
+		FOR oldName AS InpRq.PersonInfo.OldLastName[] DO
+			CREATE LASTCHILD OF OutRq NAME 'OldLastName';
+			SET OutRq.OldLastName[<] VALUE = oldName; 
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Передача информации в Бэк-офис": KZGetBackOfficeDateRq -> GetBackOfficeDateRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma7
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetBackOfficeDateRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZGetBackOfficeDateRq;
+		DECLARE personInfo REFERENCE TO inRef;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE keyCIF CHARACTER '';
+		
+		FOR prt AS inRef.LoanInfo.Participants.Participant[] DO
+			IF prt.PartType = '1' THEN
+				MOVE personInfo TO prt.PersonInfo;
+				FOR idExt AS prt.PersonInfo.PersonIdExt[] DO 
+					IF idExt.Key = 'CIF' THEN
+						SET keyCIF = idExt.Value;
+					END IF;
+				END FOR;
+			END IF;
+		END FOR;
+		
+		DECLARE phoneHome CHARACTER NULL;
+		DECLARE phoneMobile CHARACTER NULL;
+		DECLARE phoneWork CHARACTER NULL;
+		
+		FOR phone AS personInfo.Phones.Phone[] DO
+			IF phone.PhoneType = 'Home' THEN
+				SET phoneHome = phone.PhoneNum;
+			ELSEIF phone.PhoneType = 'Mobile' THEN
+				SET phoneMobile = phone.PhoneNum;
+			ELSEIF phone.PhoneType = 'Work' THEN
+				SET phoneWork = phone.PhoneNum;
+			END IF;
+		END FOR;	
+		
+		DECLARE addrHome CHARACTER NULL;
+		DECLARE addrWork CHARACTER NULL;
+		DECLARE addrHomeCity CHARACTER NULL;
+		DECLARE addrHomeCountry CHARACTER 'Kazakhstan';
+		
+		FOR addr AS personInfo.*:ContactInfo.*:PostAddr[] DO
+			IF addr.*:AddrType = 'Home' THEN
+				SET addrHome 		 = FIELDVALUE(addr.*:Addr1);
+				SET addrHomeCity	 = FIELDVALUE(addr.*:City);
+				IF FIELDVALUE(addr.*:Country) <> '' THEN
+					SET addrHomeCountry	 = FIELDVALUE(addr.*:Country);
+				END IF;
+			ELSEIF addr.*:AddrType = 'Work' THEN
+				SET addrWork 		 = FIELDVALUE(addr.*:Addr1);
+			END IF;
+		END FOR;			
+					
+		SET outRef.AgencyId							= FIELDVALUE(inRef.BankInfo.*:AgencyId);
+		SET outRef.RegionId							= FIELDVALUE(inRef.BankInfo.*:RegionId);
+		SET outRef.IdEpk 							= keyCIF;		
+		SET outRef.CardNum 							= FIELDVALUE(inRef.CardAcctId.*:CardNum);
+		SET outRef.DtOpenCrd						= inRef.CardAcctId.CardStart;
+		SET outRef.DtPeriodCrd						= inRef.CardAcctId.CardEnd;
+		SET outRef.CreditLimit						= inRef.CardAcctId.CreditLimit;		
+		SET outRef.PrcRate							= inRef.LoanInfo.LoanRate;
+		SET outRef.Security							= inRef.LoanInfo.Security;
+		SET outRef.DocNumber						= inRef.LoanInfo.DocNumber;
+		SET outRef.DocDate							= inRef.LoanInfo.DecisionDocDate;		
+		SET outRef.RejectionReason					= inRef.LoanInfo.RejectionReason;
+		SET outRef.Processing						= inRef.Processing;
+		SET outRef.LastName							= FIELDVALUE(personInfo.*:PersonName.*:LastName);
+		SET outRef.FirstName						= FIELDVALUE(personInfo.*:PersonName.*:FirstName);
+		SET outRef.MiddleName						= FIELDVALUE(personInfo.*:PersonName.*:MiddleName);
+		
+		DECLARE idCard REFERENCE TO personInfo.*:IdentityCards.*:IdentityCard[1];
+		DECLARE idCardType CHARACTER recodeIdTypeFromESB(idCard.*:IdType);
+		
+		DECLARE outCard REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS outCard NAME 'IdentityCard';
+		SET outCard.IdType 					= recodeIdTypeFromESB(idCard.*:IdType);
+		SET outCard.IdNum					= FIELDVALUE(idCard.*:IdNum);
+		SET outCard.IssuedBy				= FIELDVALUE(idCard.*:IssuedBy);
+		SET outCard.IssueDt					= FIELDVALUE(idCard.*:IssueDt);
+		SET outCard.ExpDt					= FIELDVALUE(idCard.*:ValidTo);
+		
+		SET outRef.PersonId						= THE(SELECT ITEM idExt.Value FROM personInfo.PersonIdExt[] AS idExt WHERE idExt.Key = 'IIN');
+		IF idCardType IN ('1', '2') OR (idCardType='3' AND FIELDVALUE(personInfo.*:Citizenship)='KAZ')  THEN
+			SET outRef.Resident						= '1';
+		ELSE 
+			SET outRef.Resident						= '2';
+		END IF;
+		SET outRef.FlagKZ						= '2';
+		SET outRef.CardVid						= FIELDVALUE(inRef.CardAcctId.*:CardType);
+		SET outRef.AcctCur						= FIELDVALUE(inRef.CardAcctId.*:CurCode);
+		SET outRef.WorkPlace					= personInfo.ClientWorkPlace;
+		SET outRef.DepData.AcctId				= inRef.DepData.AcctId;
+		SET outRef.DepData.PledgeSum			= inRef.DepData.PledgeSum;		
+		IF FIELDVALUE(personInfo.*:Citizenship) = 'KAZ' THEN 
+			SET outRef.Citizenship				= '1';
+		ELSE 
+			SET outRef.Citizenship				= '2';
+		END IF;
+		SET outRef.SecretWord					= inRef.CardAcctId.SecWord;
+		SET outRef.BirthDay						= FIELDVALUE(personInfo.*:BirthDt);
+		SET outRef.BirthPlace					= FIELDVALUE(personInfo.*:BirthPlace);		
+		SET outRef.HomePhone					= phoneHome;
+		SET outRef.MobilePhone					= phoneMobile;		
+		SET outRef.HomeAddress					= addrHome;
+		SET outRef.Position						= personInfo.ClientJobTitle;
+		SET outRef.WorkAddress					= addrWork;
+		SET outRef.WorkPhone					= phoneWork;
+		
+		SET outRef.Extract						= inRef."Extract";
+		SET outRef.EMailAddr					= personInfo.EMails.EMail[1].EMailAddr;
+		SET outRef.Country						= addrHomeCountry;
+		SET outRef.City							= addrHomeCity;
+		
+		SET outRef.EmbossedName					= inRef.CardAcctId.EmbossedName;
+		SET outRef.EmbossedSurName				= inRef.CardAcctId.EmbossedSurName;
+		SET outRef.SubProductType				= inRef.CardAcctId.SubProductType;
+		SET outRef.DSKey						= inRef.DSKey;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "А.2.2 Получение значения моментной ссудной 
+ * задолженности компании за период": KZGetInstantLoanDeptRq -> GetInstantLoanDeptRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma8
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetInstantLoanDeptRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetInstantLoanDeptRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.GetInstantLoanDeptRq;
+		
+		FOR orgId AS InpRq.OrgId[] DO
+			IF orgId.orgs:OrgType = ORG_TYPE_KZBIN THEN
+				SET OutRq.OrgBIN = orgId.orgs:OrgNum;
+			END IF;
+			IF orgId.orgs:OrgType = ORG_TYPE_KZRNN THEN
+				SET OutRq.OrgRNN = orgId.orgs:OrgNum;
+			END IF;
+		END FOR;
+		
+		SET OutRq.StartDate = InpRq.StartDate;
+		SET OutRq.EndDate 	= InpRq.EndDate;
+		SET OutRq.CurrCode 	= InpRq.CurrCode;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение СДО компании за период": KZGetAverageDailyBalanceRq -> GetAverageDailyBalanceRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma9
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetAverageDailyBalanceRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetAverageDailyBalanceRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.GetAverageDailyBalanceRq;
+		
+		FOR orgId AS InpRq.OrgId[] DO
+			IF orgId.orgs:OrgType = ORG_TYPE_KZBIN THEN
+				SET OutRq.OrgBIN = orgId.orgs:OrgNum;
+			END IF;
+			IF orgId.orgs:OrgType = ORG_TYPE_KZRNN THEN
+				SET OutRq.OrgRNN = orgId.orgs:OrgNum;
+			END IF;
+		END FOR;
+		
+		SET OutRq.StartDate = InpRq.StartDate;
+		SET OutRq.EndDate 	= InpRq.EndDate;
+		SET OutRq.CurrCode 	= InpRq.CurrCode;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение суммы процентных доходов от компании за период": 
+ * KZGetInterestIncomeRq -> GetInterestIncomeRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma10
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetInterestIncomeRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetInterestIncomeRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.GetInterestIncomeRq;
+		
+		FOR orgId AS InpRq.OrgId[] DO
+			IF orgId.orgs:OrgType = ORG_TYPE_KZBIN THEN
+				SET OutRq.OrgBIN = orgId.orgs:OrgNum;
+			END IF;
+			IF orgId.orgs:OrgType = ORG_TYPE_KZRNN THEN
+				SET OutRq.OrgRNN = orgId.orgs:OrgNum;
+			END IF;
+		END FOR;
+		
+		SET OutRq.StartDate = InpRq.StartDate;
+		SET OutRq.EndDate 	= InpRq.EndDate;
+		SET OutRq.CurrCode 	= InpRq.CurrCode;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение суммы непроцентных доходов от компании за период": 
+ * KZGetNonInterestIncomeRq -> GetNonInterestIncomeRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma11
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetNonInterestIncomeRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetNonInterestIncomeRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.GetNonInterestIncomeRq;
+		
+		FOR orgId AS InpRq.OrgId[] DO
+			IF orgId.orgs:OrgType = ORG_TYPE_KZBIN THEN
+				SET OutRq.OrgBIN = orgId.orgs:OrgNum;
+			END IF;
+			IF orgId.orgs:OrgType = ORG_TYPE_KZRNN THEN
+				SET OutRq.OrgRNN = orgId.orgs:OrgNum;
+			END IF;
+		END FOR;
+		
+		SET OutRq.StartDate = InpRq.StartDate;
+		SET OutRq.EndDate 	= InpRq.EndDate;
+		SET OutRq.CurrCode 	= InpRq.CurrCode;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение оборотов по счетам компании за период": 
+ * KZGetFinAccountTurnoverRq -> GetFinAccountTurnoverRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma12
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetFinAccountTurnoverRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetFinAccountTurnoverRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.GetFinAccountTurnoverRq;
+		
+		FOR orgId AS InpRq.OrgId[] DO
+			IF orgId.orgs:OrgType = ORG_TYPE_KZBIN THEN
+				SET OutRq.OrgBIN = orgId.orgs:OrgNum;
+			END IF;
+			IF orgId.orgs:OrgType = ORG_TYPE_KZRNN THEN
+				SET OutRq.OrgRNN = orgId.orgs:OrgNum;
+			END IF;
+		END FOR;
+		
+		SET OutRq.StartDate = InpRq.StartDate;
+		SET OutRq.EndDate 	= InpRq.EndDate;
+		SET OutRq.CurrCode 	= InpRq.CurrCode;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение чистых оборотов по счетам компании за период": 
+ * KZGetFinAccountNetTurnoverRq -> GetFinAccountNetTurnoverRq
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma13
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetFinAccountNetTurnoverRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetFinAccountNetTurnoverRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.GetFinAccountNetTurnoverRq;
+		
+		FOR orgId AS InpRq.OrgId[] DO
+			IF orgId.orgs:OrgType = ORG_TYPE_KZBIN THEN
+				SET OutRq.OrgBIN = orgId.orgs:OrgNum;
+			END IF;
+			IF orgId.orgs:OrgType = ORG_TYPE_KZRNN THEN
+				SET OutRq.OrgRNN = orgId.orgs:OrgNum;
+			END IF;
+		END FOR;
+		
+		SET OutRq.StartDate = InpRq.StartDate;
+		SET OutRq.EndDate 	= InpRq.EndDate;
+		SET OutRq.CurrCode 	= InpRq.CurrCode;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Маршрутизирует в требуемую очередь Прагмы,
+ * в зависимости от операций.
+ * Пока что временный модуль.
+ **/
+CREATE COMPUTE MODULE RequestForPragma_RouteToQueue
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE TEST_PATH CONSTANT CHARACTER 'TEST';
+		DECLARE WORK_PATH CONSTANT CHARACTER 'WORK';
+		
+		DECLARE operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE messagePath CHARACTER;
+		
+		CALL CopyEntireMessage();
+		
+		CASE operation
+		WHEN 'BlackListRq' THEN
+			SET messagePath = WORK_PATH;
+		WHEN 'GetCardInfoRq' THEN
+			SET messagePath = WORK_PATH;
+		WHEN 'GetDepInfoRq' THEN
+			SET messagePath = WORK_PATH;
+		WHEN 'GetSalaryTurnoverRq' THEN
+			SET messagePath = WORK_PATH;
+		WHEN 'CheckPersonIdRq' THEN
+			SET messagePath = WORK_PATH;
+		WHEN 'GetCreditHistoryRq' THEN
+			SET messagePath = WORK_PATH;
+		WHEN 'GetBackOfficeDateRq' THEN
+			SET messagePath = WORK_PATH;
+		-- Временная операция для проверки CRM
+		WHEN 'GetCompanySDOForPeriodRq' THEN
+			SET messagePath = TEST_PATH;
+		WHEN 'GetAverageDailyBalanceRq' THEN
+			SET messagePath = TEST_PATH;
+		WHEN 'GetFinAccountNetTurnoverRq' THEN
+			SET messagePath = TEST_PATH;
+		WHEN 'GetFinAccountTurnoverRq' THEN
+			SET messagePath = TEST_PATH;
+		WHEN 'GetInstantLoanDeptRq' THEN
+			SET messagePath = TEST_PATH;
+		WHEN 'GetInterestIncomeRq' THEN
+			SET messagePath = TEST_PATH;
+		WHEN 'GetNonInterestIncomeRq' THEN
+			SET messagePath = TEST_PATH;
+		WHEN 'PragmaEnvelope' THEN
+			SET messagePath = WORK_PATH;	
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('No operation found', operation);
+		END CASE;
+		
+		IF messagePath = TEST_PATH THEN
+			PROPAGATE TO TERMINAL 'out1';
+		ELSEIF messagePath = WORK_PATH THEN
+			PROPAGATE TO TERMINAL 'out';
+		END IF;
+		
+		RETURN FALSE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+/**
+ * Определение направления потока, в зависимости от
+ * необходимости агрегации.
+ **/
+CREATE FILTER MODULE RequestForPragma_IsUseAggregate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		IF Root.MQRFH2.usr.OperationId IN ('KZGetBackOfficeDateRq') THEN
+			RETURN FALSE;
+		ELSE
+			RETURN TRUE;
+		END IF;
+	END;
+
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Загрузка входящих платежных документов" : KZComplexPayDocRq -> PragmaEnvelope:DocumentSync
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma14
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'PragmaEnvelope';
+		DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRoot.MessageUID = InputRoot.XMLNSC.*[<].RqUID;
+		SET outRoot.SystemCode = InputRoot.XMLNSC.*[<].SPName;
+		SET outRoot.ServiceCode = 'SAPDOCUMENT';
+		SET outRoot.MessageDateTime = InputRoot.XMLNSC.*[<].RqTm;
+		SET outRoot.FilialCode = COALESCE(InputRoot.XMLNSC.*[<].BankInfo.*:BranchId, '00');
+
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch			= '';
+		SET outRef.DocumentKey.DocumentType		= '0';
+		SET outRef.DocumentKey.Id				= '';
+		SET outRef.DocumentKey.Template			= 'BSSOutNC';
+
+		CREATE FIELD Environment.UserProperties.PayDocs;
+
+		DECLARE currentId INTEGER 0;
+		DECLARE outDocument REFERENCE TO outRef;
+		FOR inPayDoc AS inRef.PayDoc[] DO
+			CREATE LASTCHILD OF outRef AS outDocument NAME 'Document';
+			
+			DECLARE payeeCode CHARACTER;
+			DECLARE receiverRnn CHARACTER;
+			FOR inOrgIdExt AS inPayDoc.ReceiverInfo.OrgInfo.OrgIdExt[] DO
+				IF inOrgIdExt.Key = 'CODE' THEN
+					SET payeeCode = inOrgIdExt.Value;
+				END IF;
+				IF inOrgIdExt.Key = 'RNN' THEN
+					SET receiverRnn = inOrgIdExt.Value;
+				END IF;
+			END FOR;
+			DECLARE payerCode CHARACTER;
+			DECLARE payerRnn CHARACTER;
+			FOR inOrgIdExt AS inPayDoc.PayerInfo.OrgInfo.OrgIdExt[] DO
+				IF inOrgIdExt.Key = 'CODE' THEN
+					SET payerCode = inOrgIdExt.Value;
+				END IF;
+				IF inOrgIdExt.Key = 'RNN' THEN
+					SET payerRnn = inOrgIdExt.Value;
+				END IF;
+			END FOR;
+			
+			SET outDocument.Id						= currentId;
+			SET outDocument.SenderReference			= inPayDoc.PayDocInfo.DocRef || '_' || inPayDoc.PayDocInfo.DocNum;
+			SET outDocument.Type					= inPayDoc.PayDocInfo.DocType;
+			SET outDocument.AmountDB				= inPayDoc.PayDocInfo.DBAmount;
+			SET outDocument.CurrencyDB				= IsoToCodCurSafe(inPayDoc.PayerInfo.AcctInfo.AcctCur);
+			SET outDocument.AmountCR				= inPayDoc.PayDocInfo.CRAmount;
+			SET outDocument.CurrencyCR				= IsoToCodCurSafe(inPayDoc.ReceiverInfo.AcctInfo.AcctCur);
+			SET outDocument.Details					= inPayDoc.PayDocInfo.Assign;
+			SET outDocument.CNP						= inPayDoc.PayDocInfo.PurposeCode;
+			SET outDocument.Number					= inPayDoc.PayDocInfo.DocNum;
+			SET outDocument.OrderPay				= inPayDoc.PayDocInfo.OrderPayment;
+			SET outDocument.PrimaryCreationDate		= inPayDoc.PayDocInfo.DocDate;
+			SET outDocument.OperationDate			= inPayDoc.PayDocInfo.RefDate;
+			SET outDocument.CBC						= inPayDoc.PayDocInfo.CBCPayment;
+			SET outDocument.PayeeCode				= payeeCode;
+			SET outDocument.PayerCode				= payerCode;
+			SET outDocument.CurrencyRate			= inPayDoc.PayDocInfo.CurrRate;
+			SET outDocument.DocCreatorName			= inPayDoc.PayDocInfo.DocCreatorName;
+			
+			SET outDocument.DocumentParticipants.DocumentParticipant[1].Role_A		= 'Плательщик';
+			SET outDocument.DocumentParticipants.DocumentParticipant[1].RNN_A		= payerRnn;
+			SET outDocument.DocumentParticipants.DocumentParticipant[1].Name_A		= inPayDoc.PayerInfo.OrgInfo.*:Name;
+			SET outDocument.DocumentParticipants.DocumentParticipant[1].Account_A	= inPayDoc.PayerInfo.AcctInfo.AcctId;
+			SET outDocument.DocumentParticipants.DocumentParticipant[1].Bukrs_A		= inPayDoc.PayerInfo.AcctInfo.ExtAcctId.Value;
+
+			SET outDocument.DocumentParticipants.DocumentParticipant[2].Role_Bank	= 'Банк_получателя';
+			SET outDocument.DocumentParticipants.DocumentParticipant[2].BIC_Bank	= inPayDoc.ReceiverInfo.BankInfo.*:BankId;
+
+			SET outDocument.DocumentParticipants.DocumentParticipant[3].Role_B		= 'Получатель';
+			SET outDocument.DocumentParticipants.DocumentParticipant[3].RNN_B		= receiverRnn;
+			SET outDocument.DocumentParticipants.DocumentParticipant[3].Name_B		= inPayDoc.ReceiverInfo.OrgInfo.*:Name;
+			SET outDocument.DocumentParticipants.DocumentParticipant[3].Account_B	= inPayDoc.ReceiverInfo.AcctInfo.AcctId;
+			SET outDocument.DocumentParticipants.DocumentParticipant[3].Bukrs_B		= inPayDoc.ReceiverInfo.AcctInfo.ExtAcctId.Value;
+			
+			SET currentId = currentId + 1;
+
+			-- сохраним данные для обработки ответа
+			CREATE LASTCHILD OF Environment.UserProperties.PayDocs NAME 'PayDoc'
+				VALUE CAST(ASBITSTREAM(inPayDoc OPTIONS FolderBitStream) AS CHARACTER);
+				
+			PROPAGATE DELETE NONE;
+			SET outRef.Document = NULL;
+		END FOR;
+
+		-- сохраним данные для обработки ответа
+		SET Environment.UserProperties.TransType = inRef.TransType;
+
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Отправка статуса загрузки документов в САП": KZExpPayDocStatusRq -> PragmaEnvelope:SapReturn
+ **/
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma15
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'PragmaEnvelope';
+		DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRoot.MessageUID = InputRoot.XMLNSC.*[<].RqUID;
+		SET outRoot.SystemCode = InputRoot.XMLNSC.*[<].SPName;
+		SET outRoot.ServiceCode = 'SapReturn';
+		SET outRoot.MessageDateTime = InputRoot.XMLNSC.*[<].RqTm;
+		SET outRoot.FilialCode = COALESCE(InputRoot.XMLNSC.*[<].BankInfo.*:RegionId, '00');
+
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch			= '';
+		SET outRef.DocumentKey.DocumentType		= '0';
+		SET outRef.DocumentKey.Id				= '';
+		SET outRef.DocumentKey.Template			= '';
+
+		DECLARE outDocument REFERENCE TO outRef;
+		FOR inPayDoc AS inRef.PayDoc[] DO
+			CREATE LASTCHILD OF outRef AS outDocument NAME 'Document';
+			
+			SET outDocument.Id						= inPayDoc.PayDocInfo.DocNum;
+			SET outDocument.Status					= inPayDoc.DocStatus;
+			SET outDocument.DetailsInformation		= inPayDoc.DocStatusDesc;
+		END FOR;
+
+		-- сохраним данные для обработки ответа
+		SET Environment.UserProperties.TransType = inRef.TransType;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ConvertMDO2Pragma_sapSaldo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'PragmaEnvelope';
+		DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRoot.MessageUID = InputRoot.XMLNSC.*[<].RqUID;
+		SET outRoot.SystemCode = InputRoot.XMLNSC.*[<].SPName;
+		SET outRoot.ServiceCode = 'KZSAPSaldoRq';
+		SET outRoot.MessageDateTime = InputRoot.XMLNSC.*[<].RqTm;
+		--SET outRoot.FilialCode = COALESCE(InputRoot.XMLNSC.*[<].BankInfo.*:RegionId, '00');
+		SET outRoot.FilialCode = COALESCE(InputRoot.XMLNSC.*[<].BUKRS); 
+	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.AccountStatementRequests;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.AccountStatementRequests;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		CREATE FIELD Environment.UserProperties.SapSaldo;
+
+		DECLARE outAccountSt REFERENCE TO outRef;
+		FOR inPayDoc AS inRef.Saldo[] DO
+			CREATE LASTCHILD OF outRef AS outAccountSt NAME 'AccountStatementRequest';
+			
+		    SET outAccountSt.Number 						= inPayDoc.HKONT;
+		    SET outAccountSt.StartDate 					    = inPayDoc.STARTDATE;
+		    SET outAccountSt.EndDate 					    = inPayDoc.ENDDATE;
+		    SET outAccountSt.Extended    					= ' ';
+		    SET outAccountSt.Turnovers 	   				    = 'Y'; -- всегда с оборотами        
+			
+			-- сохраним данные для обработки ответа
+			CREATE LASTCHILD OF Environment.UserProperties.SapSaldo NAME 'SapSaldo'
+				VALUE CAST(ASBITSTREAM(inPayDoc OPTIONS FolderBitStream) AS CHARACTER);
+		END FOR;
+
+		-- сохраним данные для обработки ответа
+		SET Environment.UserProperties.TransType = inRef.TransType;
+			
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForPragma_ConvertMDO2Pragma_CreditHistoryCorp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN	 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetCreditHistoryRq';		
+		
+		CALL FillPragmaStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetCreditHistoryCorpRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.GetCreditHistoryRq;
+		
+		SET OutRq.ApplicationNumber = InpRq.DebtorsID.DebtorID.NumQuest;
+		SET OutRq.BKI 				= InpRq.DebtorsID.DebtorID.IdBki;
+		SET OutRq.PersonIdType 		= InpRq.DebtorsID.DebtorID.TypeID;
+		SET OutRq.PersonId 			= InpRq.DebtorsID.DebtorID.ID;
+		
+		SET OutRq.FirstName			= InpRq.DebtorsID.DebtorID.OldLastName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

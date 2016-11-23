@@ -1,0 +1,97 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.billing.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+/*
+ *  Маршрутизация для нескольких систем от системы SBOLRS в WAY и BILLING
+ */
+CREATE COMPUTE MODULE GetBillingRequest_FindRoute
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		SET OutputRoot = InputRoot;
+		
+		IF NOT EXISTS(Environment.UserProperties.Counter[]) THEN 	
+			SET Environment.UserProperties.Counter = '1';
+		ElSEIF Environment.UserProperties.Counter = '1' THEN 
+			SET Environment.UserProperties.Counter = '2';
+		ELSEIF Environment.UserProperties.Counter = '2' THEN
+			SET Environment.UserProperties.Counter = '3';		
+		END IF;
+		 
+		DECLARE labelName CHARACTER;
+		
+		IF Environment.UserProperties.Counter = '1' THEN
+			SET labelName = 'WAY_AUTH';
+		ELSEIF Environment.UserProperties.Counter = '2'	THEN
+			SET labelName = 'BILLING_PAY';
+		ELSEIF Environment.UserProperties.Counter = '3' THEN
+			SET labelName = 'WAY_PAY';
+		END IF;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		SET Environment.UserProperties.Source.MQMD 			= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 		= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties	= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 			= CAST(ASBITSTREAM(InputRoot.XMLNSC CCSID 1208) AS CHARACTER CCSID 1208);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс TBP_PAY проводки билингового платежа u06068 16.12.2014
+ */
+CREATE COMPUTE MODULE GetBillingRequest_CreateRequestToWAY
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders();
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetBillingPayRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWAYAuthRetailRq';
+		
+		SET outRoot = inRoot;		
+		
+		RETURN TRUE;
+	END;
+	 
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+	
+END MODULE;
+
+/**
+ * Заполнение заголовков для маршрутизации в WAY
+ **/ 
+CREATE COMPUTE MODULE GetBillingRequest_FillMqRfh_WAY_AUTH
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		   
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+
+END MODULE;

@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmMQInput.msgnode="ComIbmMQInput.msgnode" xmlns:ComIbmMQOutput.msgnode="ComIbmMQOutput.msgnode" xmlns:ComIbmResetContentDescriptor.msgnode="ComIbmResetContentDescriptor.msgnode" xmlns:ComIbmTrace.msgnode="ComIbmTrace.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow" xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbrf/bp/common/flow/EventLogger.msgflow"
+    nsPrefix="ru_croc_sbrf_bp_common_flow_EventLogger.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.queueManagerName" name="queueManagerName" defaultValueLiteral="M99.ESB.EL1">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.queueName" name="queueName" defaultValueLiteral="EVENT.LOGGING">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.IsIgnoreCopyToOperLog" name="IsIgnoreCopyToOperLog" lowerBound="1">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EBoolean"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.BackoutMessageLifeTime" name="BackoutMessageLifeTime" lowerBound="1" defaultValueLiteral="864000">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="EventLogger" bundleName="ru/croc/sbrf/bp/common/flow/EventLogger" pluginId="CommonFlows"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/CommonFlows/icons/full/obj16/EventLogger.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/CommonFlows/icons/full/obj30/EventLogger.gif"/>
+    <version xmi:type="utility:ConstantString" string="ESB_Version_Id"/>
+    <composition>
+      <nodes xmi:type="ComIbmMQInput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="5,121" queueName="EVENT.LOGGING" messageDomainProperty="BLOB" validateTiming="complete" transactionMode="no">
+        <translation xmi:type="utility:ConstantString" string="EVENT.LOGGING"/>
+      </nodes>
+      <nodes xmi:type="ComIbmResetContentDescriptor.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_2" location="130,121" messageDomain="MRM" resetMessageDomain="true" messageSet="EventLogging" resetMessageSet="true" messageType="{http://croc.ru/sbrf/bp/EventMsg}:Event" resetMessageType="true" messageFormat="XML1" resetMessageFormat="true" validateTiming="immediate">
+        <translation xmi:type="utility:ConstantString" string="ResetContentDescriptor"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_5" location="315,125" dataSource="DIORA" computeExpression="esql://routine/ru.croc.sbrf.bp.common.esql#EventLogger_CallWriteEvent.Main">
+        <translation xmi:type="utility:ConstantString" string="CallWriteEvent"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_3" location="522,126">
+        <translation xmi:type="utility:ConstantString" string="toOperLog"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_4" location="485,251" queueName="EVENT.LOGGING.BACKOUT">
+        <translation xmi:type="utility:ConstantString" string="EVENT.LOGGING.BACKOUT"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_8" location="386,250" computeExpression="esql://routine/ru.croc.sbrf.bp.common.esql#EventLogger_SetOptionsForBQ.Main">
+        <translation xmi:type="utility:ConstantString" string="SetOptionsForBQ"/>
+      </nodes>
+      <nodes xmi:type="ComIbmTrace.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_9" location="525,355" destination="localError" pattern="${LocalEnvironment.sFullException}">
+        <translation xmi:type="utility:ConstantString" string="Trace"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_10" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.out4" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_14" targetNode="FCMComposite_1_8" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_15" targetNode="FCMComposite_1_8" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_18" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_8" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_9" sourceNode="FCMComposite_1_8" sourceTerminalName="OutTerminal.out3" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.toOperLog" configurable="true" describedAttribute="Property.queueManagerName">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.queueManagerName" bundleName="ComIbmMQOutput" pluginId="com.ibm.etools.mft.ibmnodes"/>
+        <propertyDescriptor groupName="Group.toOperLog" configurable="true" describedAttribute="Property.queueName">
+          <propertyName xmi:type="utility:TranslatableString" key="Property.queueName" bundleName="ComIbmMQOutput" pluginId="com.ibm.etools.mft.ibmnodes"/>
+          <propertyDescriptor groupName="Group.toOperLog" configurable="true" userDefined="true" describedAttribute="Property.IsIgnoreCopyToOperLog">
+            <propertyName xmi:type="utility:TranslatableString" key="Property.IsIgnoreCopyToOperLog" bundleName="ru/croc/sbrf/bp/common/flow/EventLogger" pluginId="CommonFlows"/>
+            <propertyDescriptor groupName="Group.toOperLog" configurable="true" userDefined="true" describedAttribute="Property.BackoutMessageLifeTime">
+              <propertyName xmi:type="utility:TranslatableString" key="Property.BackoutMessageLifeTime" bundleName="ru/croc/sbrf/bp/common/flow/EventLogger" pluginId="CommonFlows"/>
+            </propertyDescriptor>
+          </propertyDescriptor>
+        </propertyDescriptor>
+      </propertyDescriptor>
+    </propertyOrganizer>
+    <attributeLinks promotedAttribute="Property.queueManagerName" overriddenNodes="FCMComposite_1_3">
+      <overriddenAttribute href="ComIbmMQOutput.msgnode#Property.queueManagerName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.queueName" overriddenNodes="FCMComposite_1_3">
+      <overriddenAttribute href="ComIbmMQOutput.msgnode#Property.queueName"/>
+    </attributeLinks>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

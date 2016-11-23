@@ -1,0 +1,871 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.billing.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+/*
+ * Маршрутизация сервисов
+ */
+CREATE COMPUTE MODULE RequestForBilling_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZBillingPayPrepRq' THEN
+			SET labelName = 'BillingPayPrepRq';
+		WHEN 'KZBillingPayExecRq' THEN
+			SET labelName = 'BillingPayExecRq';
+		WHEN 'KZBillingIPTInfoRq' THEN
+			SET labelName = 'BillingIPTInfoRq';
+		WHEN 'KZBillingIPTPrepRq' THEN
+			SET labelName = 'BillingIPTPrepRq';
+		WHEN 'KZBillingIPTStatRq' THEN
+			SET labelName = 'BillingIPTStatRq';
+		WHEN 'KZBillingIPTExecRq' THEN
+			SET labelName = 'BillingIPTExecRq';	
+		WHEN 'KZBillingIPTtoBilling' THEN
+			SET labelName = 'BillingMasspayInfoRq';								 			
+		ELSE
+			-- Неизвестный тип сообщения 	
+			THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForBilling(SBOLR_RS)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *	Интерфейс TBP_PR подготовки билингового платежа к отправке u06068 14.12.2014 FROM A_SBOL_RS -> Billing
+ */
+CREATE COMPUTE MODULE RequestForBilling_ConvertMDO2Billing_BillingPayPrepRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZBillingPayPrepRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		DECLARE recipient REFERENCE TO outRoot;
+		DECLARE requisites REFERENCE TO outRoot;
+		DECLARE objs_req REFERENCE TO outRoot;
+		DECLARE obj_req REFERENCE TO outRoot;		
+		DECLARE counter INTEGER 1;
+		DECLARE firstly BOOLEAN TRUE;
+		
+		DECLARE nameBS CHARACTER inRoot.RecipientRec.CodeRecipientBS;
+		DECLARE result CHARACTER;
+		
+		DECLARE res CHARACTER; 
+		
+		DECLARE kisc CHARACTER;
+		
+		SET kisc = SUBSTRING(nameBS FROM 0 FOR  4);
+		 
+		CALL removeDigits(nameBS,result);
+		
+		IF kisc = 'KISC' THEN
+			CALL removeChar(nameBS,res);
+		ELSE
+			SET res = nameBS;
+		END IF;	
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing';
+		   
+		SET outRoot.(XMLNSC.Attribute)"UID" 	 = ConvertToBilling(inRoot.RqUID);
+		SET outRoot.(XMLNSC.Attribute)"DateTime" = inRoot.RqTm;
+		SET outRoot.(XMLNSC.Attribute)"SystemId" = inRoot.SPName;
+		SET outRoot.GroupId		=	inRoot.OperUID;
+		
+		IF inRoot.RecipientRec.TaxId <> '' AND inRoot.RecipientRec.BIC <> '' AND inRoot.RecipientRec.AcctId <> '' THEN
+		
+			CREATE LASTCHILD OF outRoot AS recipient NAME 'Recipient';
+			
+			SET recipient.(XMLNSC.Attribute)"name"  = result;
+			
+			CREATE LASTCHILD OF recipient AS requisites NAME 'Requisites';
+			
+			CREATE LASTCHILD OF requisites AS objs_req NAME 'objects';
+			
+			CREATE LASTCHILD OF objs_req AS obj_req NAME 'object';
+			SET obj_req.(XMLNSC.Attribute)"name"	=	'TaxId';
+			SET obj_req.(XMLNSC.Attribute)"value"	=	inRoot.RecipientRec.TaxId;
+			
+			CREATE LASTCHILD OF objs_req AS obj_req NAME 'object';
+			SET obj_req.(XMLNSC.Attribute)"name"	=	'BIC';
+			SET obj_req.(XMLNSC.Attribute)"value"	=	inRoot.RecipientRec.BIC;
+			
+			CREATE LASTCHILD OF objs_req AS obj_req NAME 'object';
+			SET obj_req.(XMLNSC.Attribute)"name"	=	'AcctId';
+			SET obj_req.(XMLNSC.Attribute)"value"	=	inRoot.RecipientRec.AcctId;
+		
+		END IF;
+		
+		SET outRoot.Source		=	'65756876';
+		
+		DECLARE clazz CHARACTER;
+		
+		SET clazz = COALESCE(THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Clazz'), 'operation');
+				
+		/*IF clazz = '0' THEN
+			SET outRoot.Clazz   =   'operation';
+		END IF;*/
+		
+		DECLARE id CHARACTER; 
+		
+		SET id = COALESCE(THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Id'), 'invoices');
+		
+		/*IF id = '0' THEN
+			SET outRoot.Id   =   'invoices';
+		END IF; */
+		
+		SET outRoot.Target.(XMLNSC.Attribute)"clazz" = clazz;
+		SET outRoot.Target.(XMLNSC.Attribute)"id"	= id;
+		--SET outRoot.Target.(XMLNSC.Attribute)"id"	= 'invoices';
+		SET outRoot.Target 		=	'prep';		
+		--SET outRoot.Code		=	inRoot.RecipientRec.CodeRecipientBS;
+		IF res <> '' THEN
+			SET outRoot.Code		=	res;
+		ELSE
+			SET outRoot.Code		=	nameBS;
+		END IF;	
+		DECLARE buffer CHARACTER THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Amount');
+		
+		SET outRoot.IsAutoPay = COALESCE(inRoot.IsAutoPayment,null);
+		
+		IF buffer <> '' THEN 
+		
+			DECLARE pay REFERENCE TO outRoot;	
+			CREATE LASTCHILD OF outRoot AS pay NAME 'Pay';
+			
+			SET pay.(XMLNSC.Attribute)"Ref" = inRoot.MadeOperationId;
+			
+			SET pay.Amount = THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Amount');
+			SET pay.Target  = THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Target');
+			SET pay.Currency = 'KZT';
+			SET pay.DateTime = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		
+		END IF;
+		
+		DECLARE body REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS body NAME 'Body';		
+		SET body.(XMLNSC.Attribute)"name"  = 'invoices';
+		SET body.(XMLNSC.Attribute)"type"  = 'string';
+		
+		DECLARE objs REFERENCE TO body; 
+		DECLARE obj  REFERENCE TO body;
+		DECLARE outer_obj REFERENCE TO objs;
+		DECLARE inner_obj REFERENCE TO objs;
+				 	
+		DECLARE obj_general REFERENCE TO objs;
+		DECLARE obj_element REFERENCE TO objs;		
+		
+		CREATE LASTCHILD OF body AS objs NAME 'objects';
+		
+		/*CREATE LASTCHILD OF objs AS obj NAME 'object';				
+		SET obj.(XMLNSC.Attribute)"name"  = 'BillCode';
+		SET obj.(XMLNSC.Attribute)"value" = inRoot.RecipientRec.CodeRecipientBS;*/
+		
+		DECLARE first_element CHARACTER;
+		DECLARE second_element CHARACTER;
+		DECLARE third_element CHARACTER;
+		DECLARE input CHARACTER;
+		DECLARE compare INTEGER;
+		
+		DECLARE fs BOOLEAN TRUE;
+		
+		FOR req AS inRoot.RecipientRec.Requisites.Requisite[] DO
+			
+			CASE req.NameBS 
+			WHEN 'Target' THEN
+
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Target';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+			/*WHEN 'Amount' THEN
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Amount';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;*/
+			WHEN 'Docnum' THEN
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Docnum';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+			WHEN 'Curnum' THEN
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Curnum';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+			WHEN 'Otdel' THEN
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Otdel';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+			WHEN 'Spec' THEN
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Spec';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+			WHEN 'Month' THEN
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Month';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;	
+			WHEN 'FIO' THEN
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'FIO';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;			
+			WHEN 'Fior' THEN
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Fior';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;					
+			WHEN 'Invoice' THEN 
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Invoice';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				
+				DECLARE bill_val CHARACTER;
+				SET bill_val =  COALESCE(THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Regions'),'');
+				IF bill_val = '' THEN
+					SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+				ELSE
+					SET obj.(XMLNSC.Attribute)"value" = bill_val;
+				END IF;
+			ELSE
+				 --IF nameBS IN ('ALSECO','IVC','0004','0137','0229','0232','0465','0619','0679','0695','0697','0698') THEN
+				 					 	
+				 	SET input = req.NameBS;
+				 	 
+				 	--CALL parseNameBS(input, first_element);
+				 	CALL parseNameBS(input, second_element);
+				 	CALL getNameBS(input, third_element);
+				 	
+				 	SET compare = CAST(second_element AS INTEGER);				 	
+				 	
+				 	IF compare <> counter THEN
+				 		
+				 		IF req.NameVisible NOT IN('Clazz','Id','way4code','Amount','Сумма','Баланс','BalanceAmount','AccountAddress','ivcaddress','Date','ExpireDate','HeatingSquare','2','LodgerAmount','ivcfio','Итоговая Сумма','PID','Список регионов','Docnum','Curnum','FIO','Fior','Otdel','Spec','Month') THEN 
+				 		 IF req.NameBS NOT IN('Date','AccountAddress','ExpireDate','tenantCount','HeatingSquare') THEN	
+					 		IF fs = TRUE THEN
+						 			
+						 			CREATE LASTCHILD OF objs AS obj NAME 'object';
+									SET obj.(XMLNSC.Attribute)"name"  = 'Items';	
+									SET obj.(XMLNSC.Attribute)"type"  = 'list';							
+										
+						 			CREATE LASTCHILD OF obj AS outer_obj NAME 'objects';
+																
+									SET fs = FALSE;
+																
+						 	END IF;
+					 		
+					 		CREATE LASTCHILD OF outer_obj AS inner_obj NAME 'object';
+					 		SET inner_obj.(XMLNSC.Attribute)"name" = 'Item';
+					 		SET inner_obj.(XMLNSC.Attribute)"type" = 'list';
+					 		SET inner_obj.(XMLNSC.Attribute)"key"  =  second_element;--THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Field_'||second_element||'_ServiceID');
+					 		
+					 		CREATE LASTCHILD OF inner_obj AS obj_general NAME 'objects';
+					 		
+					 		CREATE LASTCHILD OF obj_general AS obj_element NAME 'object'; 
+					 		SET obj_element.(XMLNSC.Attribute)"name" = convertNameBs(third_element);
+					 		SET obj_element.(XMLNSC.Attribute)"title" = req.NameVisible;
+							SET obj_element.(XMLNSC.Attribute)"type"  = req.Type;
+							SET obj_element.(XMLNSC.Attribute)"value" = COALESCE(req.EnteredData.DataItem,'0.0');				 		
+					 		
+					 		SET counter = counter + 1;	
+				 		
+				 		 END IF;
+				 		END IF;
+				 		
+				 	ELSE
+				 		
+				 		IF req.NameVisible NOT IN('Clazz','Id','way4code','Amount','Сумма','Баланс','BalanceAmount','AccountAddress','ivcaddress','Date','ExpireDate','HeatingSquare','2','LodgerAmount','ivcfio','Итоговая Сумма','PID','Список регионов','Docnum','Curnum','FIO','Fior','Otdel','Spec','Month') THEN 
+				 		  IF req.NameBS NOT IN('Date','AccountAddress','ExpireDate','tenantCount','HeatingSquare') THEN	
+					 		IF firstly = TRUE THEN
+					 			
+					 			IF fs = TRUE THEN 
+						 			
+							 			CREATE LASTCHILD OF objs AS obj NAME 'object';
+									 	SET obj.(XMLNSC.Attribute)"name"  = 'Items';	
+									 	SET obj.(XMLNSC.Attribute)"type"  = 'list';
+									 	
+									 	CREATE LASTCHILD OF obj AS outer_obj NAME 'objects';
+							 			
+							 			SET fs = FALSE;
+						 			
+						 		END IF;
+					 			
+					 			CREATE LASTCHILD OF outer_obj AS inner_obj NAME 'object';
+					 			SET inner_obj.(XMLNSC.Attribute)"name" = 'Item';
+					 			SET inner_obj.(XMLNSC.Attribute)"type" = 'list';
+					 			SET inner_obj.(XMLNSC.Attribute)"key"  = second_element;--THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Field_'||second_element||'_ServiceID');
+					 			
+					 			CREATE LASTCHILD OF inner_obj AS obj_general NAME 'objects';
+					 			
+					 			SET firstly = FALSE;
+					 			
+					 		END IF;				 		
+					 		 
+					 		CREATE LASTCHILD OF obj_general AS obj_element NAME 'object'; 
+					 		SET obj_element.(XMLNSC.Attribute)"name" = convertNameBs(third_element);
+					 		SET obj_element.(XMLNSC.Attribute)"title" = req.NameVisible;
+							SET obj_element.(XMLNSC.Attribute)"type"  = req.Type;
+							SET obj_element.(XMLNSC.Attribute)"value" = COALESCE(req.EnteredData.DataItem,'0.0');
+				 		
+				 	     END IF;
+				       END IF;		
+				     END IF;
+			END CASE;		
+				 	 			 
+		END FOR;		
+	
+		DECLARE existDate CHARACTER;
+	    
+	    SET existDate = COALESCE(THE(SELECT ITEM attr.NameBS FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Date'),'');
+	    
+	    IF existDate <> '' THEN
+		
+		CREATE LASTCHILD OF objs AS obj NAME 'object';
+		SET obj.(XMLNSC.Attribute)"name"  = 'parameters';	
+			
+		CREATE LASTCHILD OF obj AS outer_obj NAME 'objects';
+		
+		FOR req AS inRoot.RecipientRec.Requisites.Requisite[] DO				
+									 	
+				IF req.NameBS IN('Date','AccountAddress','ExpireDate','tenantCount','HeatingSquare') THEN
+										
+					CREATE LASTCHILD OF outer_obj AS inner_obj NAME 'object';
+					SET inner_obj.(XMLNSC.Attribute)"name"  = req.NameBS;
+					SET inner_obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+					SET inner_obj.(XMLNSC.Attribute)"type"  = req.Type;
+					SET inner_obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+					--SET inner_obj.(XMLNSC.Attribute)"key"  = req.;--THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Field_'||second_element||'_ServiceID');
+				
+				END IF;		
+				
+		END FOR;	
+	
+	    END IF;
+		
+		DECLARE pidd CHARACTER;
+		SET pidd = COALESCE(THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'PID'),'');
+		
+		IF pidd <> '' THEN
+		
+			DECLARE pid REFERENCE TO outRoot;
+				
+			CREATE LASTCHILD OF outRoot AS pid NAME 'PID';
+			
+			SET pid = pidd;
+			
+		END IF;
+		
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForBilling_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+	
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		--CALL SetMQReplyDestination(Environment.UserProperties.Source, OutputLocalEnvironment);
+		
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = Environment.UserProperties.ReplyToQ;
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName =	Environment.UserProperties.ReplyToQMgr;
+		
+		SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForBilling_SaveOrigMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+			
+			SET Environment.UserProperties.Source.MQMD 			= InputRoot.MQMD;
+			SET Environment.UserProperties.Source.MQRFH2 		= InputRoot.MQRFH2;
+			SET Environment.UserProperties.Source.Properties	= InputRoot.Properties;
+			SET Environment.UserProperties.Source.Body 			= InputBody;		
+			
+			RETURN TRUE;
+				
+		END;
+		 
+		CREATE PROCEDURE CopyEntireMessage() BEGIN
+			SET OutputRoot = InputRoot;
+		END;
+END MODULE;
+
+/*
+ * Интерфейс TBP_PAY проводки билингового платежа u06068 16.12.2014 SBOLRS -> BILLING -> SBOLRS
+ */
+CREATE COMPUTE MODULE RequestForBilling_ConvertMDO2Billing_BillingPayExecRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZBillingPayExecRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		DECLARE recipient REFERENCE TO outRoot;
+		DECLARE requisites REFERENCE TO outRoot;
+		DECLARE objs_req REFERENCE TO outRoot;
+		DECLARE obj_req REFERENCE TO outRoot;		
+		DECLARE counter INTEGER 1;
+		DECLARE firstly BOOLEAN TRUE;
+		
+		DECLARE nameBS CHARACTER inRoot.RecipientRec.CodeRecipientBS;
+		DECLARE result CHARACTER;
+		 
+		CALL removeDigits(nameBS,result);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing';
+		 
+		SET outRoot.(XMLNSC.Attribute)"UID" 	 = ConvertToBilling(inRoot.RqUID);
+		SET outRoot.(XMLNSC.Attribute)"DateTime" = inRoot.RqTm;
+		SET outRoot.(XMLNSC.Attribute)"SystemId" = inRoot.SPName;
+		
+		CREATE LASTCHILD OF outRoot AS recipient NAME 'Recipient';
+		
+		SET recipient.(XMLNSC.Attribute)"name"  = result;
+		
+		CREATE LASTCHILD OF recipient AS requisites NAME 'Requisites';
+		
+		CREATE LASTCHILD OF requisites AS objs_req NAME 'objects';
+		
+		CREATE LASTCHILD OF objs_req AS obj_req NAME 'object';
+		SET obj_req.(XMLNSC.Attribute)"name"	=	'TaxId';
+		SET obj_req.(XMLNSC.Attribute)"value"	=	inRoot.RecipientRec.TaxId;
+		
+		CREATE LASTCHILD OF objs_req AS obj_req NAME 'object';
+		SET obj_req.(XMLNSC.Attribute)"name"	=	'BIC';
+		SET obj_req.(XMLNSC.Attribute)"value"	=	inRoot.RecipientRec.BIC;
+		
+		CREATE LASTCHILD OF objs_req AS obj_req NAME 'object';
+		SET obj_req.(XMLNSC.Attribute)"name"	=	'AcctId';
+		SET obj_req.(XMLNSC.Attribute)"value"	=	inRoot.RecipientRec.AcctId;
+		
+		DECLARE clazz CHARACTER;
+		
+		SET clazz = THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Clazz');
+		
+		IF clazz = '' THEN
+			SET outRoot.Clazz   =   'operation';
+		END IF;
+		
+		DECLARE id CHARACTER; 
+		
+		SET id = THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Id');
+		
+		IF id = '' THEN
+			SET outRoot.Id   =   'payment';
+		END IF;
+		
+		SET outRoot.GroupId		=	inRoot.OperUID;
+		SET outRoot.Target.(XMLNSC.Attribute)"clazz" = clazz;
+		SET outRoot.Target.(XMLNSC.Attribute)"id"	= id;
+		SET outRoot.Target		=	'exec';
+		SET outRoot.Code		=	inRoot.RecipientRec.CodeRecipientBS;
+		
+		SET outRoot.Result.Status.(XMLNSC.Attribute)"Id" = '1';
+		SET outRoot.Result.Status = 'OK';
+		SET outRoot.Result.Commission.(XMLNSC.Attribute)"currency" = 'KZT';
+		SET outRoot.Result.Commission = inRoot.Commission;	
+		
+		DECLARE pay REFERENCE TO outRoot;	
+		CREATE LASTCHILD OF outRoot AS pay NAME 'Pay';
+		
+		SET pay.(XMLNSC.Attribute)"Ref" = inRoot.MadeOperationId;
+		
+		SET pay.Amount = THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Amount');
+		SET pay.Currency = 'KZT';
+		SET pay.DateTime = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		
+		DECLARE body REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS body NAME 'Body'; 
+		
+		DECLARE objs REFERENCE TO body; 
+		DECLARE obj  REFERENCE TO body;
+		DECLARE outer_obj REFERENCE TO objs;
+		DECLARE inner_obj REFERENCE TO objs;
+				 	
+		DECLARE obj_general REFERENCE TO objs;
+		DECLARE obj_element REFERENCE TO objs;		
+		
+		CREATE LASTCHILD OF body AS objs NAME 'objects';
+		
+		CREATE LASTCHILD OF objs AS obj NAME 'object';				
+		SET obj.(XMLNSC.Attribute)"name"  = 'BillCode';
+		SET obj.(XMLNSC.Attribute)"value" = inRoot.RecipientRec.CodeRecipientBS;
+		
+		DECLARE first_element CHARACTER;
+		DECLARE second_element CHARACTER;
+		DECLARE third_element CHARACTER;
+		DECLARE input CHARACTER;
+		DECLARE compare INTEGER;
+		
+		FOR req AS inRoot.RecipientRec.Requisites.Requisite[] DO
+			
+			CASE req.NameBS 
+			WHEN 'Target' THEN
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Target';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+			WHEN 'Amount' THEN 
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Amount';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+			WHEN 'Fior' THEN
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Fior';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+			WHEN 'Spec' THEN 
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Spec';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+			WHEN 'Otdel' THEN 
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Otdel';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+			WHEN 'Month' THEN 
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Month';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+			WHEN 'Invoice' THEN 
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Invoice';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;	
+			ELSE
+				 IF nameBS IN ('ALSECO','IVC','KISC0004','KISC0137','KISC0229','KISC0232','KISC0465','KISC0619','KISC0679','KISC0695','KISC0697','KISC0698') THEN
+				 	IF req.NameBS NOT IN('Date','AccountAddress','ExpireDate','tenantCount','HeatingSquare') THEN	
+					 	SET input = req.NameBS;
+					 	 
+					 	--CALL parseNameBS(input, first_element);
+					 	CALL parseNameBS(input, second_element);
+					 	CALL getNameBS(input, third_element);
+					 	
+					 	SET compare = CAST(second_element AS INTEGER);					 	 
+					 	
+					 	IF compare <> counter THEN
+					 		
+					 		CREATE LASTCHILD OF objs AS obj NAME 'object';
+							SET obj.(XMLNSC.Attribute)"name"  = 'Items';	
+							SET obj.(XMLNSC.Attribute)"type"  = 'list';
+					 		
+					 		CREATE LASTCHILD OF obj AS outer_obj NAME 'objects';
+					 		
+					 		CREATE LASTCHILD OF outer_obj AS inner_obj NAME 'object';
+					 		SET inner_obj.(XMLNSC.Attribute)"name" = 'Item';
+					 		SET inner_obj.(XMLNSC.Attribute)"type" = 'list';
+					 		SET inner_obj.(XMLNSC.Attribute)"key"  =  THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Field_'||second_element||'_ServiceID');
+					 		
+					 		CREATE LASTCHILD OF inner_obj AS obj_general NAME 'objects';
+					 		
+					 		CREATE LASTCHILD OF obj_general AS obj_element NAME 'object'; 
+					 		SET obj_element.(XMLNSC.Attribute)"name" = convertNameBs(third_element);
+					 		SET obj_element.(XMLNSC.Attribute)"title" = req.NameVisible;
+							SET obj_element.(XMLNSC.Attribute)"type"  = req.Type;
+							SET obj_element.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;				 		
+					 		
+					 		SET counter = counter + 1;	
+					 		
+					 	ELSE
+					 		
+					 		IF firstly = TRUE THEN
+					 			
+					 			CREATE LASTCHILD OF objs AS obj NAME 'object';
+							 	SET obj.(XMLNSC.Attribute)"name"  = 'Items';	
+							 	SET obj.(XMLNSC.Attribute)"type"  = 'list';
+							 	
+							 	CREATE LASTCHILD OF obj AS outer_obj NAME 'objects';
+					 			
+					 			CREATE LASTCHILD OF outer_obj AS inner_obj NAME 'object';
+					 			SET inner_obj.(XMLNSC.Attribute)"name" = 'Item';
+					 			SET inner_obj.(XMLNSC.Attribute)"type" = 'list';
+					 			SET inner_obj.(XMLNSC.Attribute)"key"  = THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Field_'||second_element||'_ServiceID');
+					 			
+					 			CREATE LASTCHILD OF inner_obj AS obj_general NAME 'objects';
+					 			
+					 			SET firstly = FALSE;
+					 			
+					 		END IF;				 		
+					 		 
+					 		CREATE LASTCHILD OF obj_general AS obj_element NAME 'object'; 
+					 		SET obj_element.(XMLNSC.Attribute)"name" = convertNameBs(third_element);
+					 		SET obj_element.(XMLNSC.Attribute)"title" = req.NameVisible;
+							SET obj_element.(XMLNSC.Attribute)"type"  = req.Type;
+							SET obj_element.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+					 		
+					 	END IF;
+				 	END IF;		
+				 END IF;
+			END CASE;	 	 			 
+		END FOR;		
+		
+		DECLARE existDate CHARACTER;
+	    
+	    SET existDate = COALESCE(THE(SELECT ITEM attr.NameBS FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Date'),'');
+		
+		IF existDate <> '' THEN
+		
+		CREATE LASTCHILD OF objs AS obj NAME 'object';
+		SET obj.(XMLNSC.Attribute)"name"  = 'parameters';	
+			
+		CREATE LASTCHILD OF obj AS outer_obj NAME 'objects';
+		
+		FOR req AS inRoot.RecipientRec.Requisites.Requisite[] DO				
+									 	
+				IF req.NameBS IN('Date','AccountAddress','ExpireDate','tenantCount','HeatingSquare') THEN
+										
+					CREATE LASTCHILD OF outer_obj AS inner_obj NAME 'object';
+					SET inner_obj.(XMLNSC.Attribute)"name"  = req.NameBS;
+					SET inner_obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+					SET inner_obj.(XMLNSC.Attribute)"type"  = req.Type;
+					SET inner_obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+					--SET inner_obj.(XMLNSC.Attribute)"key"  = req.;--THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Field_'||second_element||'_ServiceID');
+				
+				END IF;		
+				
+		END FOR;
+		
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForBilling_PrepareRespHeaders
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+	
+		SET OutputRoot.HTTPResponseHeader = NULL;
+		-- Восстанавливаем все заголовки
+		IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQMD') NAME 'MQMD';
+		END IF;
+		SET OutputRoot.MQMD = Environment.Variables.InputMQMD;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForBilling_Length_Processing
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		--DECLARE length CHARACTER CAST(ASBITSTREAM(InputRoot.XMLNSC CCSID 1208) AS CHARACTER CCSID 1208);
+		DECLARE tcpHeader CHAR;
+		DECLARE tcpMsgLen INTEGER;
+		DECLARE tcpData BLOB ASBITSTREAM(InputRoot.XMLNSC CCSID 1208);
+		
+		DECLARE tcpMessage CHARACTER ASBITSTREAM(InputRoot.XMLNSC CCSID 1208); 
+		
+		
+		SET tcpMsgLen = LENGTH(CAST(tcpData AS CHAR CCSID 1208));
+		DECLARE length INTEGER tcpMsgLen + 4;
+		/*DECLARE tcpDataLength CHAR;
+		SET tcpDataLength = CAST(InputRoot.BLOB.BLOB AS CHAR CCSID 1208);*/
+		 
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+        SET OutputLocalEnvironment.TCPIP.Receive.Length = 4+tcpMsgLen;
+           
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *
+ */
+CREATE COMPUTE MODULE RequestForBilling_ConvertToBLOB
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE tcpHeader CHAR;
+		DECLARE tcpMsgLen INTEGER;
+		DECLARE tcpData BLOB ASBITSTREAM(InputRoot.XMLNSC CCSID 1208);
+		
+		SET tcpMsgLen = LENGTH(CAST(tcpData AS CHAR CCSID 1208)); 
+		SET tcpHeader = LEFT(CAST(tcpMsgLen AS CHAR) || '', 4);
+		SET OutputRoot.Properties.MessageFormat = 'BLOB';
+		--SET OutputRoot.BLOB.BLOB	=	CAST(tcpHeader AS BLOB CCSID 1208) || tcpData;
+		SET OutputRoot.BLOB.BLOB	=	tcpData;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForBilling_Compute
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+				
+		--SET OutputRoot.XMLNSC  = CAST(InputRoot.BLOB.BLOB AS CHAR CCSID 1208);
+		
+		CREATE FIRSTCHILD OF OutputRoot.XMLNSC 
+                  PARSE ( 
+                        InputRoot.BLOB.BLOB
+                        CCSID 1208
+                        OPTIONS FolderBitStream + ValidateNone);
+
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForBilling_ConvertMDO2Billing_BillingIPTInfoRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		 
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC'; 
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing';
+		
+		DECLARE len INTEGER LENGTH(inRoot.RqUID);
+				
+		DECLARE RUID CHARACTER;
+		
+		
+		/*IF len < 16 THEN   
+			WHILE(len <= 32) DO 
+				SET RUID = RUID || '0';
+				SET len = len + 1;
+			END WHILE;
+		END IF;*/	 
+		
+		SET RUID = REPLACE(inRoot.request.UID, '{',''); 
+		SET RUID = REPLACE(RUID, '}','');
+						
+		SET outRoot = inRoot.request;		
+		SET outRoot.(XMLNSC.Attribute)"UID" = RUID;		
+		
+		/*IF LENGTH(inRoot.request.UID) < 16 THEN 
+			SET outRoot.(XMLNSC.Attribute)"UID" 	 = ConvertToBilling(RUID);			
+		END IF; 
+		SET outRoot.(XMLNSC.Attribute)"DateTime" = inRoot.RqTm;*/
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForBilling_ConvertMDO2Billing_BillingIPTtoBilling
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		 
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC'; 
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing';
+		
+		DECLARE len INTEGER LENGTH(inRoot.RqUID);
+				
+		DECLARE RUID CHARACTER;
+		
+		
+		/*IF len < 16 THEN   
+			WHILE(len <= 32) DO 
+				SET RUID = RUID || '0';
+				SET len = len + 1;
+			END WHILE;
+		END IF;*/	 
+		
+		SET RUID = REPLACE(inRoot.request.UID, '{',''); 
+		SET RUID = REPLACE(RUID, '}','');
+						
+		SET outRoot = inRoot.request;		
+		SET outRoot.(XMLNSC.Attribute)"UID" = RUID;		
+		
+		/*IF LENGTH(inRoot.request.UID) < 16 THEN 
+			SET outRoot.(XMLNSC.Attribute)"UID" 	 = ConvertToBilling(RUID);			
+		END IF; 
+		SET outRoot.(XMLNSC.Attribute)"DateTime" = inRoot.RqTm;*/
+		RETURN TRUE;
+
+	END;
+END MODULE;
+
+
+/*
+ * 26.01.2016 Данный сервис предназначен на запрос биллинга от системы Masspay
+ */
+CREATE COMPUTE MODULE RequestForBilling_ConvertMDO2Billing_BillingMasspayInfoRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+					
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		 
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC'; 
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing';
+		
+		SET outRoot.(XMLNSC.Attribute)"UID"      = inRoot.Billing.(XMLNSC.Attribute)"UID";
+		SET outRoot.(XMLNSC.Attribute)"SystemId" = inRoot.Billing.(XMLNSC.Attribute)"SystemId";
+		
+		SET outRoot = inRoot.Billing;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

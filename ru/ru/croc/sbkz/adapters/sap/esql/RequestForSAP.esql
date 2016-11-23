@@ -1,0 +1,286 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sap.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+DECLARE XSD_DATE_TIME_FORMAT CONSTANT CHARACTER 'IU';
+
+/* Определение типа сообщения */
+CREATE COMPUTE MODULE SAP_RequestFoSAP_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZExpCurrencyRateRq' THEN
+			SET labelName = 'KZExpCurrencyRateRq';
+		WHEN 'KZExpPayDocRq' THEN
+			SET labelName = 'KZExpPayDocRq';
+		WHEN 'KZLegalExpPayDocStatusRq' THEN
+			SET labelName = 'KZLegalExpPayDocStatusRq';
+		WHEN 'KZSapDocsRq' THEN
+			SET labelName = 'KZSapDocsRq';
+		WHEN 'KZSAPSalaryRespRq' THEN
+			SET labelName = 'KZSAPSalaryRespRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown message format in RequestFoSAP', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE FileRequestForSAP_ConvertMDO_SAP_CurrencyRate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'File';
+		
+		SET outRef.(XMLNSC.Attribute)Type						= 'EXCHANGE_RATES';
+		SET outRef.(XMLNSC.Attribute)MSGUID                     = Environment.UserProperties.RqUID;		
+		SET outRef.ExchangeRates.(XMLNSC.Attribute)ToCurrency	= 'KZT';
+		SET outRef.ExchangeRates.(XMLNSC.Attribute)ValidFrom	= CAST(inRef.RqTm AS DATE FORMAT XSD_DATE_TIME_FORMAT);		
+
+		-- Копирование данных в формат SAP
+		DECLARE curElm REFERENCE TO outRef;
+		FOR curRate AS inRef.CurrRateData.CurrRate[] DO
+			
+			IF curRate.RateType = 'discount' THEN 
+			
+			CREATE LASTCHILD OF outRef.ExchangeRates AS curElm NAME 'Currency';
+	
+			SET curElm.FromCurrency 		= curRate.CurrCode;  -- Код исходной валюты
+			SET curElm.FromFactor    		= curRate.Scale;     -- Коэффициент пересчета ***Коэффициент для исходной валюты***
+			SET curElm.ToFactor   	        = '';                -- Коэффициент для целевой валюты 
+			SET curElm.Rate            		= curRate.RateValue; -- Курс пресчёта 
+			
+			END IF;			
+		END FOR;	
+
+		RETURN TRUE;
+	END;	
+END MODULE;
+
+
+CREATE COMPUTE MODULE FileRequestForSAP_ConvertMDO_SAP_PayDoc
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.[<];
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.FILE AS outRef;
+		
+		-- временная доработка по интеграции со старой Прагмой
+		IF inRef.SPName = 'ABPK' THEN
+			SET Environment.UserProperties.IsFromOldPragma = '1';
+		END IF;
+		
+		SET outRef.(XMLNSC.Attribute)TYPE = 'ABC_SAP_PAYMENT';
+		SET outRef.(XMLNSC.Attribute)MSGUID = Environment.UserProperties.RqUID;
+		
+		DECLARE outDOCUMENT REFERENCE TO outRef;
+		FOR inPayDoc AS inRef.PayDoc[] DO
+			DECLARE payerRnn CHARACTER;
+			FOR inOrgIdExt AS inPayDoc.PayerInfo.OrgInfo.OrgIdExt[] DO
+				IF inOrgIdExt.Key = 'RNN' THEN
+					SET payerRnn = inOrgIdExt.Value;
+				END IF;
+			END FOR;
+			DECLARE receiverRnn CHARACTER;
+			FOR inOrgIdExt AS inPayDoc.ReceiverInfo.OrgInfo.OrgIdExt[] DO
+				IF inOrgIdExt.Key = 'RNN' THEN
+					SET receiverRnn = inOrgIdExt.Value;
+				END IF;
+			END FOR;
+
+			DECLARE receiverPolRnn CHARACTER;
+			FOR inOrgIdExt AS inPayDoc.PayerPol.OrgInfo.OrgIdExt[] DO
+				IF inOrgIdExt.Key = 'RNN' THEN
+					SET receiverPolRnn = inOrgIdExt.Value;
+				END IF;
+			END FOR;
+
+			DECLARE receiverOtprRnn CHARACTER;
+			FOR inOrgIdExt AS inPayDoc.PayerOtpr.OrgInfo.OrgIdExt[] DO
+				IF inOrgIdExt.Key = 'RNN' THEN
+					SET receiverOtprRnn = inOrgIdExt.Value;
+				END IF;
+			END FOR;
+			
+			CREATE LASTCHILD OF outRef AS outDOCUMENT NAME 'DOCUMENT';
+			SET outDOCUMENT.(XMLNSC.Attribute)KOSTL				= '';
+			SET outDOCUMENT.(XMLNSC.Attribute)CONTRACT			= '';
+			SET outDOCUMENT.(XMLNSC.Attribute)HKONT_H			= inPayDoc.DocOper.CRAcctInfo.AcctId;
+			SET outDOCUMENT.(XMLNSC.Attribute)HKONT_S			= CASE 
+				WHEN inPayDoc.PayerInfo.AcctInfo.AcctId <> '' THEN inPayDoc.PayerInfo.AcctInfo.AcctId 
+				ELSE inPayDoc.DocOper.DBAcctInfo.AcctId
+			END;
+			SET outDOCUMENT.(XMLNSC.Attribute)ORDER				= inPayDoc.PayDocInfo.Assign;
+			SET outDOCUMENT.(XMLNSC.Attribute)WRBTR				= inPayDoc.DocOper.Amount;
+			SET outDOCUMENT.(XMLNSC.Attribute)WAERS				= IsoToCodCurSafe(COALESCE(inPayDoc.DocOper.DBAcctInfo.AcctCur, inPayDoc.DocOper.CRAcctInfo.AcctCur));
+			SET outDOCUMENT.(XMLNSC.Attribute)NAME_B			= FIELDVALUE(inPayDoc.ReceiverInfo.OrgInfo.*:Name);
+			SET outDOCUMENT.(XMLNSC.Attribute)NAME_A			= FIELDVALUE(inPayDoc.PayerInfo.OrgInfo.*:Name);
+			SET outDOCUMENT.(XMLNSC.Attribute)STCD_B			= receiverPolRnn; --receiverRnn;
+			SET outDOCUMENT.(XMLNSC.Attribute)STCD_A			= receiverOtprRnn; --payerRnn;
+
+			SET outDOCUMENT.(XMLNSC.Attribute)BANKN_B			= inPayDoc.PayerPol.AcctInfo.AcctId; 
+			SET outDOCUMENT.(XMLNSC.Attribute)BANKN_A			= inPayDoc.PayerOtpr.AcctInfo.AcctId;
+			
+			SET outDOCUMENT.(XMLNSC.Attribute)BANKL_B			= inPayDoc.PayerPol.BankInfo.*:BankId;
+			SET outDOCUMENT.(XMLNSC.Attribute)BANKL_A			= inPayDoc.PayerOtpr.BankInfo.*:BankId;
+			
+			SET outDOCUMENT.(XMLNSC.Attribute)BUDAT				= convertToSAPDate(inPayDoc.PayDocInfo.RefDate);
+			SET outDOCUMENT.(XMLNSC.Attribute)BLDAT				= convertToSAPDate(inPayDoc.PayDocInfo.DocDate);
+			SET outDOCUMENT.(XMLNSC.Attribute)XBLNR				= '';
+			SET outDOCUMENT.(XMLNSC.Attribute)BELNR_ABC_ST		= '';
+			SET outDOCUMENT.(XMLNSC.Attribute)BELNR_ABC			= inPayDoc.PayDocInfo.DocNum;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE FileRequestForSAP_ConvertMDO_SAP_PayDocStatus
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.[<];
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.FILE AS outRef;
+		
+		-- тип определяем по первому переданному статусу
+		SET outRef.(XMLNSC.Attribute)TYPE = CASE inRef.PayDocStatusInfo[>].Doc.PayDocInfo.DocType  
+				WHEN '6' THEN 'ABC_SAP_MO_STATUS'
+				WHEN '1' THEN 'ABC_SAP_PP_STATUS'
+				ELSE NULL
+		END;
+		SET outRef.(XMLNSC.Attribute)MSGUID = Environment.UserProperties.RqUID;
+		
+		DECLARE outSTATUS REFERENCE TO outRef;
+		FOR inPayDocStatusInfo AS inRef.PayDocStatusInfo[] DO
+			CREATE LASTCHILD OF outRef AS outSTATUS NAME 'STATUS';
+			SET outSTATUS.(XMLNSC.Attribute)TYPE		= CASE inPayDocStatusInfo.DocStatus WHEN '17041' THEN 'S' ELSE 'E' END;
+			SET outSTATUS.(XMLNSC.Attribute)MESSAGE		= inPayDocStatusInfo.Doc.PayDocInfo.Note;
+			SET outSTATUS.(XMLNSC.Attribute)BELNR_ABC	= inPayDocStatusInfo.Doc.PayDocInfo.DocRef;
+			SET outSTATUS.(XMLNSC.Attribute)BELNR		= inPayDocStatusInfo.Doc.PayDocInfo.DocNum;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE FileRequestForSAP_ConvertMDO_SAPSalaryResp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'FILE';
+		
+		SET outRef.(XMLNSC.Attribute)TYPE						= 'ABC_SAP_HRB_REESTR_STATUS';
+		SET outRef.(XMLNSC.Attribute)MSGUID                     = inRef.RqUID;
+		
+		DECLARE outSTATUS REFERENCE TO outRef;
+		FOR inPayDocStatusInfo AS inRef.PayDocStatusInfo[] DO
+			CREATE LASTCHILD OF outRef AS outSTATUS NAME 'STATUS';
+			SET outSTATUS.(XMLNSC.Attribute)BELNR		= inPayDocStatusInfo.BELNR;
+			SET outSTATUS.(XMLNSC.Attribute)BELNR_ABC	= inPayDocStatusInfo.BELNR_ABC;
+			SET outSTATUS.(XMLNSC.Attribute)TYPE		= CASE inPayDocStatusInfo.TYPE WHEN '17041' THEN 'S' ELSE 'E' END;
+			SET outSTATUS.(XMLNSC.Attribute)MESSAGE		= inPayDocStatusInfo.MESSAGE;--CASE inPayDocStatusInfo.TYPE WHEN '17041' THEN ' ' ELSE inPayDocStatusInfo.MESSAGE END;
+		END FOR;
+
+		RETURN TRUE;
+	END;	
+END MODULE;
+
+CREATE COMPUTE MODULE FileRequestForSAP_ConvertMDO_SapDocs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'FILE';
+		
+		SET outRef.(XMLNSC.Attribute)BUDAT						= CAST(CAST(Environment.UserProperties.BUDAT AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'dd.MM.yyyy');
+		SET outRef.(XMLNSC.Attribute)TYPE						= 'ABC_SAP_DOCS';
+		SET outRef.(XMLNSC.Attribute)MSGUID                     = inRef.RqUID;
+ 
+    	DECLARE outASD REFERENCE TO outRef;		
+		--FOR inAccount AS inRef.AccountStatement[] DO		
+		    CREATE LASTCHILD OF outRef AS outASD NAME 'BALANCE';			
+
+		    SET outASD.(XMLNSC.Attribute)HKONT    				= ' '; -- inAccount.HKONT;      -- Номер лицевого счета в АБС		
+/*
+    	    SET outASD.(XMLNSC.Attribute)WAERS    				= inAccount.WAERS;      -- Код валюты		
+	    	SET outASD.(XMLNSC.Attribute)BEGIN_S    		    = inAccount.BEGIN_S;    -- Сальдо на начало дня по Дебету
+		    SET outASD.(XMLNSC.Attribute)BEGIN_H    			= '0.0';                -- Сальдо на начало дня по Кредиту
+    		SET outASD.(XMLNSC.Attribute)TURNOVER_S  			= inAccount.TURNOVER_S; -- Оборот за день по Дебиту
+		    SET outASD.(XMLNSC.Attribute)TURNOVER_H  			= inAccount.TURNOVER_H; -- Оборот за день по Кредиту
+    		SET outASD.(XMLNSC.Attribute)END_S    				= inAccount.END_S;      -- Сальдо на конец дня по Дебету
+		    SET outASD.(XMLNSC.Attribute)END_H    				= '0.0';                -- Сальдо на конец дня по Кредиту		    
+		    SET outASD.(XMLNSC.Attribute)SIDE    				= inAccount.SIDE;       -- Тип счёта : активный/пассивный		    
+*/
+        --END FOR;	
+
+		    DECLARE outDOCUMENT REFERENCE TO outASD;
+			CREATE LASTCHILD OF outASD AS outDOCUMENT NAME 'DOCUMENT';
+			SET outDOCUMENT.(XMLNSC.Attribute)WAERS				= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)WRBTR_H			= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)WRBTR_S			= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)BELNR_ABC			= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)XBLNR				= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)USER				= ' ';
+		   
+			CREATE LASTCHILD OF outASD AS outDOCUMENT NAME 'DOCUMENT';
+			SET outDOCUMENT.(XMLNSC.Attribute)WAERS				= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)WRBTR_H			= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)WRBTR_S			= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)BELNR_ABC			= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)XBLNR				= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)USER				= ' ';
+		   
+			CREATE LASTCHILD OF outASD AS outDOCUMENT NAME 'DOCUMENT';
+			SET outDOCUMENT.(XMLNSC.Attribute)WAERS				= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)WRBTR_H			= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)WRBTR_S			= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)BELNR_ABC			= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)XBLNR				= ' ';
+			SET outDOCUMENT.(XMLNSC.Attribute)USER				= ' ';
+
+		IF inRef.Status.*:StatusCode <> '0' THEN
+			DECLARE outSTATUS REFERENCE TO outRef;
+			FOR inStatus AS inRef.Status[] DO
+				CREATE LASTCHILD OF outRef AS outSTATUS NAME 'STATUS';
+				SET outSTATUS.(XMLNSC.Attribute)TYPE		= 'E';
+				SET outSTATUS.(XMLNSC.Attribute)MESSAGE		= inRef.Status.*:StatusDesc;
+			END FOR;
+		END IF;		
+   
+		RETURN TRUE;
+	END;	
+END MODULE;
+

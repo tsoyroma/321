@@ -1,0 +1,41 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pragmanew.esql
+
+-- Namespace МДО
+DECLARE NS_MDO_BANKS CONSTANT CHARACTER 'http://sberbank.ru/dem/organizations/banks/15';
+DECLARE banks	NAMESPACE	NS_MDO_BANKS;
+DECLARE NS_MDO_INDS CONSTANT CHARACTER 'http://sberbank.ru/dem/individual/15';
+DECLARE inds	NAMESPACE	NS_MDO_INDS;
+DECLARE NS_MDO_IFXST CONSTANT CHARACTER 'http://sberbank.ru/dem/simpleTypes/15';
+DECLARE ifxst	NAMESPACE	NS_MDO_IFXST;
+DECLARE NS_MDO_IFX CONSTANT CHARACTER 'http://sberbank.ru/dem/ifxSimpleTypes/15';
+DECLARE	ifx		NAMESPACE 	NS_MDO_IFX;
+DECLARE NS_MDO_IFXCA CONSTANT CHARACTER 'http://sberbank.ru/dem/commonAggregates/15';
+DECLARE	ifxca	NAMESPACE 	NS_MDO_IFXCA;
+DECLARE NS_MDO_ORGS CONSTANT CHARACTER 'http://sberbank.ru/dem/organizations/15';
+DECLARE	orgs	NAMESPACE 	NS_MDO_ORGS;
+DECLARE NS_MDO_COMMONS CONSTANT CHARACTER 'http://sberbank.ru/dem/commonAggregates/18';
+DECLARE	commons	NAMESPACE 	NS_MDO_COMMONS;
+DECLARE NS_MDO_CARDS CONSTANT CHARACTER 'http://sberbank.ru/dem/ifxCards/18';
+DECLARE cards NAMESPACE NS_MDO_CARDS;
+
+-- Namespace Kolibri
+DECLARE MTBLITZ CONSTANT CHARACTER 'http://sberbank.ru/dem/moneytransfers/blitzAggregates/15';
+DECLARE mtblitz NAMESPACE MTBLITZ;
+
+DECLARE MT CONSTANT CHARACTER 'http://sberbank.ru/dem/moneytransfers/moneytransferAggregates/15';
+DECLARE mt NAMESPACE MT;
+
+DECLARE IAM CONSTANT CHARACTER 'http://sberbank.ru/dem/identityAggregates/15';
+DECLARE iam NAMESPACE IAM;
+
+DECLARE CA CONSTANT CHARACTER 'http://sberbank.ru/dem/commonAggregates/15';
+DECLARE ca NAMESPACE CA;
+
+DECLARE IND CONSTANT CHARACTER 'http://sberbank.ru/dem/individual/15';
+DECLARE ind NAMESPACE IND;
+
+DECLARE IFXDT CONSTANT CHARACTER 'http://sberbank.ru/dem/ifxDateTimeTypes/15';
+DECLARE ifxdt NAMESPACE IFXDT;
+
+DECLARE ST CONSTANT CHARACTER 'http://sberbank.ru/dem/simpleTypes/15';
+DECLARE st NAMESPACE ST;

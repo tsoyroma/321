@@ -1,0 +1,92 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.qiwi.esql
+
+PATH ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE SOAPRequestForESB_RestoreMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		SET OutputRoot = InputRoot;
+		
+		DECLARE inRef REFERENCE TO InputRoot;
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE env REFERENCE TO Environment;
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		
+		SET OutputRoot.HTTPInputHeader = null;
+		
+		SET Environment.UserProperties.ReplyIdentifier	= InputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier;
+	
+		DECLARE inBody REFERENCE TO InputRoot.XMLNSC.GetStatementsRequest;
+		
+		SET Environment.UserProperties.RqUID			= FIELDVALUE(inBody.(XMLNSC.Attribute)ID);
+		SET Environment.UserProperties.RqTm				= FIELDVALUE(inBody.(XMLNSC.Attribute)DateTime);
+		SET Environment.UserProperties.SPName			= 'BSS';
+		SET Environment.UserProperties.Operation	= 'AcctGetStatement';
+
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = Environment.UserProperties.Operation;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForESB_ConvertQIWI2QPRAGMA
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		SET OutputRoot.HTTPInputHeader = null;
+		SET OutputRoot.XMLNSC.GetStatementsRequest = NULL;
+		
+		DECLARE inBody REFERENCE TO InputRoot.XMLNSC.GetStatementsRequest;
+		
+		SET OutputRoot.XMLNSC.PragmaEnvelope VALUE = NULL;
+
+		DECLARE outBody REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		
+		
+		SET outBody.MessageUID VALUE = FIELDVALUE(inBody.(XMLNSC.Attribute)ID);
+		SET outBody.SystemCode VALUE = 'BSS';
+		SET outBody.ServiceCode VALUE = 'AcctGetStatement';
+		SET outBody.MessageDateTime VALUE = FIELDVALUE(inBody.(XMLNSC.Attribute)DateTime);
+		SET outBody.FilialCode VALUE = 'BSS 00';
+		
+		SET OutputRoot.XMLNSC.PragmaEnvelope.RequestData.AccountStatementRequests.AccountStatementRequest VALUE = NULL;
+		DECLARE refAccountStatementRequest REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope.RequestData.AccountStatementRequests.AccountStatementRequest;
+		
+		SET refAccountStatementRequest.Number VALUE = FIELDVALUE(inBody.account);
+		SET refAccountStatementRequest.StartDate VALUE = FIELDVALUE(inBody.dateFrom);
+		SET refAccountStatementRequest.EndDate VALUE = FIELDVALUE(inBody.dateTo);
+		SET refAccountStatementRequest.Extended VALUE = 'Y';
+		SET refAccountStatementRequest.Turnovers VALUE = 'Y';
+		
+		
+		--SET Environment.UserProperties.ReplyIdentifier	= InputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier;
+		--SET Environment.UserProperties.HTTPRequestIdentifier = CAST(InputLocalEnvironment.Destination.HTTP.RequestIdentifier AS CHARACTER);
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+  	
+	 	SET OutputRoot.MQRFH2.usr.TypeId		= 'urn:sbkztypes:esb:adapter';
+	 	SET OutputRoot.MQRFH2.usr.SystemId		= 'urn:sbkzsystems:newpragma';
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+

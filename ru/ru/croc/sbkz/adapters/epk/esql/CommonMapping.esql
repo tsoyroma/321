@@ -1,0 +1,1630 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.epk.esql
+
+PATH ru.croc.sbkz.utils;
+
+/*
+  Копирование данных из блока OrgInfo (MDO) в блок Client (MDM) 
+*/
+CREATE PROCEDURE CopyOrgInfo2Client(
+		IN inRef REFERENCE, 
+		IN outRef REFERENCE)
+BEGIN
+	DECLARE cifId CHARACTER NULL;
+	DECLARE filial CHARACTER NULL;
+	DECLARE surrogates ROW;
+	DECLARE orgIdRNN CHARACTER NULL;
+	DECLARE orgIdBIN CHARACTER NULL;
+	DECLARE unk CHARACTER NULL;
+	DECLARE okpo CHARACTER NULL;
+	
+	FOR orgId AS inRef.OrgIdExt[] DO
+		CASE
+		WHEN orgId.Key = 'CIF' THEN
+			SET cifId = orgId.Value;
+		WHEN isExchangeSystem(orgId.Key) THEN
+			SET surrogates.{orgId.Key} = orgId.Value;
+		WHEN orgId.Key = 'RNN' THEN
+			SET orgIdRNN = orgId.Value;
+		WHEN orgId.Key = 'BIN' THEN
+			SET orgIdBIN = orgId.Value;
+		WHEN orgId.Key = 'UNK' THEN
+			SET unk = orgId.Value;
+		WHEN orgId.Key = 'OKPO' THEN
+			SET okpo = orgId.Value;
+		END CASE;
+	END FOR;
+	
+	FOR branch AS inRef.Branches.Branch[] DO
+		IF branch.IsResp = 'T' THEN
+			SET filial = branch.BankInfo.*:BranchId;
+		END IF;
+	END FOR;
+	
+	SET outRef.CifId		= cifId;
+	SET outRef.ObjectType	= inRef.ObjectType;
+	SET outRef.IsDuplicate	= '';
+	SET outRef.Status		= inRef.IsClient;
+	SET outRef.Filial		= filial;
+	SET outRef.Department	= inRef.FirstContactBankInfo.*:BranchId;
+	SET outRef.Manager		= inRef.ABS;
+	SET outRef.DateCreated	= inRef.DateOpen;
+	SET outRef.UNK			= unk;
+	
+	CREATE FIELD outRef.Sources;
+	DECLARE outSource REFERENCE TO outRef;
+	FOR surrogate AS surrogates.*[] DO
+		CREATE LASTCHILD OF outRef.Sources AS outSource NAME 'Source';
+		SET outSource.Surrogate			= FIELDVALUE(surrogate);
+		SET outSource.ObjectType		= 'ORGANIZATION';
+		SET outSource.SourceSystemCode	= FIELDNAME(surrogate);
+		SET outSource.TimeStamp			= inRef.DTModify;
+		SET outSource.User				= '';
+	END FOR;
+	
+	CREATE FIELD outRef.Organization;
+	DECLARE outOrg REFERENCE TO outRef.Organization;
+	SET outOrg.Country 				= inRef.OrgAttr.Country;
+	SET outOrg.BIN 					= orgIdBIN;
+	SET outOrg.NameShort 			= inRef.OrgAttr.ShortName;
+	SET outOrg.NameFull 			= inRef.OrgAttr.FullName;
+	SET outOrg.RNN 					= orgIdRNN;
+	SET outOrg.NameLat 				= FIELDVALUE(inRef.*:LegalNameEn);
+	SET outOrg.NameChar 			= FIELDVALUE(inRef.*:LegalName);
+	SET outOrg.RegistrationDate 	= FIELDVALUE(inRef.*:EstablishDt);
+	SET outOrg.Form 				= FIELDVALUE(inRef.EmployerCode);
+	SET outOrg.CustStatus			= inRef.OrgAttr.CustomerStatus;
+	SET outOrg.Comment				= inRef.OrgAttr.Comment;
+	
+	IF EXISTS(inRef.Phones.Phone[]) OR EXISTS(inRef.EMails.EMail[]) THEN	
+		CREATE FIELD outRef.Reaches;
+		DECLARE outReach REFERENCE TO outRef.Reaches;
+		FOR inPhone AS inRef.Phones.Phone[] DO
+			CREATE LASTCHILD OF outRef.Reaches AS outReach NAME 'Reach';
+			SET outReach.Type			= recodeOrgContactTypeToEPK(inPhone.PhoneType);
+			SET outReach.Classifier		= inPhone.PhoneProvider;
+			SET outReach.Value			= inPhone.PhoneNum;
+			SET outReach.IsBlocked	= CAST(NOT CAST(inPhone.IsActive AS BOOLEAN) AS CHARACTER);
+			SET outReach.TimeStart		= inPhone.From;
+			SET outReach.TimeStop		= inPhone.Till;
+			SET outReach.IsAllowed		= inPhone.Allowed;
+		END FOR;
+		FOR inEMail AS inRef.EMails.EMail[] DO
+			CREATE LASTCHILD OF outRef.Reaches AS outReach NAME 'Reach';
+			SET outReach.Type			= 'email';
+			SET outReach.Value			= inEMail.EMailAddr;
+			SET outReach.IsBlocked	= CAST(NOT CAST(inEMail.Active AS BOOLEAN) AS CHARACTER);
+			SET outReach.IsAllowed		= inEMail.Allowed;
+		END FOR;
+	END IF;	
+	
+	FOR compInfo AS inRef.*:CompositeContactInfo[] DO		
+		IF compInfo.*:ContactInfoType = 'LegalAddress' THEN 
+			IF NOT EXISTS(outRef.Addresses[]) THEN
+				CREATE FIELD outRef.Addresses;
+			END IF;
+			DECLARE outAddr REFERENCE TO outRef.Addresses;
+			FOR inAddr AS compInfo.*:ContactInfo.*:PostAddr[] DO
+				CREATE LASTCHILD OF outRef.Addresses AS outAddr NAME 'Address';
+				SET outAddr.Type				= recodeOrgAddressTypeToEPK(inAddr.*:AddrType);
+				SET outAddr.Unstructured		= inAddr.*:Addr1;
+				SET outAddr.PostCode			= inAddr.*:PostalCode;
+				SET outAddr.Country				= inAddr.*:Country;
+				--SET outAddr.Region				= inAddr.*:StateProv;
+				SET outAddr.Region				= inAddr.*:County;
+				SET outAddr.District			= inAddr.*:StateProv;	
+				SET outAddr.City				= inAddr.*:City;
+				--SET outAddr.District			= inAddr.*:District;
+				SET outAddr.Street				= inAddr.*:Street;
+				SET outAddr.House				= inAddr.*:House;
+				SET outAddr.Building			= inAddr.*:Buiding;
+				SET outAddr.Apartment			= inAddr.*:Flat;
+			END FOR;
+		END IF;
+	END FOR;
+		
+	IF EXISTS(inRef.RelPersons.RelPerson[]) THEN
+		
+		DECLARE linkedSubjectId CHARACTER;
+		FOR inRelPersonId AS inRef.RelPersons.RelPersonId[] DO
+			IF inRelPersonId.Key = 'MABPK' THEN
+				SET linkedSubjectId	= inRelPersonId.Value;
+			END IF;
+		END FOR;
+		
+		CREATE FIELD outRef.Links;
+		DECLARE outLink REFERENCE TO outRef.Links;
+		FOR inRelPerson AS inRef.RelPersons.RelPerson[] DO
+			CREATE LASTCHILD OF outRef.Links AS outLink NAME 'Link';		
+			SET outLink.LinkedSurrogate			= linkedSubjectId;
+			SET outLink.LinkedObjectType		= recodeSubjectTypeToEPK(inRelPerson.SubjectType);
+			SET outLink.Type					= inRelPerson.RelationshipType;
+			SET outLink.Since					= inRelPerson.StartDate;
+			SET outLink.Until					= inRelPerson.EndDate;
+		END FOR;
+	END IF;
+
+	CREATE FIELD outRef.Procuracies;
+	DECLARE outProcuracy REFERENCE TO outRef.Procuracies;
+	FOR inAuthority AS inRef.AuthorityList.Authority[] DO
+		CREATE LASTCHILD OF outRef.Procuracies AS outProcuracy NAME 'Procuracy';
+		SET outProcuracy.IsActive			= inAuthority.IsActive;
+		SET outProcuracy.Number				= inAuthority.WarrantNumber;
+		SET outProcuracy.RegDate			= inAuthority.RegDate;
+		SET outProcuracy.IssueDate			= inAuthority.IssueDate;
+		SET outProcuracy.EndDate			= inAuthority.ExpDate;
+		DECLARE notaryCifId CHARACTER;
+		FOR inNotaryId AS inAuthority.NotaryInfo.NotaryId[] DO
+			IF inNotaryId.Key = 'CIF' THEN
+				SET notaryCifId	= inNotaryId.Value;
+			END IF;
+		END FOR;
+		SET outProcuracy.NotaryCifId			= notaryCifId;
+		SET outProcuracy.NotaryDate				= inAuthority.NotaryDate;
+		SET outProcuracy.NotaryAddress			= inAuthority.NotaryInfo.NotaryAddress;
+		SET outProcuracy.NotaryLicenseNumber	= inAuthority.NotaryInfo.NotaryLicense;
+		SET outProcuracy.NotaryLicenseIssued	= inAuthority.NotaryInfo.NotaryLicenseDate;
+		SET outProcuracy.NotaryPhone			= inAuthority.NotaryInfo.NotaryPhone;
+		SET outProcuracy.NotaryName				= inAuthority.NotaryInfo.NotaryName;
+		SET outProcuracy.NotaryObjectType		= inAuthority.NotaryInfo.ObjectType;
+	END FOR;
+
+	DECLARE managerPositionName CHARACTER;
+	DECLARE accountantPositionName CHARACTER;
+	DECLARE managerName CHARACTER;
+	DECLARE accountantName CHARACTER;
+
+	FOR inKeyPerson AS inRef.OrgAttr.KeyPerson[] DO
+		IF inKeyPerson.PositionKey = 'CHIEF' THEN
+			SET managerPositionName = FIELDVALUE(inKeyPerson.PersonInfo.ClientJobTitle);
+			SET managerName = FIELDVALUE(inKeyPerson.PersonInfo.*:FullName);
+		END IF;
+		IF inKeyPerson.PositionKey = 'ACC' THEN
+			SET accountantPositionName = FIELDVALUE(inKeyPerson.PersonInfo.ClientJobTitle);
+			SET accountantName = FIELDVALUE(inKeyPerson.PersonInfo.*:FullName);
+		END IF;
+	END FOR;
+
+	CREATE FIELD outRef.Signs;
+	DECLARE outSign REFERENCE TO outRef.Signs;
+
+	FOR inBranch AS inRef.Branches.Branch[] DO
+		IF inBranch.BankInfo.banks:BranchId <> '' THEN
+			CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+			SET outSign.Type = 'BranchList';
+			SET outSign.Value = inBranch.BankInfo.banks:BranchId;
+		END IF;
+	END FOR;
+	
+	IF inRef.OrgAttr.Segment <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Segment';
+		SET outSign.Value = inRef.OrgAttr.Segment;
+	END IF;
+	IF inRef.OrgAttr.EcActivityCode <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'EconomicActivityCode';
+		SET outSign.Value = inRef.OrgAttr.EcActivityCode;
+	END IF;
+	IF inRef.OrgAttr.Category <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Category';
+		SET outSign.Value = inRef.OrgAttr.Category;
+	END IF;
+	IF inRef.OrgAttr.EcSector <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'EconomicSector';
+		SET outSign.Value = inRef.OrgAttr.EcSector;
+	END IF;
+	IF inRef.OrgAttr.Group <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Group';
+		SET outSign.Value = inRef.OrgAttr.Group;
+	END IF;
+	IF inRef.*:NumEmployees <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'NumEmployees';
+		SET outSign.Value = inRef.*:NumEmployees;
+	END IF;
+	IF inRef.OrgAttr.HoldingMembership <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Holding';
+		SET outSign.Value = inRef.OrgAttr.HoldingMembership;
+	END IF;
+	IF inRef.OrgAttr.Rating <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Rating';
+		SET outSign.Value = inRef.OrgAttr.Rating;
+	END IF;
+	IF inRef.OrgAttr.Region <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'RegionCode';
+		SET outSign.Value = inRef.OrgAttr.Region;
+	END IF;
+	IF managerPositionName <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'ManagerPositionName';
+		SET outSign.Value = managerPositionName;
+	END IF;
+	IF accountantPositionName <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'AccountantPositionName';
+		SET outSign.Value = accountantPositionName;
+	END IF;
+	IF managerName <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'ManagerName';
+		SET outSign.Value = managerName;
+	END IF;
+	IF accountantName <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'AccountantName';
+		SET outSign.Value = accountantName;
+	END IF;
+	IF inRef.OrgAttr.DocRegNum <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'RegistrationNumber';
+		SET outSign.Value = inRef.OrgAttr.DocRegNum;
+	END IF;
+	IF inRef.OrgAttr.DocRegPlace <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'RegistrationIssuer';
+		SET outSign.Value = inRef.OrgAttr.DocRegPlace;
+	END IF;
+	IF inRef.OrgAttr.EcActivity <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'EconomicActivity';
+		SET outSign.Value = inRef.OrgAttr.EcActivity;
+	END IF;
+	IF okpo <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'OKPO';
+		SET outSign.Value = okpo;
+	END IF;
+	IF inRef.OrgAttr.Trademark <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Trademark';
+		SET outSign.Value = inRef.OrgAttr.Trademark;
+	END IF;
+	IF inRef.OrgAttr.RevenueInfo.Amount <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Revenue';
+		SET outSign.Value = inRef.OrgAttr.RevenueInfo.Amount;
+	END IF;
+	IF inRef.OrgAttr.RevenueInfo.AmtCurr <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'RevenueCurrency';
+		SET outSign.Value = inRef.OrgAttr.RevenueInfo.AmtCurr;
+	END IF;
+	IF inRef.OrgAttr.GeoCode <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'GeoCode';
+		SET outSign.Value = inRef.OrgAttr.GeoCode;
+	END IF;
+	IF inRef.OrgAttr.Holding <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'HoldingCode';
+		SET outSign.Value = inRef.OrgAttr.Holding;
+	END IF;
+	IF inRef.IsBank <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'IsBank';
+		SET outSign.Value = inRef.IsBank;
+	END IF;
+	IF inRef.OrgAttr.FullNameKz <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'FullNameKaz';
+		SET outSign.Value = inRef.OrgAttr.FullNameKz;
+	END IF;
+	IF inRef.OrgAttr.ShortNameKz <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'ShortNameKaz';
+		SET outSign.Value = inRef.OrgAttr.ShortNameKz;
+	END IF;
+	IF inRef.IsEnt <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'IsEntrepreneur';
+		SET outSign.Value = inRef.IsEnt;
+	END IF;
+	IF inRef.FirstContactBankInfo.banks:BranchName <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'BankBranchName';
+		SET outSign.Value = inRef.FirstContactBankInfo.banks:BranchName;
+	END IF;
+	IF inRef.OrgAttr.DateReReg <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'SecondaryRegistrationDate';
+		SET outSign.Value = inRef.OrgAttr.DateReReg;
+	END IF;
+	
+	IF EXISTS(inRef.Signs.Sign[]) THEN 
+		FOR inSign AS inRef.Signs.Sign[] DO
+			IF checkSignType(inSign.SignType) THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+				SET outSign.Type					= inSign.SignType;
+				SET outSign.Id						= inSign.SignId;
+				SET outSign.Since					= inSign.StartDate;
+				SET outSign.Until					= inSign.EndDate;
+				SET outSign.Value					= inSign.Value;
+			END IF;
+		END FOR;
+	END IF;
+	
+	IF NOT EXISTS(outRef.Signs.*[]) THEN
+		SET outRef.Signs = NULL;
+	END IF;
+END; /* PROCEDURE CopyOrgInfo2Client */ 
+
+/*
+  Копирование данных из блока Client (MDM) в блок OrgInfo (MDO)
+*/
+CREATE PROCEDURE CopyClient2OrgInfo(
+		IN inRef REFERENCE, 
+		IN outRef REFERENCE)
+BEGIN
+	
+	DECLARE numEmployees CHARACTER;
+	DECLARE okpo CHARACTER;
+	DECLARE managerName CHARACTER;
+	DECLARE managerPositionName CHARACTER;
+	DECLARE accountantName CHARACTER;
+	DECLARE accountantPositionName CHARACTER;
+	DECLARE economicSector CHARACTER;
+	DECLARE regionCode CHARACTER;
+	DECLARE registrationNumber CHARACTER;
+	DECLARE registrationIssuer CHARACTER;
+	DECLARE geoCode CHARACTER;
+	DECLARE trademark CHARACTER;
+	DECLARE holdingCode CHARACTER;
+ 	DECLARE revenue CHARACTER;
+	DECLARE revenueCurrency CHARACTER;
+	DECLARE segment CHARACTER;
+	DECLARE economicActivity CHARACTER;
+	DECLARE category CHARACTER;
+	DECLARE group CHARACTER;
+ 	DECLARE rating CHARACTER;
+	DECLARE economicActivityCode CHARACTER;
+	DECLARE holding CHARACTER;
+	DECLARE secondaryRegistrationDate CHARACTER;
+	DECLARE resident CHARACTER;
+	DECLARE url CHARACTER;
+	
+	FOR inSign AS inRef.Signs.Sign[] DO
+		IF inSign.Type = 'Resident' THEN
+			SET resident = inSign.Value;
+		END IF;
+		IF inSign.Type = 'URL' THEN
+			SET url = inSign.Value;	
+		END IF;
+		IF inSign.Type = 'Segment' THEN
+			SET segment = inSign.Value;
+		END IF;			
+		IF inSign.Type = 'NumEmployees' THEN
+			SET numEmployees = inSign.Value;
+		END IF;
+		IF inSign.Type = 'OKPO' THEN
+			SET okpo = inSign.Value;
+		END IF;
+		IF inSign.Type = 'ManagerName' THEN
+			SET managerName = inSign.Value;
+		END IF;
+		IF inSign.Type = 'ManagerPositionName' THEN
+			SET managerPositionName = inSign.Value;
+		END IF;
+		IF inSign.Type = 'AccountantName' THEN
+			SET accountantName = inSign.Value;
+		END IF;
+		IF inSign.Type = 'AccountantPositionName' THEN
+			SET accountantPositionName = inSign.Value;
+		END IF;
+		IF inSign.Type = 'EconomicSector' THEN
+			SET economicSector = inSign.Value;
+		END IF;
+		IF inSign.Type = 'RegionCode' THEN
+			SET regionCode = inSign.Value;
+		END IF;
+		IF inSign.Type = 'RegistrationNumber' THEN
+			SET registrationNumber = inSign.Value;
+		END IF;
+		IF inSign.Type = 'RegistrationIssuer' THEN
+			SET registrationIssuer = inSign.Value;
+		END IF;
+		IF inSign.Type = 'GeoCode' THEN
+			SET geoCode = inSign.Value;
+		END IF;
+		IF inSign.Type = 'Trademark' THEN
+			SET trademark = inSign.Value;
+		END IF;
+		IF inSign.Type = 'HoldingCode' THEN
+			SET holdingCode = inSign.Value;
+		END IF;
+		IF inSign.Type = 'Revenue' THEN
+			SET revenue = inSign.Value;
+		END IF;
+		IF inSign.Type = 'RevenueCurrency' THEN
+			SET revenueCurrency = inSign.Value;
+		END IF;
+		IF inSign.Type = 'Segment' THEN
+			SET segment = inSign.Value;
+		END IF;
+		IF inSign.Type = 'EconomicActivity' THEN
+			SET economicActivity = inSign.Value;
+		END IF;
+		IF inSign.Type = 'Category' THEN
+			SET category = inSign.Value;
+		END IF;
+		IF inSign.Type = 'Group' THEN
+			SET group = inSign.Value;
+		END IF;
+		IF inSign.Type = 'Rating' THEN
+			SET rating = inSign.Value;
+		END IF;
+		IF inSign.Type = 'EconomicActivityCode' THEN
+			SET economicActivityCode = inSign.Value;
+		END IF;
+		IF inSign.Type = 'Holding' THEN
+			SET holding = inSign.Value;
+		END IF;
+		IF inSign.Type = 'SecondaryRegistrationDate' THEN
+			SET secondaryRegistrationDate = inSign.Value;
+		END IF;
+	END FOR;
+	
+	SET outRef.orgs:Name 			= inRef.Organization.NameChar;
+	SET outRef.orgs:LegalName 		= inRef.Organization.NameChar;
+	SET outRef.orgs:LegalNameEn		= inRef.Organization.NameLat;
+	
+	
+	IF EXISTS(inRef.Addresses.Address[]) THEN
+		CREATE FIELD outRef.orgs:CompositeContactInfo;
+		SET outRef.orgs:CompositeContactInfo.ifxca:ContactInfoType = 'LegalAddress';
+		CREATE FIELD outRef.orgs:CompositeContactInfo.ifxca:ContactInfo;
+		DECLARE outAddr REFERENCE TO outRef;
+		FOR inAddr AS inRef.Addresses.Address[] DO  
+			CREATE LASTCHILD OF outRef.orgs:CompositeContactInfo.ifxca:ContactInfo AS outAddr NAMESPACE ifxca NAME 'PostAddr';
+			SET outAddr.ifxca:Addr1			= inAddr.Unstructured;
+			SET outAddr.ifxca:City			= inAddr.City;
+			SET outAddr.ifxca:StateProv		= inAddr.Region;
+			SET outAddr.ifxca:PostalCode	= inAddr.PostCode;
+			SET outAddr.ifxca:Country		= inAddr.Country;
+			SET outAddr.ifxca:AddrType		= recodeOrgAddressTypeFromEPK(inAddr.Type);
+			SET outAddr.ifxca:District		= inAddr.District;
+			SET outAddr.ifxca:Street		= inAddr.Street;
+			SET outAddr.ifxca:House			= inAddr.House;
+			SET outAddr.ifxca:Building		= inAddr.Building;
+			SET outAddr.ifxca:Flat			= inAddr.Apartment;
+		END FOR;
+	END IF;
+	
+	SET outRef.orgs:EstablishDt		= inRef.Organization.RegistrationDate;
+	SET outRef.orgs:NumEmployees	= numEmployees;
+	
+	DECLARE orgId REFERENCE TO outRef;
+	
+	CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+	SET orgId.Key 	= 'CIF';
+	SET orgId.Value = inRef.CifId;
+	IF inRef.Organization.BIN <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'BIN';
+		SET orgId.Value = inRef.Organization.BIN;
+	END IF;
+	IF inRef.Organization.RNN <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'RNN';
+		SET orgId.Value = inRef.Organization.RNN;
+	END IF;
+	IF inRef.UNK <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'UNK';
+		SET orgId.Value = inRef.UNK;
+	END IF;
+	IF okpo <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'OKPO';
+		SET orgId.Value = okpo;
+	END IF;
+	
+	FOR inSource AS inRef.Sources.Source[] DO
+		IF inSource.ObjectType = 'ORGANIZATION' THEN
+			CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+			SET orgId.Key		= inSource.SourceSystemCode;
+			SET orgId.Value		= inSource.Surrogate;
+		END IF;
+	END FOR;	
+	
+	SET outRef.OrgAttr.KeyPerson[1].PositionKey						= 'CHIEF';
+	SET outRef.OrgAttr.KeyPerson[1].PersonInfo.inds:NameAddrType	= 'Customer';
+	SET outRef.OrgAttr.KeyPerson[1].PersonInfo.inds:FullName		= managerName;
+	SET outRef.OrgAttr.KeyPerson[1].PersonInfo.ClientJobTitle		= managerPositionName;
+	SET outRef.OrgAttr.KeyPerson[2].PositionKey						= 'ACC';
+	SET outRef.OrgAttr.KeyPerson[2].PersonInfo.inds:NameAddrType	= 'Customer';
+	SET outRef.OrgAttr.KeyPerson[2].PersonInfo.inds:FullName		= accountantName;
+	SET outRef.OrgAttr.KeyPerson[2].PersonInfo.ClientJobTitle		= accountantPositionName;
+
+	SET outRef.OrgAttr.EcSector				= economicSector;
+	SET outRef.OrgAttr.Country 				= inRef.Organization.Country;
+	SET outRef.OrgAttr.NameRegulation 		= inRef.Organization.NameChar;
+	SET outRef.OrgAttr.Form					= inRef.Organization.Form;
+	SET outRef.OrgAttr.ShortName			= inRef.Organization.NameShort;
+
+	SET outRef.OrgAttr.FullNameKz			= inRef.FullNameKaz;
+	SET outRef.OrgAttr.ShortNameKz			= inRef.ShortNameKaz;
+	SET outRef.OrgAttr.Region				= regionCode;
+	SET outRef.OrgAttr.DocRegNum			= registrationNumber;
+	SET outRef.OrgAttr.DocRegPlace			= registrationIssuer;
+	SET outRef.OrgAttr.DateReReg			= secondaryRegistrationDate;
+	SET outRef.OrgAttr.GeoCode				= geoCode;
+	SET outRef.OrgAttr.Trademark			= trademark;
+	SET outRef.OrgAttr.Holding				= holdingCode;
+
+	SET outRef.OrgAttr.RevenueInfo.Amount	= revenue;
+	SET outRef.OrgAttr.RevenueInfo.AmtCurr	= revenueCurrency;
+
+	SET outRef.OrgAttr.Segment				= segment;
+	SET outRef.OrgAttr.EcActivity			= economicActivity;
+	SET outRef.OrgAttr.Category				= category;
+	SET outRef.OrgAttr.Group				= group;
+	SET outRef.OrgAttr.Rating				= rating;
+	SET outRef.OrgAttr.EcActivityCode		= economicActivityCode;
+	SET outRef.OrgAttr.HoldingMembership	= holding;
+	SET outRef.OrgAttr.FullName				= inRef.Organization.NameFull;
+	SET outRef.OrgAttr.CustomerStatus		= inRef.Organization.CustStatus;
+	SET outRef.OrgAttr.Comment				= inRef.Organization.Comment;
+	SET outRef.OrgAttr.Form					= inRef.Organization.Form;
+	SET outRef.OrgAttr.Resident				= resident;
+	SET outRef.OrgAttr.URL					= url;
+	SET outRef.OrgAttr.NumEmployees			= numEmployees;
+
+	IF NOT EXISTS(outRef.OrgAttr.*[]) THEN
+		SET outRef.OrgAttr = NULL;
+	END IF;
+	
+	SET outRef.FirstContactBankInfo.banks:BranchId		= inRef.Department;
+	SET outRef.FirstContactBankInfo.banks:BranchName	= inRef.BranchName;
+	IF NOT EXISTS(outRef.FirstContactBankInfo.*:*[]) THEN
+		SET outRef.FirstContactBankInfo = NULL;
+	END IF;
+
+	SET outRef.ABSManager 						   = inRef.Manager;
+	
+	DECLARE branchRef REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef NAME 'Branches';
+	IF inRef.Filial <> '' THEN
+		CREATE LASTCHILD OF outRef.Branches AS branchRef NAME 'Branch';
+		--SET branchRef.BankInfo.banks:BranchId		= inRef.Filial;
+		SET branchRef.BankInfo.banks:BranchId		= inRef.Department; -- u00671 04/09/2014
+		SET branchRef.IsResp						= 'T';
+	END IF;
+	FOR inSign AS inRef.Signs.Sign[] DO
+		IF inSign.Type = 'BranchList' AND inSign.Value <> COALESCE(inRef.Filial, '') THEN
+			CREATE LASTCHILD OF outRef.Branches AS branchRef NAME 'Branch';
+			SET branchRef.BankInfo.banks:BranchId	= inSign.Value;
+			SET branchRef.IsResp					= 'F';
+		END IF;
+	END FOR;
+	IF NOT EXISTS(outRef.Branches.*[]) THEN
+		SET outRef.Branches = NULL;
+	END IF;
+	
+	SET outRef.DateOpen 					= inRef.DateCreated;
+	-- !TODO
+	-- SET outRef.DTModify						= ???;
+	
+	FOR reach AS inRef.Reaches.Reach[] DO
+		IF reach.Type <> 'email' and reach.Type <> 'www' THEN
+			IF NOT EXISTS(outRef.Phones[]) THEN
+				CREATE LASTCHILD OF outRef NAME 'Phones';				
+			END IF;
+			DECLARE outPhone REFERENCE TO outRef.Phones;
+			CREATE LASTCHILD OF outRef.Phones AS outPhone NAME 'Phone';
+			SET outPhone.PhoneType		= recodeOrgContactTypeFromEPK(reach.Type);
+			SET outPhone.PhoneNum		= reach.Value;
+			SET outPhone.Allowed		= reach.IsAllowed;
+			SET outPhone.From			= reach.TimeStart;
+			SET outPhone.Till			= reach.TimeStop;
+			SET outPhone.PhoneProvider	= reach.Classifier;
+			SET outPhone.IsActive		= CAST(NOT CAST(reach.IsBlocked AS BOOLEAN) AS CHARACTER);
+		END IF;
+	END FOR;
+	
+	IF EXISTS(inRef.Links.Link[]) THEN
+		CREATE FIELD outRef.RelPersons;
+		DECLARE outRelPerson REFERENCE TO outRef.RelPersons;
+		FOR inLink AS inRef.Links.Link[] DO  
+			CREATE LASTCHILD OF outRef.RelPersons AS outRelPerson NAME 'RelPerson';
+			
+			SET outRelPerson.RelPerson.Key	= 'MABPK';
+			SET outRelPerson.RelPerson.Value	= inLink.LinkedSubjectId;
+			
+			SET outRelPerson.RelationshipType		= parseEPKLinkType(inLink.LinkType);
+			SET outRelPerson.RelationshipSubType	= parseEPKLinkSubType(inLink.LinkType);
+			SET outRelPerson.SubjectType			= recodeSubjectTypeFromEPK(inLink.LinkedObjectType);
+			SET outRelPerson.StartDate				= inLink.StartDate;
+			SET outRelPerson.EndDate				= inLink.FinishDate;
+		END FOR;
+	END IF;
+	
+	SET outRef.IsClient	= inRef.Status;
+	
+	FOR reach AS inRef.Reaches.Reach[] DO
+		IF reach.Type = 'email' THEN
+			IF NOT EXISTS(outRef.EMails[]) THEN
+				CREATE LASTCHILD OF outRef NAME 'EMails';
+			END IF;
+			DECLARE outEMail REFERENCE TO outRef.EMails;
+			CREATE LASTCHILD OF outRef.EMails AS outEMail NAME 'EMail';
+			SET outEMail.EMailAddr		= reach.Value;
+			SET outEMail.Active			= CAST(NOT CAST(reach.IsBlocked AS BOOLEAN) AS CHARACTER);
+			SET outEMail.Allowed		= reach.IsAllowed;
+		END IF;
+	END FOR;
+	
+	IF EXISTS(inRef.Signs.Sign[]) THEN 
+		CREATE FIELD outRef.Signs;
+		DECLARE outSign REFERENCE TO outRef.Signs;
+		FOR inSign AS inRef.Signs.Sign[] DO
+			IF checkSignType(inSign.Type) THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+				SET outSign.SignType					= inSign.Type;
+				SET outSign.SignId						= inSign.Id;
+				SET outSign.StartDate					= inSign.Since;
+				SET outSign.EndDate						= inSign.Until;
+				SET outSign.Value						= inSign.Value;
+			END IF;
+		END FOR;
+	END IF;
+	
+	SET outRef.IsEnt	= 	inRef.IsEntrepreneur;
+	SET outRef.IsBank	= 	inRef.IsBank;
+
+	IF EXISTS(inRef.Procuracies.Procuracy[]) THEN
+		CREATE FIELD outRef.AuthorityList;
+	END IF;
+	DECLARE outAuthority REFERENCE TO outRef;
+	FOR inProcuracy AS inRef.Procuracies.Procuracy[] DO
+		CREATE LASTCHILD OF outRef.AuthorityList AS outAuthority NAME 'Authority';
+		SET outAuthority.IsActive		= inProcuracy.IsActive;
+		SET outAuthority.WarrantNumber	= inProcuracy.Number;
+		SET outAuthority.RegDate		= inProcuracy.RegDate;
+		SET outAuthority.IssueDate		= inProcuracy.IssueDate;
+		SET outAuthority.ExpDate		= inProcuracy.EndDate;
+		
+		SET outAuthority.NotaryInfo.NotaryName			= inProcuracy.NotaryName;
+		SET outAuthority.NotaryInfo.NotaryAddress		= inProcuracy.NotaryAddress;
+		SET outAuthority.NotaryInfo.NotaryLicense		= inProcuracy.NotaryLicenseNumber;
+		SET outAuthority.NotaryInfo.NotaryLicenseDate	= inProcuracy.NotaryLicenseIssued;
+		SET outAuthority.NotaryInfo.NotaryPhone			= inProcuracy.NotaryPhone;
+		IF NOT EXISTS(outAuthority.NotaryInfo.*[]) THEN
+			SET outAuthority.NotaryInfo = NULL;
+		END IF;
+
+		SET outAuthority.ObjectType		= inProcuracy.NotaryObjectType;
+	END FOR;
+	
+END;
+
+CREATE FUNCTION checkSignType (IN signType CHARACTER) RETURNS BOOLEAN
+BEGIN
+	IF signType NOT IN (
+		'BranchList',
+		'Segment',
+		'EconomicActivityCode',
+		'Category',
+		'EconomicSector',
+		'Group',
+		'NumEmployees',
+		'Holding',
+		'Rating',
+		'RegionCode',
+		'ManagerPositionName',
+		'AccountantPositionName',
+		'ManagerName',
+		'AccountantName',
+		'RegistrationNumber',
+		'RegistrationIssuer',
+		'EconomicActivity',
+		'OKPO',
+		'Trademark',
+		'Revenue',
+		'RevenueCurrency',
+		'GeoCode',
+		'HoldingCode',
+		'IsBank',
+		'FullNameKaz',
+		'ShortNameKaz',
+		'IsEntrepreneur',
+		'BankBranchName',
+		'SecondaryRegistrationDate' ) THEN
+		RETURN TRUE;
+	END IF;
+	
+	RETURN FALSE;
+END;
+
+/*
+  Копирование данных из блока Client (MDM) в блок PersonInfo (MDO) 
+*/
+CREATE PROCEDURE CopyClient2PersonInfo(
+		IN inRef REFERENCE, 
+		IN outRef REFERENCE)
+BEGIN
+	DECLARE maritalStatus CHARACTER NULL;
+	DECLARE sic CHARACTER NULL;
+	DECLARE clientCategory CHARACTER NULL;
+	DECLARE isForeignPP CHARACTER NULL;
+	DECLARE segment CHARACTER NULL;
+	DECLARE clientJobTitle CHARACTER NULL;
+	DECLARE clientWorkPlaceCat CHARACTER NULL;
+	DECLARE clientWorkPlace CHARACTER NULL;
+	DECLARE branchList CHARACTER NULL;
+	DECLARE codeWord CHARACTER NULL;
+	DECLARE contactStatus CHARACTER NULL;
+	DECLARE workPositionType CHARACTER NULL; 
+	DECLARE statusVIP CHARACTER '2';
+	DECLARE statusLSBOO CHARACTER NULL;
+	DECLARE customerCat CHARACTER NULL;
+	
+	FOR inSign AS inRef.Signs.Sign[] DO
+		IF LOWER(inSign.Type) = 'maritalstatus' THEN
+			SET maritalStatus		= inSign.Value;
+		END IF;
+		IF LOWER(inSign.Type) = 'sic' THEN
+			SET sic					= inSign.Value;
+		END IF;
+		IF LOWER(inSign.Type) = 'category' THEN
+			SET clientCategory		= inSign.Value;
+		END IF;
+		IF LOWER(inSign.Type) = 'isforeignpublicperson' THEN
+			SET isForeignPP			= inSign.Value;
+		END IF;
+		IF LOWER(inSign.Type) = 'segment' THEN
+			SET segment				= inSign.Value;
+			IF LOWER(inSign.Value) = 'vip' THEN
+				SET statusVIP		= '1';
+			ELSE 
+				SET statusVIP		= '2';
+			END IF;
+		END IF;
+		IF LOWER(inSign.Type) = 'workpositionheld' THEN
+			SET clientJobTitle		= inSign.Value;
+		END IF;
+		IF LOWER(inSign.Type) = 'employercategory' THEN
+			SET clientWorkPlaceCat	= inSign.Value;
+		END IF;
+		IF LOWER(inSign.Type) = 'branchlist' THEN
+			SET branchList			= inSign.Value;
+		END IF;
+		IF LOWER(inSign.Type) = 'codeword' THEN
+			SET codeWord			= inSign.Value;
+		END IF;
+		IF LOWER(inSign.Type) = 'contactstatus' THEN
+			SET contactStatus		= inSign.Value;
+		END IF;
+		IF LOWER(inSign.Type) = 'workpositiontype' THEN
+			SET workPositionType	= inSign.Value;
+		END IF;
+		IF LOWER(inSign.Type) = 'workplace' THEN
+			SET clientWorkPlace		= inSign.Value;
+		END IF;
+		IF LOWER(inSign.Type) = 'customer_cat' THEN
+			SET customerCat = inSign.Value;			
+			IF LOWER(inSign.Value) = 'cso' THEN
+				SET statusLSBOO		= '1';
+			ELSE 
+				SET statusLSBOO		= '2';
+			END IF;
+		END IF;
+	END FOR;
+	
+	DECLARE surrogateMABPK CHARACTER NULL;
+	DECLARE surrogateWAY CHARACTER NULL;
+	DECLARE dtModify CHARACTER NULL;
+	FOR inSource AS inRef.Sources.Source[] DO
+		IF inSource.SourceSystemCode = 'MABPK' AND inSource.ObjectType = 'PERSON' THEN
+			SET surrogateMABPK	= inSource.Surrogate;
+			SET dtModify = inSource.TimeStamp;
+		END IF;
+		IF inSource.SourceSystemCode = 'WAY' AND inSource.ObjectType = 'PERSON' THEN
+			SET surrogateWAY	= inSource.Surrogate;
+		END IF;
+	END FOR;
+
+	SET outRef.inds:PersonName.inds:LastName	= inRef.Person.NameLast;
+	SET outRef.inds:PersonName.inds:FirstName	= inRef.Person.NameFirst;
+	SET outRef.inds:PersonName.inds:MiddleName	= inRef.Person.NameFather;
+
+	IF EXISTS(inRef.Addresses.Address[]) THEN
+		CREATE FIELD outRef.inds:ContactInfo;
+	END IF;
+	DECLARE outPostAddr REFERENCE TO outRef;
+	FOR inAddress AS inRef.Addresses.Address[] DO  
+		CREATE LASTCHILD OF outRef.inds:ContactInfo AS outPostAddr NAMESPACE ifxca NAME 'PostAddr';
+		SET outPostAddr.ifxca:Addr1			= inAddress.Unstructured;
+		SET outPostAddr.ifxca:City			= inAddress.City;
+---		SET outPostAddr.ifxca:StateProv		= inAddress.Region; 
+		SET outPostAddr.ifxca:County		= inAddress.Region; -- u00671 04/09/2014
+		SET outPostAddr.ifxca:PostalCode	= inAddress.PostCode;
+		SET outPostAddr.ifxca:Country		= inAddress.Country;
+		SET outPostAddr.ifxca:AddrType		= recodeAddressTypeFromEPK(inAddress.Type);
+		SET outPostAddr.ifxca:Region		= inAddress.District; -- u00671 04/09/2014
+		SET outPostAddr.ifxca:Street		= inAddress.Street;
+		SET outPostAddr.ifxca:House			= inAddress.House;
+		SET outPostAddr.ifxca:Building		= inAddress.Building;
+		SET outPostAddr.ifxca:Flat			= inAddress.Apartment;
+	END FOR;
+	
+	SET outRef.inds:BirthDt			= inRef.Person.BirthDate;
+	SET outRef.inds:Gender			= inRef.Person.Gender;
+	SET outRef.inds:MaritalStatus	= recodeMaritalStatusFromEPK(maritalStatus);
+	
+	IF EXISTS(inRef.Documents.Document[]) THEN
+		CREATE FIELD outRef.inds:IdentityCards;
+	END IF;
+	DECLARE outIdentityCard REFERENCE TO outRef;
+	FOR inDocument AS inRef.Documents.Document[] DO
+		CREATE LASTCHILD OF outRef.inds:IdentityCards AS outIdentityCard NAMESPACE inds NAME 'IdentityCard';
+		SET outIdentityCard.inds:IdType		= recodeDocumentTypeFromEPK(inDocument.Type);
+		SET outIdentityCard.inds:IdSeries	= inDocument.Series;
+		SET outIdentityCard.inds:IdNum		= inDocument.Number;
+		SET outIdentityCard.inds:IssueDt	= inDocument.DateIssued;
+		SET outIdentityCard.inds:IssuedBy	= inDocument.Issuer;
+		SET outIdentityCard.inds:Code		= inDocument.IssuerCode;
+		SET outIdentityCard.inds:ValidTo	= inDocument.DateValid;
+	END FOR;
+	IF NOT EXISTS(outRef.inds:IdentityCards.*:*[]) THEN
+		SET outRef.inds:IdentityCards	= NULL;
+	END IF;
+	
+	SET outRef.inds:BirthPlace		= inRef.Person.BirthPlace;
+	SET outRef.inds:Resident		= '';
+	SET outRef.inds:Citizenship		= inRef.Person.Country;
+	
+	DECLARE personId REFERENCE TO outRef;
+	IF surrogateMABPK <> '' THEN
+		CREATE LASTCHILD OF outRef AS personId NAME 'PersonIdExt';
+		SET personId.Key	= 'MABPK';
+		SET personId.Value	= surrogateMABPK;
+	END IF;
+	IF inRef.CifId <> '' THEN
+		CREATE LASTCHILD OF outRef AS personId NAME 'PersonIdExt';
+		SET personId.Key	= 'CIF';
+		SET personId.Value	= inRef.CifId;
+	END IF;
+	IF inRef.Person.IIN <> '' THEN
+		CREATE LASTCHILD OF outRef AS personId NAME 'PersonIdExt';
+		SET personId.Key	= 'IIN';
+		SET personId.Value	= inRef.Person.IIN;
+	END IF;
+	IF inRef.Person.RNN <> '' THEN
+		CREATE LASTCHILD OF outRef AS personId NAME 'PersonIdExt';
+		SET personId.Key	= 'RNN';
+		SET personId.Value	= inRef.Person.RNN;
+	END IF;
+	IF sic <> '' THEN
+		CREATE LASTCHILD OF outRef AS personId NAME 'PersonIdExt';
+		SET personId.Key	= 'SIC';
+		SET personId.Value	= sic;
+	END IF;
+	IF surrogateWAY <> '' THEN
+		CREATE LASTCHILD OF outRef AS personId NAME 'PersonIdExt';
+		SET personId.Key	= 'WAY';
+		SET personId.Value	= surrogateWAY;
+	END IF;
+	IF inRef.UNK <> '' THEN
+		CREATE LASTCHILD OF outRef AS personId NAME 'PersonIdExt';
+		SET personId.Key	= 'UNK';
+		SET personId.Value	= inRef.UNK;
+	END IF;
+	
+	FOR inSource AS inRef.Sources.Source[] DO
+		IF inSource.ObjectType = 'PERSON' AND inSource.SourceSystemCode NOT IN ('MABPK', 'WAY') THEN
+			CREATE LASTCHILD OF outRef AS personId NAME 'PersonIdExt';
+			SET personId.Key	= inSource.SourceSystemCode;
+			SET personId.Value	= inSource.Surrogate;
+		END IF;
+	END FOR;	
+	
+	SET outRef.ClientType			= '';
+	SET outRef.SecretWord			= codeWord;
+	SET outRef.Country				= inRef.Person.Country;
+	
+	IF EXISTS(inRef.Reaches.Reach[]) THEN
+		CREATE FIELD outRef.Phones;
+	END IF;
+	DECLARE outPhone REFERENCE TO outRef;
+	DECLARE emailAddr CHARACTER;
+	DECLARE emailIsActive CHARACTER;
+	DECLARE emailIsAllowed CHARACTER;
+	FOR inReach AS inRef.Reaches.Reach[] DO  
+		DECLARE recodedContactType CHARACTER recodeContactTypeFromEPK(inReach.Type);
+		
+		IF recodedContactType = 'email' THEN
+			SET emailAddr				= inReach.Value;
+			SET emailIsActive			= CAST(NOT CAST(inReach.IsBlocked AS BOOLEAN) AS CHARACTER);
+			SET emailIsAllowed			= inReach.IsAllowed;
+		ELSE
+			CREATE LASTCHILD OF outRef.Phones AS outPhone NAME 'Phone';
+			SET outPhone.PhoneType		= recodedContactType;
+			SET outPhone.PhoneNum		= inReach.Value;
+			SET outPhone.Allowed		= inReach.IsAllowed;
+			SET outPhone.From			= inReach.TimeStart;
+			SET outPhone.Till			= inReach.TimeStop;
+			SET outPhone.PhoneProvider	= inReach.Classifier;
+			SET outPhone.IsActive		= CAST(NOT CAST(inReach.IsBlocked AS BOOLEAN) AS CHARACTER);
+		END IF;
+	END FOR;
+	IF emailAddr <> '' THEN
+		SET outRef.EMails.EMail.EMailAddr	= emailAddr;
+		SET outRef.EMails.EMail.Active		= emailIsActive;
+		SET outRef.EMails.EMail.Allowed		= emailIsAllowed;
+	END IF;
+	
+	SET outRef.ClientCategory		= clientCategory;
+	SET outRef.LatLastName			= inRef.Person.NameLastLat;
+	SET outRef.LatFirstName			= combineFirstNames(inRef.Person.NameFirstLat, inRef.Person.NameFatherLat);
+	SET outRef.DateCreated 			= inRef.DateCreated;
+	
+	IF EXISTS(inRef.Links.Link[]) THEN
+		CREATE FIELD outRef.RelPersons;
+	END IF;
+	DECLARE outRelPerson REFERENCE TO outRef;
+	FOR inLink AS inRef.Links.Link[] DO  
+		CREATE LASTCHILD OF outRef.RelPersons AS outRelPerson NAME 'RelPerson';
+		
+		IF inLink.LinkedId <> '' THEN
+			SET outRelPerson.RelPersonId.Key	= 'MABPK';
+			SET outRelPerson.RelPersonId.Value	= inLink.LinkedId;
+		END IF;
+		
+		SET outRelPerson.RelationshipType		= parseEPKLinkType(inLink.LinkType);
+		SET outRelPerson.RelationshipSubType	= parseEPKLinkSubType(inLink.LinkType);
+		SET outRelPerson.SubjectType			= recodeSubjectTypeFromEPK(inLink.LinkedObjectType);
+		SET outRelPerson.StartDate				= inLink.Since;
+		SET outRelPerson.EndDate				= inLink.Until;
+	END FOR;
+	
+	IF inRef.Department <> '' THEN
+		SET outRef.FirstContactBankInfo.banks:BranchId = inRef.Department;
+	END IF;
+	
+	SET outRef.IsForeignPP			= isForeignPP;
+	SET outRef.PersonStatus			= contactStatus;
+	SET outRef.Segment				= segment;
+	SET outRef.StatDivision			= '';
+	SET outRef.ABSManager			= inRef.Manager;
+	
+	IF EXISTS(inRef.Procuracies.Procuracy[]) THEN
+		CREATE FIELD outRef.AuthorityList;
+	END IF;
+	DECLARE outAuthority REFERENCE TO outRef;
+	FOR inProcuracy AS inRef.Procuracies.Procuracy[] DO
+		CREATE LASTCHILD OF outRef.AuthorityList AS outAuthority NAME 'Authority';
+		SET outAuthority.IsActive		= inProcuracy.IsActive;
+		SET outAuthority.WarrantNumber	= inProcuracy.Number;
+		SET outAuthority.RegDate		= inProcuracy.RegDate;
+		SET outAuthority.IssueDate		= inProcuracy.IssueDate;
+		SET outAuthority.ExpDate		= inProcuracy.EndDate;
+		
+		SET outAuthority.NotaryInfo.NotaryName			= inProcuracy.NotaryName;
+		SET outAuthority.NotaryInfo.NotaryAddress		= inProcuracy.NotaryAddress;
+		SET outAuthority.NotaryInfo.NotaryLicense		= inProcuracy.NotaryLicenseNumber;
+		SET outAuthority.NotaryInfo.NotaryLicenseDate	= inProcuracy.NotaryIssued;
+		SET outAuthority.NotaryInfo.NotaryPhone			= inProcuracy.NotaryPhone;
+		IF NOT EXISTS(outAuthority.NotaryInfo.*[]) THEN
+			SET outAuthority.NotaryInfo = NULL;
+		END IF;
+
+		SET outAuthority.NotaryDate		= inProcuracy.NotaryDate;
+	END FOR;
+	
+	SET outRef.IsAccepted			= recodeAcceptanceStatusFromEPK(inRef.Status);
+	SET outRef.ClientJobTitle		= clientJobTitle;
+	SET outRef.ClientWorkPlace		= clientWorkPlace;
+	SET outRef.ClientWorkPlaceCat	= clientWorkPlaceCat;
+	SET outRef.DTModify				= dtModify;
+	
+	CREATE FIELD outRef.Branches;
+	DECLARE branchListRow ROW;
+	DECLARE branch CHARACTER;
+	WHILE LENGTH(branchList) > 0 DO
+		IF CONTAINS(branchList, ',') THEN
+			SET branch = SUBSTRING(branchList BEFORE ',');
+			SET branchList = SUBSTRING(branchList AFTER ',');
+		ELSE
+			SET branch = branchList;
+			SET branchList = '';
+		END IF;
+		CREATE LASTCHILD OF branchListRow NAME 'Row' VALUE branch;
+	END WHILE;
+	DECLARE outBranch REFERENCE TO outRef.Branches;
+	FOR inBranch AS branchListRow.*[] DO
+		CREATE LASTCHILD OF outRef.Branches AS outBranch NAME 'Branch';
+		SET outBranch.BankInfo.banks:BranchId = FIELDVALUE(inBranch);
+	END FOR;
+	IF NOT EXISTS(outRef.Branches.*[]) THEN
+		SET outRef.Branches = NULL;
+	END IF;
+
+	SET outRef.WorkPositionType		= workPositionType;
+
+	IF EXISTS(inRef.Signs.Sign[]) THEN
+		CREATE FIELD outRef.Signs;
+	END IF;
+	DECLARE outSign REFERENCE TO outRef;
+	FOR inSign AS inRef.Signs.Sign[] DO
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.SignType		= inSign.Type;
+		SET outSign.SignId			= inSign.Id;
+		SET outSign.StartDate		= inSign.Since;
+		SET outSign.EndDate			= inSign.Until;
+		SET outSign.Value			= inSign.Value;
+	END FOR;
+	IF NOT EXISTS(outRef.Signs.*[]) THEN
+		SET outRef.Signs		= NULL;
+	END IF;
+	
+	SET outRef.StatusVIP 			= statusVIP;
+	SET outRef.StatusLSBOO 			= statusLSBOO;
+	SET outRef.CustCategory 		= customerCat;
+	SET outRef.Comment		 		= inRef.Person.Comment;
+	
+END;
+
+/*
+  Копирование данных из блока Classifiers (MDM) в формат MDO
+*/
+CREATE PROCEDURE CopyClassifiersToMDO(
+		IN inRef REFERENCE, 
+		IN outRef REFERENCE)
+BEGIN
+	DECLARE cInfo REFERENCE TO outRef;
+	DECLARE dataRecord REFERENCE TO outRef;
+	DECLARE attr REFERENCE TO outRef;
+	
+	SET outRef.Date 					= inRef.Conditions.targetDate;
+	SET outRef.Closed					= recodeBooleanFromEPK(inRef.Conditions.includeClosed);
+		
+	FOR classifier AS inRef.Classifier[] DO
+		CREATE LASTCHILD OF outRef AS cInfo NAME 'ClassifierInfo';
+		SET cInfo.Code					= classifier.Code;
+		SET cInfo.ParentCode			= classifier.ParentCode;
+		FOR record AS classifier.Records.Record[] DO 
+			CREATE LASTCHILD OF cInfo AS dataRecord NAME 'DataRecord';
+			SET dataRecord.Code					= record.Code;
+			SET dataRecord.ParentCode			= record.ParentCode;
+			SET dataRecord.Name					= record.Name;
+			SET dataRecord.Value				= record.Value;				
+			SET dataRecord.OpenDate				= record.OpenDate;
+			SET dataRecord.IsClosed				= recodeBooleanFromEPK(record.IsClosed);
+			SET dataRecord.Note					= record.Note;
+			SET dataRecord.DiffCode				= record.DiffCode;				
+			SET dataRecord.Timestamp			= record.Timestamp;
+			FOR attribute AS record.Attributes.Attribute[] DO 
+				CREATE LASTCHILD OF dataRecord AS attr NAME 'Attr';
+				SET attr.Code					= attribute.Code;
+				SET attr.Value					= attribute.Value;
+				SET attr.OpenDate				= attribute.OpenDate;
+				SET attr.IsClosed				= recodeBooleanFromEPK(attribute.IsClosed);
+				SET attr.Note					= attribute.Note;
+				SET attr.DiffCode				= attribute.DiffCode;
+			END FOR;
+		END FOR;
+	END FOR;
+END;
+
+
+CREATE PROCEDURE CopyOrgSetDataRich(
+		IN inRef REFERENCE, 
+		IN outRef REFERENCE)
+BEGIN
+	DECLARE cifId CHARACTER NULL;
+	DECLARE filial CHARACTER NULL;
+	DECLARE surrogates ROW;
+	DECLARE orgIdRNN CHARACTER NULL;
+	DECLARE orgIdBIN CHARACTER NULL;
+	DECLARE unk CHARACTER NULL;
+	DECLARE okpo CHARACTER NULL;
+	
+	FOR orgId AS inRef.OrgIdExt[] DO
+		CASE
+		WHEN orgId.Key = 'CIF' THEN
+			SET cifId = orgId.Value;
+		WHEN isExchangeSystem(orgId.Key) THEN
+			SET surrogates.{orgId.Key} = orgId.Value;
+		WHEN orgId.Key = 'RNN' THEN
+			SET orgIdRNN = orgId.Value;
+		WHEN orgId.Key = 'BIN' THEN
+			SET orgIdBIN = orgId.Value;
+		WHEN orgId.Key = 'UNK' THEN
+			SET unk = orgId.Value;
+		WHEN orgId.Key = 'OKPO' THEN
+			SET okpo = orgId.Value;
+		END CASE;
+	END FOR;
+	
+	FOR branch AS inRef.Branches.Branch[] DO
+		IF branch.IsResp = 'T' THEN
+			SET filial = branch.BankInfo.*:BranchId;
+		END IF;
+	END FOR;
+	
+	SET outRef.CifId		= cifId;
+	SET outRef.ObjectType	= inRef.ObjectType;
+	SET outRef.IsDuplicate	= '';
+	SET outRef.Status		= inRef.IsClient;
+	SET outRef.Filial		= filial;
+	SET outRef.Department	= inRef.FirstContactBankInfo.*:BranchId;
+	SET outRef.Manager		= inRef.ABS;
+	SET outRef.DateCreated	= inRef.DateOpen;
+	SET outRef.UNK			= unk;
+
+	SET outRef.IsDuplicate	= ' ';
+	
+	CREATE FIELD outRef.Sources;
+	DECLARE outSource REFERENCE TO outRef;
+	FOR surrogate AS surrogates.*[] DO
+		CREATE LASTCHILD OF outRef.Sources AS outSource NAME 'Source';
+		SET outSource.Surrogate			= FIELDVALUE(surrogate);
+		SET outSource.ObjectType		= 'ORGANIZATION';
+		SET outSource.SourceSystemCode	= FIELDNAME(surrogate);
+		SET outSource.TimeStamp			= inRef.DTModify;
+		SET outSource.User				= '';
+	END FOR;
+	
+	CREATE FIELD outRef.Organization;
+	DECLARE outOrg REFERENCE TO outRef.Organization;
+	SET outOrg.Country 				= inRef.OrgAttr.Country;
+	SET outOrg.BIN 					= orgIdBIN;
+	SET outOrg.NameShort 			= inRef.OrgAttr.ShortName;
+	SET outOrg.NameFull 			= inRef.OrgAttr.FullName;
+	SET outOrg.RNN 					= orgIdRNN;
+	SET outOrg.NameLat 				= FIELDVALUE(inRef.*:LegalNameEn);
+	SET outOrg.NameChar 			= FIELDVALUE(inRef.*:LegalName);
+	SET outOrg.RegistrationDate 	= FIELDVALUE(inRef.*:EstablishDt);
+	SET outOrg.Form 				= FIELDVALUE(inRef.EmployerCode);
+	SET outOrg.CustStatus			= inRef.OrgAttr.CustomerStatus;
+	SET outOrg.Comment				= inRef.OrgAttr.Comment;
+	
+	IF EXISTS(inRef.Phones.Phone[]) OR EXISTS(inRef.EMails.EMail[]) THEN	
+		CREATE FIELD outRef.Reaches;
+		DECLARE outReach REFERENCE TO outRef.Reaches;
+		FOR inPhone AS inRef.Phones.Phone[] DO
+			CREATE LASTCHILD OF outRef.Reaches AS outReach NAME 'Reach';
+			SET outReach.Type			= recodeOrgContactTypeToEPK(inPhone.PhoneType);
+			SET outReach.Classifier		= inPhone.PhoneProvider;
+			SET outReach.Value			= inPhone.PhoneNum;
+			SET outReach.IsBlocked	= CAST(NOT CAST(inPhone.IsActive AS BOOLEAN) AS CHARACTER);
+			SET outReach.TimeStart		= inPhone.From;
+			SET outReach.TimeStop		= inPhone.Till;
+			SET outReach.IsAllowed		= inPhone.Allowed;
+		END FOR;
+		FOR inEMail AS inRef.EMails.EMail[] DO
+			CREATE LASTCHILD OF outRef.Reaches AS outReach NAME 'Reach';
+			SET outReach.Type			= 'email';
+			SET outReach.Value			= inEMail.EMailAddr;
+			SET outReach.IsBlocked	= CAST(NOT CAST(inEMail.Active AS BOOLEAN) AS CHARACTER);
+			SET outReach.IsAllowed		= inEMail.Allowed;
+		END FOR;
+	END IF;	
+	
+	FOR compInfo AS inRef.*:CompositeContactInfo[] DO		
+		IF compInfo.*:ContactInfoType = 'LegalAddress' THEN 
+			IF NOT EXISTS(outRef.Addresses[]) THEN
+				CREATE FIELD outRef.Addresses;
+			END IF;
+			DECLARE outAddr REFERENCE TO outRef.Addresses;
+			FOR inAddr AS compInfo.*:ContactInfo.*:PostAddr[] DO
+				CREATE LASTCHILD OF outRef.Addresses AS outAddr NAME 'Address';
+				SET outAddr.Type				= recodeOrgAddressTypeToEPK(inAddr.*:AddrType);
+				SET outAddr.Unstructured		= inAddr.*:Addr1;
+				SET outAddr.PostCode			= inAddr.*:PostalCode;
+				SET outAddr.Country				= inAddr.*:Country;
+				--SET outAddr.Region				= inAddr.*:StateProv;
+				SET outAddr.Region				= inAddr.*:County;
+				SET outAddr.District			= inAddr.*:StateProv;	
+				SET outAddr.City				= inAddr.*:City;
+				--SET outAddr.District			= inAddr.*:District;
+				SET outAddr.Street				= inAddr.*:Street;
+				SET outAddr.House				= inAddr.*:House;
+				SET outAddr.Building			= inAddr.*:Buiding;
+				SET outAddr.Apartment			= inAddr.*:Flat;
+			END FOR;
+		END IF;
+	END FOR;
+		
+	IF EXISTS(inRef.RelPersons.RelPerson[]) THEN
+		
+		DECLARE linkedSubjectId CHARACTER;
+		FOR inRelPersonId AS inRef.RelPersons.RelPersonId[] DO
+			IF inRelPersonId.Key = 'MABPK' THEN
+				SET linkedSubjectId	= inRelPersonId.Value;
+			END IF;
+		END FOR;
+		
+		CREATE FIELD outRef.Links;
+		DECLARE outLink REFERENCE TO outRef.Links;
+		FOR inRelPerson AS inRef.RelPersons.RelPerson[] DO
+			CREATE LASTCHILD OF outRef.Links AS outLink NAME 'Link';		
+			SET outLink.LinkedSurrogate			= linkedSubjectId;
+			SET outLink.LinkedObjectType		= recodeSubjectTypeToEPK(inRelPerson.SubjectType);
+			SET outLink.Type					= inRelPerson.RelationshipType;
+			SET outLink.Since					= inRelPerson.StartDate;
+			SET outLink.Until					= inRelPerson.EndDate;
+		END FOR;
+	END IF;
+
+	CREATE FIELD outRef.Procuracies;
+	DECLARE outProcuracy REFERENCE TO outRef.Procuracies;
+	FOR inAuthority AS inRef.AuthorityList.Authority[] DO
+		CREATE LASTCHILD OF outRef.Procuracies AS outProcuracy NAME 'Procuracy';
+		SET outProcuracy.IsActive			= inAuthority.IsActive;
+		SET outProcuracy.Number				= inAuthority.WarrantNumber;
+		SET outProcuracy.RegDate			= inAuthority.RegDate;
+		SET outProcuracy.IssueDate			= inAuthority.IssueDate;
+		SET outProcuracy.EndDate			= inAuthority.ExpDate;
+		DECLARE notaryCifId CHARACTER;
+		FOR inNotaryId AS inAuthority.NotaryInfo.NotaryId[] DO
+			IF inNotaryId.Key = 'CIF' THEN
+				SET notaryCifId	= inNotaryId.Value;
+			END IF;
+		END FOR;
+		SET outProcuracy.NotaryCifId			= notaryCifId;
+		SET outProcuracy.NotaryDate				= inAuthority.NotaryDate;
+		SET outProcuracy.NotaryAddress			= inAuthority.NotaryInfo.NotaryAddress;
+		SET outProcuracy.NotaryLicenseNumber	= inAuthority.NotaryInfo.NotaryLicense;
+		SET outProcuracy.NotaryLicenseIssued	= inAuthority.NotaryInfo.NotaryLicenseDate;
+		SET outProcuracy.NotaryPhone			= inAuthority.NotaryInfo.NotaryPhone;
+		SET outProcuracy.NotaryName				= inAuthority.NotaryInfo.NotaryName;
+		SET outProcuracy.NotaryObjectType		= inAuthority.NotaryInfo.ObjectType;
+	END FOR;
+
+	DECLARE managerPositionName CHARACTER;
+	DECLARE accountantPositionName CHARACTER;
+	DECLARE managerName CHARACTER;
+	DECLARE accountantName CHARACTER;
+
+	FOR inKeyPerson AS inRef.OrgAttr.KeyPerson[] DO
+		IF inKeyPerson.PositionKey = 'CHIEF' THEN
+			SET managerPositionName = FIELDVALUE(inKeyPerson.PersonInfo.ClientJobTitle);
+			SET managerName = FIELDVALUE(inKeyPerson.PersonInfo.*:FullName);
+		END IF;
+		IF inKeyPerson.PositionKey = 'ACC' THEN
+			SET accountantPositionName = FIELDVALUE(inKeyPerson.PersonInfo.ClientJobTitle);
+			SET accountantName = FIELDVALUE(inKeyPerson.PersonInfo.*:FullName);
+		END IF;
+	END FOR;
+
+	CREATE FIELD outRef.Signs;
+	DECLARE outSign REFERENCE TO outRef.Signs;
+
+	FOR inBranch AS inRef.Branches.Branch[] DO
+		IF inBranch.BankInfo.banks:BranchId <> '' THEN
+			CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+			SET outSign.Type = 'BranchList';
+			SET outSign.Value = inBranch.BankInfo.banks:BranchId;
+		END IF;
+	END FOR;
+	
+	IF inRef.OrgAttr.Segment <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Segment';
+		SET outSign.Value = inRef.OrgAttr.Segment;
+	END IF;
+	IF inRef.OrgAttr.EcActivityCode <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'EconomicActivityCode';
+		SET outSign.Value = inRef.OrgAttr.EcActivityCode;
+	END IF;
+	IF inRef.OrgAttr.Category <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Category';
+		SET outSign.Value = inRef.OrgAttr.Category;
+	END IF;
+	IF inRef.OrgAttr.EcSector <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'EconomicSector';
+		SET outSign.Value = inRef.OrgAttr.EcSector;
+	END IF;
+	IF inRef.OrgAttr.Group <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Group';
+		SET outSign.Value = inRef.OrgAttr.Group;
+	END IF;
+	IF inRef.*:NumEmployees <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'NumEmployees';
+		SET outSign.Value = inRef.*:NumEmployees;
+	END IF;
+	IF inRef.OrgAttr.HoldingMembership <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Holding';
+		SET outSign.Value = inRef.OrgAttr.HoldingMembership;
+	END IF;
+	IF inRef.OrgAttr.Rating <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Rating';
+		SET outSign.Value = inRef.OrgAttr.Rating;
+	END IF;
+	IF inRef.OrgAttr.Region <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'RegionCode';
+		SET outSign.Value = inRef.OrgAttr.Region;
+	END IF;
+	IF managerPositionName <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'ManagerPositionName';
+		SET outSign.Value = managerPositionName;
+	END IF;
+	IF accountantPositionName <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'AccountantPositionName';
+		SET outSign.Value = accountantPositionName;
+	END IF;
+	IF managerName <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'ManagerName';
+		SET outSign.Value = managerName;
+	END IF;
+	IF accountantName <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'AccountantName';
+		SET outSign.Value = accountantName;
+	END IF;
+	IF inRef.OrgAttr.DocRegNum <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'RegistrationNumber';
+		SET outSign.Value = inRef.OrgAttr.DocRegNum;
+	END IF;
+	IF inRef.OrgAttr.DocRegPlace <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'RegistrationIssuer';
+		SET outSign.Value = inRef.OrgAttr.DocRegPlace;
+	END IF;
+	IF inRef.OrgAttr.EcActivity <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'EconomicActivity';
+		SET outSign.Value = inRef.OrgAttr.EcActivity;
+	END IF;
+	IF okpo <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'OKPO';
+		SET outSign.Value = okpo;
+	END IF;
+	IF inRef.OrgAttr.Trademark <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Trademark';
+		SET outSign.Value = inRef.OrgAttr.Trademark;
+	END IF;
+	IF inRef.OrgAttr.RevenueInfo.Amount <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'Revenue';
+		SET outSign.Value = inRef.OrgAttr.RevenueInfo.Amount;
+	END IF;
+	IF inRef.OrgAttr.RevenueInfo.AmtCurr <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'RevenueCurrency';
+		SET outSign.Value = inRef.OrgAttr.RevenueInfo.AmtCurr;
+	END IF;
+	IF inRef.OrgAttr.GeoCode <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'GeoCode';
+		SET outSign.Value = inRef.OrgAttr.GeoCode;
+	END IF;
+	IF inRef.OrgAttr.Holding <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'HoldingCode';
+		SET outSign.Value = inRef.OrgAttr.Holding;
+	END IF;
+	IF inRef.IsBank <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'IsBank';
+		SET outSign.Value = inRef.IsBank;
+	END IF;
+	IF inRef.OrgAttr.FullNameKz <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'FullNameKaz';
+		SET outSign.Value = inRef.OrgAttr.FullNameKz;
+	END IF;
+	IF inRef.OrgAttr.ShortNameKz <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'ShortNameKaz';
+		SET outSign.Value = inRef.OrgAttr.ShortNameKz;
+	END IF;
+	IF inRef.IsEnt <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'IsEntrepreneur';
+		SET outSign.Value = inRef.IsEnt;
+	END IF;
+	IF inRef.FirstContactBankInfo.banks:BranchName <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'BankBranchName';
+		SET outSign.Value = inRef.FirstContactBankInfo.banks:BranchName;
+	END IF;
+	IF inRef.OrgAttr.DateReReg <> '' THEN
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+		SET outSign.Type = 'SecondaryRegistrationDate';
+		SET outSign.Value = inRef.OrgAttr.DateReReg;
+	END IF;
+	
+	IF EXISTS(inRef.Signs.Sign[]) THEN 
+		FOR inSign AS inRef.Signs.Sign[] DO
+			IF checkSignType(inSign.SignType) THEN
+				CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+				SET outSign.Type					= inSign.SignType;
+				SET outSign.Id						= inSign.SignId;
+				SET outSign.Since					= inSign.StartDate;
+				SET outSign.Until					= inSign.EndDate;
+				SET outSign.Value					= inSign.Value;
+			END IF;
+		END FOR;
+	END IF;
+	
+	IF NOT EXISTS(outRef.Signs.*[]) THEN
+		SET outRef.Signs = NULL;
+	END IF;
+END; /* PROCEDURE CopyOrgSetDataRich */ 
+
+
+
+CREATE PROCEDURE CopyOrgSetDataRichTEST(
+		IN inRef REFERENCE, 
+		IN outRef REFERENCE)
+BEGIN
+	DECLARE inLink2 REFERENCE TO inRef.Link;
+
+	SET outRef.Filial 				= inRef.Filial;
+	SET outRef.Department			= inRef.Department;
+	SET outRef.Manager 				= inRef.Manager;
+	SET outRef.CifId 				= inRef.CifId;
+
+	CREATE FIELD outRef.Organization;
+	DECLARE outOrg REFERENCE TO outRef.Organization;
+	SET outOrg.Country 				= inRef.Organization.Country;
+	SET outOrg.BIN 					= inRef.Organization.BIN;
+	SET outOrg.NameShort 			= inRef.Organization.NameShort;
+	SET outOrg.NameFull 			= inRef.Organization.NameFull;
+	SET outOrg.RNN 					= inRef.Organization.RNN;
+	SET outOrg.NameLat 				= inRef.Organization.NameLat;
+	SET outOrg.NameChar 			= inRef.Organization.NameChar;
+	SET outOrg.RegistrationDate 	= inRef.Organization.RegistrationDate;
+	SET outOrg.Form 				= inRef.Organization.Form;
+
+	CREATE FIELD outRef.Sources;
+	DECLARE outSource REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef.Sources AS outSource NAME 'Source';
+	SET outSource.Surrogate			= inRef.Source.Surrogate;
+	SET outSource.ObjectType		= inRef.Source.ObjectType;
+	SET outSource.SourceSystemCode	= inRef.Source.SourceSystemCode;
+
+	CREATE FIELD outRef.Documents;
+	
+		CREATE FIELD outRef.Addresses;
+		DECLARE outAddress REFERENCE TO outRef.Addresses;
+		CREATE LASTCHILD OF outRef.Addresses AS outAddress NAME 'Address';		
+		SET outAddress.Type						= inLink2.Address.Type;
+		SET outAddress.Id						= inLink2.Address.Id;
+		SET outAddress.Unstructured				= inLink2.Address.Unstructured;
+		SET outAddress.PostCode					= inLink2.Address.PostCode;
+		SET outAddress.DateIn					= inLink2.Address.DateIn;
+		SET outAddress.DateOut					= inLink2.Address.DateOut;
+		SET outAddress.Country					= inLink2.Address.Country;
+		SET outAddress.Region					= inLink2.Address.Region;
+		SET outAddress.City					    = inLink2.Address.City;
+		SET outAddress.District					= inLink2.Address.District;
+		SET outAddress.Street					= inLink2.Address.Street;
+		SET outAddress.House					= inLink2.Address.House;
+		SET outAddress.Building					= inLink2.Address.Building;
+		SET outAddress.Apartment				= inLink2.Address.Apartment;
+		
+		CREATE LASTCHILD OF outRef.Addresses AS outAddress NAME 'Address';		
+		SET outAddress.Type						= inRef.Link[2].Address.Type;
+		SET outAddress.Id						= inRef.Link[2].Address.Id;
+		SET outAddress.Unstructured				= inRef.Link[2].Address.Unstructured;
+		SET outAddress.PostCode					= inRef.Link[2].Address.PostCode;
+		SET outAddress.DateIn					= inRef.Link[2].Address.DateIn;
+		SET outAddress.DateOut					= inRef.Link[2].Address.DateOut;
+		SET outAddress.Country					= inRef.Link[2].Address.Country;
+		SET outAddress.Region					= inRef.Link[2].Address.Region;
+		SET outAddress.City					    = inRef.Link[2].Address.City;
+		SET outAddress.District					= inRef.Link[2].Address.District;
+		SET outAddress.Street					= inRef.Link[2].Address.Street;
+		SET outAddress.House					= inRef.Link[2].Address.House;
+		SET outAddress.Building					= inRef.Link[2].Address.Building;
+		SET outAddress.Apartment				= inRef.Link[2].Address.Apartment;
+		
+		DECLARE outReach REFERENCE TO outRef;
+		FOR inReach AS inLink2.Reaches.Reach[] DO			
+			CREATE LASTCHILD OF outRef.Reaches AS outReach NAME 'Reach';		
+			SET outReach.Type						= inReach.Type;
+			SET outReach.Value						= inReach.Value;
+		END FOR;
+
+		DECLARE outSign REFERENCE TO outRef;
+		FOR inSign AS inRef.Signs.Sign[] DO			
+			CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+			SET outSign.Type					= inSign.Type;
+			SET outSign.Id						= inSign.Id;
+			SET outSign.Since					= inSign.Since;
+			SET outSign.Until					= inSign.Until;
+			SET outSign.Value					= inSign.Value;
+		END FOR;
+
+	FOR inLink AS inRef.Link[] DO			
+
+		CREATE FIELD outRef.Links;
+		DECLARE outLink REFERENCE TO outRef.Links;
+		CREATE LASTCHILD OF outRef.Links AS outLink NAME 'Link';		
+		SET outLink.Type					= inLink.Type;
+		SET outLink.Since					= inLink.Since;
+		SET outLink.Until					= inLink.Until;
+		SET outLink.LinkedId				= inLink.LinkedId;
+		SET outLink.CapitalShare			= inLink.CapitalShare;
+	
+		CREATE FIELD outLink.Client;
+		DECLARE outClient REFERENCE TO outLink.Client;
+			
+		SET outClient.CifId			= inLink.Client.CifId;
+		SET outClient.Status		= inLink.Client.Status;
+		SET outClient.Filial		= inLink.Client.Filial;
+		SET outClient.Department	= inLink.Client.Department;
+		SET outClient.Manager		= inLink.Client.Manager;
+		SET outClient.DateCreated	= inLink.Client.DateCreated;
+		SET outClient.UNK			= inLink.Client.UNK;
+		SET outClient.ObjectType	= inLink.Client.ObjectType;
+	
+		CREATE FIELD outClient.Sources;
+		DECLARE outSource2 REFERENCE TO outClient.Sources;
+		CREATE LASTCHILD OF outClient.Sources AS outSource2 NAME 'Source';		
+		SET outSource2.Surrogate						= inLink.Source2.Surrogate;
+		SET outSource2.ObjectType						= inLink.Source2.ObjectType;
+		SET outSource2.SourceSystemCode					= inLink.Source2.SourceSystemCode;
+	
+		CREATE FIELD outClient.Person;
+		DECLARE outPerson REFERENCE TO outClient.Person;
+		SET outPerson.NameLast						= inLink.Person.NameLast;
+		SET outPerson.NameFirst						= inLink.Person.NameFirst;
+		SET outPerson.NameFather					= inLink.Person.NameFather;
+		SET outPerson.RNN							= inLink.Person.RNN;
+		SET outPerson.IIN							= inLink.Person.IIN;
+		SET outPerson.Gender						= inLink.Person.Gender;
+		SET outPerson.BirthPlace					= inLink.Person.BirthPlace;
+		SET outPerson.Country						= inLink.Person.Country;
+		SET outPerson.NameLastLat					= inLink.Person.NameLastLat;
+		SET outPerson.NameFirstLat					= inLink.Person.NameFirstLat;
+		SET outPerson.NameFatherLat					= inLink.Person.NameFatherLat;
+		SET outPerson.BirthDate						= inLink.Person.BirthDate;
+		SET outPerson.Comment						= inLink.Person.Comment;
+	
+		CREATE FIELD outClient.Documents;
+		DECLARE outDocument REFERENCE TO outClient.Documents;
+		CREATE LASTCHILD OF outClient.Documents AS outDocument NAME 'Document';		
+		SET outDocument.Type						= inLink.Document.Type;
+		SET outDocument.Id							= inLink.Document.Id;
+		SET outDocument.Number						= inLink.Document.Number;
+		SET outDocument.Series						= inLink.Document.Series;
+		SET outDocument.DateIssued					= inLink.Document.DateIssued;
+		SET outDocument.DateValid					= inLink.Document.DateValid;
+		SET outDocument.Issuer						= inLink.Document.Issuer;
+		SET outDocument.IssuerCode					= inLink.Document.IssuerCode;
+		SET outDocument.Country						= inLink.Document.Country;
+	
+		CREATE FIELD outClient.Links;
+		CREATE FIELD outClient.Procuracies;
+		CREATE FIELD outClient.Residencies;
+
+		DECLARE outSign REFERENCE TO outClient;
+		FOR inSign AS inLink.Signs.Sign[] DO			
+			CREATE LASTCHILD OF outClient.Signs AS outSign NAME 'Sign';		
+			SET outSign.Type					= inSign.Type;
+			SET outSign.Id						= inSign.Id;
+			SET outSign.Since					= inSign.Since;
+			SET outSign.Until					= inSign.Until;
+			SET outSign.Value					= inSign.Value;
+		END FOR;
+
+		CREATE FIELD outClient.URLs;
+
+	END FOR;
+
+END; 
+	

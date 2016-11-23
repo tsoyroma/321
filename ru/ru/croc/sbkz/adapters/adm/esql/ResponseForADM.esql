@@ -1,0 +1,124 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.adm.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+/**
+ * Перенаправление на нужную ветку в соответствии с операцией
+ **/
+CREATE COMPUTE MODULE ResponseForADM_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		 
+		CASE Operation
+		WHEN 'KZADMTechRequest' THEN
+			SET labelName = 'ADM001';
+		WHEN 'KZADMFinRequest' THEN
+			SET labelName = 'ADM002';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in ResponseForADM', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- Восстановление заголовка и тела исходного сообщения
+CREATE COMPUTE MODULE ResponseForADM_AddOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * u06068 11.08.2014 Технический запрос пополнение  счета
+ */
+CREATE COMPUTE MODULE ResponseForADM_ConvertMDO2ADM1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillADMStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+     	SET outRef.sender.(XMLNSC.Attribute)"member-id"  = Environment.UserProperties.MemId;
+		
+		IF inRef.Status.*:StatusCode = '0' THEN 
+		  SET outRef.response.status			= 1; -- успешно
+  		  SET outRef.response.err				= ' ';
+        ELSE 
+		  SET outRef.response.status			= 0; -- ошибка
+  		  SET outRef.response.err				= COALESCE(inRef.Status.*:StatusCode, '0') || ' : ' || COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),' ');
+		END IF;   
+		
+		IF inRef.SPName = 'ADMS' THEN
+		   PROPAGATE TO TERMINAL 'out1';
+		   RETURN FALSE;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+  u00671 12/08/2014 Финансовый запрос на пополнение счета
+*/
+CREATE COMPUTE MODULE ResponseForADM_ConvertMDO2ADM2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillADMStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE varDt CHARACTER;
+		DECLARE varTi CHARACTER;
+
+     	SET outRef.sender.(XMLNSC.Attribute)"member-id"  = Environment.UserProperties.MemId;
+		
+		IF inRef.Status.*:StatusCode = '0' THEN 
+		  SET outRef.response.status			= 1; -- успешно
+
+		  IF COALESCE(FIELDVALUE(inRef.ActionTime),'') <> '' THEN
+			 SET varDt		= 	SUBSTRING(inRef.ActionTime FROM 1 FOR 10);
+			 SET varTi		= 	SUBSTRING(inRef.ActionTime FROM 12 FOR 8);
+
+	  	     SET outRef.response."trx-datetime"	= varDt || ' ' || varTi;
+	  	  ELSE   
+	  	     SET outRef.response."trx-datetime"	= ' ';
+		  END IF;
+		  
+  		  SET outRef.response.err				= ' ';
+        ELSE 
+		  SET outRef.response.status			= 0; -- ошибка
+  		  SET outRef.response.err				= COALESCE(inRef.Status.*:StatusCode, '0') || ' : ' || COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),' ');
+		END IF;   
+		
+		IF inRef.SPName = 'ADMS' THEN
+		   PROPAGATE TO TERMINAL 'out1';
+		   RETURN FALSE;
+		END IF;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+

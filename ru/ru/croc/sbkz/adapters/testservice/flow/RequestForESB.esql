@@ -1,0 +1,10 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.testservice.flow
+
+
+CREATE DATABASE MODULE RequestForESB_Database
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		RETURN TRUE;
+	END;
+
+END MODULE;

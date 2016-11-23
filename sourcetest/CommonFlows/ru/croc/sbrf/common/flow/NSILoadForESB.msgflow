@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmMQInput.msgnode="ComIbmMQInput.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow" xmlns:ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow="ru/croc/sbrf/bp/common/flow/ErrorHandlerSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_NSIErrorHandlerSubflow.msgflow="ru/croc/sbrf/bp/common/flow/NSIErrorHandlerSubflow.msgflow"
+    xmlns:ru_croc_sbrf_common_flow_NSICommon.msgflow="ru/croc/sbrf/common/flow/NSICommon.msgflow" xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbrf/common/flow/NSILoadForESB.msgflow"
+    nsPrefix="ru_croc_sbrf_common_flow_NSILoadForESB.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.LocaleListForUpdate" name="LocaleListForUpdate" defaultValueLiteral="&lt;List>&lt;Item>&lt;Value>2200&lt;/Value>&lt;/Item>&lt;Item>&lt;Value>100&lt;/Value>&lt;/Item>&lt;/List>">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="NSILoadForESB" bundleName="ru/croc/sbrf/common/flow/NSILoadForESB" pluginId="CommonFlows"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/CommonFlows/icons/full/obj16/NSILoadForESB.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/CommonFlows/icons/full/obj30/NSILoadForESB.gif"/>
+    <version xmi:type="utility:ConstantString" string="ESB_Version_Id"/>
+    <composition>
+      <nodes xmi:type="ComIbmMQInput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="24,93" queueName="ESB.NSI.NOTIFICATION.IN" messageDomainProperty="XMLNSC">
+        <translation xmi:type="utility:ConstantString" string="ESB.NSI.NOTIFICATION.IN"/>
+        <parserXmlnscOpaqueElements elements="//tabledesc"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_2" location="288,89" computeExpression="esql://routine/ru.croc.sbrf.common.esql#NSILoadForESB_ExtractSubscr.Main">
+        <translation xmi:type="utility:ConstantString" string="ExtractSubscr"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_7" location="168,93" EventReceiverProp="A_NSI_TER" EventSourceProp="A_NSIPublish">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflow"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_11" location="479,152" CurrentOperation="Справочники НСИ в КСШ успешно обновлены" CurrentEventSource="A_NSI_TER" CurrentEventReceiver="EVENT.LOGGING">
+        <translation xmi:type="utility:ConstantString" string="A_NSI_TER -> LOGGING"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_common_flow_NSICommon.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_4" location="403,90" dataSource="DIORA" DBType="Oracle">
+        <translation xmi:type="utility:ConstantString" string="NSICommon"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_5" location="408,151" computeExpression="esql://routine/ru.croc.sbrf.common.esql#NSILoadForESB_Log.Main">
+        <translation xmi:type="utility:ConstantString" string="Log"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_NSIErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_3" location="156,27" EventReceiverProp="A_NSI_TER" EventSourceProp="A_NSIPublish">
+        <translation xmi:type="utility:ConstantString" string="NSIErrorHandlerSubflow"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.out1" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_11" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.catch" targetTerminalName="InTerminal.Input2"/>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.Basic" configurable="true" userDefined="true" describedAttribute="Property.LocaleListForUpdate">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.LocaleListForUpdate" bundleName="ru/croc/sbrf/common/flow/NSILoadForESB" pluginId="CommonFlows"/>
+      </propertyDescriptor>
+    </propertyOrganizer>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

@@ -1,0 +1,105 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.talliman.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'SMSSend' THEN
+			SET labelName = 'SMSSend';
+		WHEN 'rootBlock' THEN
+			SET labelName = 'rootBlock';
+		WHEN 'GetPersonInfo_output' THEN
+			SET labelName = 'PersonInfo';	
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown message format', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+	 	
+	 	SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+/**
+ * Передача SMS на телефон клиента
+ */
+CREATE COMPUTE MODULE RequestForESB_SendSMS
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CALL FillStandardMDORq(InputRoot, OutputRoot, 'KZSendSMSRq', 'D', '1.3.0');
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZSendSMSRq;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:SMSSend;
+		SET outRef.PhoneNumber		= inRef.DataRq.SMS.PhoneNumber;
+		SET outRef.SMSText			= inRef.DataRq.SMS.Text;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Получение расчёта задолженности клиента
+ */
+CREATE COMPUTE MODULE RequestForESB_GetCalcLoan
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.UserProperties.Source.Body 		= 
+								CAST(ASBITSTREAM(InputRoot.XMLNSC ENCODING InputRoot.MQMD.Encoding CCSID InputRoot.MQMD.CodedCharSetId)
+									 AS CHARACTER CCSID InputRoot.MQMD.CodedCharSetId ENCODING InputRoot.MQMD.Encoding
+								);		
+		
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CALL FillStandardMDORq(InputRoot, OutputRoot, 'KZGetCalcLoanDeptRq', 'Talliman', NULL);
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZGetCalcLoanDeptRq;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:rootBlock;
+		SET outRef.CalcDate				= FIELDVALUE(inRef.*:generalBlock.*:processDate);
+		SET outRef.LoanId				= FIELDVALUE(inRef.*:generalBlock.*:appId);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Тестовый запрос для Жанибека из отдела Ильяса. 21/07/2014 u06068   
+ */
+CREATE COMPUTE MODULE RequestForESB_Compute
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CALL FillStandardMDORq(InputRoot, OutputRoot, 'KZGetPersonInfoTest', NULL, NULL);
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZGetPersonInfoTest;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:GetPersonInfo_output;
+		SET outRef.PersonID				= FIELDVALUE(inRef.*:PersonID);
+		SET outRef.Status				= FIELDVALUE(inRef.*:Status);
+		
+		RETURN TRUE;
+	END;
+END MODULE;

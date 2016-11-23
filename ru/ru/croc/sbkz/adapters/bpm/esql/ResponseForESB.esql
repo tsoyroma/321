@@ -1,0 +1,22 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.bpm.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Установка ответных заголовков а также получение ответного сообщения из агрегации
+CREATE COMPUTE MODULE ResponseForESB_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE OrigMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+		SET Environment.UserProperties = OrigMsg.UserProperties;
+
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+
+		SET OutputRoot.XMLNSC = InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC;
+
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(OrigMsg, OutputLocalEnvironment);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+

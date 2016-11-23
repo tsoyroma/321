@@ -1,0 +1,160 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.imap.esql
+
+PATH ru.croc.sbkz.utils;
+
+/**
+ * Определяет операцию для продолжения обработки
+ * в потоке.
+ **/
+CREATE COMPUTE MODULE HTTPResponseFromIMAP_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE labelName CHARACTER;
+		
+		SET labelName = 'KZSendSMSRs'; -- пока есть только одна операция (да и всегда будет)
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Преобразует ответ от iMAP для взаимодействия 
+ * "Отправка SMS клиенту": IMAP -> KZSendSMSRs
+ **/
+CREATE COMPUTE MODULE HTTPResponseFromIMAP_ConvertIMAP2MDO
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC');
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSendSMSRs';
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.IMAP;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE inputId CHARACTER InpRq.Message.(XMLNSC.Attribute)id;
+		DECLARE I INTEGER 0;
+		
+		SET OutRs.RqUID = Environment.UserProperties.RqUID;
+		SET OutRs.RqTm 	= Environment.UserProperties.RqTm;
+		IF Environment.UserProperties.OperUID <> 'UNKNOWN' THEN
+			SET OutRs.OperUID = Environment.UserProperties.OperUID;
+		END IF;
+		SET OutRs.SPName = Environment.UserProperties.SPName;
+		IF InpRq.Message.OperationReport.mbgTrx.status = 'Y' THEN
+			SET OutRs.Status.ifxca:StatusCode = '0';
+		ELSE
+			SET OutRs.Status.ifxca:StatusCode 
+					= InpRq.Message.OperationReport.mbgTrx.Result.code;
+		END IF;
+		SET OutRs.Status.ifxca:StatusDesc 
+					= InpRq.Message.OperationReport.mbgTrx.Result.detail;
+		
+		SET OutRs.Status.Severity = 'Info';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Заполняет заголовок MQRFH2 для правильной маршрутизации.
+ **/
+CREATE COMPUTE MODULE HTTPResponseFromIMAP_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		DECLARE systemId, adapterType CHARACTER;
+		SET systemId 	= ResolveSystemIdBySPName(InputRoot.XMLNSC.*[<].SPName);
+		SET adapterType = 'urn:sbkztypes:esb:adapter:async:response';
+		
+		IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQMD') NAME 'MQMD';
+	 	END IF;
+		
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Создает пустой ответ для отправки в HTTP.
+ **/
+CREATE COMPUTE MODULE HTTPResponseFromIMAP_CreateEmptyResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CREATE LASTCHILD OF OutputRoot DOMAIN('BLOB');
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Возвращает идентификатор системы по специфическому
+ * SPName.
+ **/
+CREATE FUNCTION ResolveSystemIdBySPName(IN spName CHARACTER) RETURNS CHARACTER
+BEGIN
+	CASE spName
+	WHEN 'A' THEN
+		RETURN 'urn:sbkzsystems:crmretail';
+	WHEN 'B' THEN
+		RETURN 'urn:sbkzsystems:crm';
+	ELSE
+		RETURN 'UNKNOWN';
+	END CASE;
+END;
+
+
+/**
+ * Проверяет входящее сообщение на правильность атрибута Message@id
+ **/
+CREATE FILTER MODULE HTTPResponseFromIMAP_IsCorrectId
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE inpId CHARACTER Root.XMLNSC.IMAP.Message.(XMLNSC.Attribute)id;
+		DECLARE rqUID, operUID, spName CHARACTER;
+		
+		CALL ParseMessageId(inpId, rqUID, operUID, spName);
+		
+		IF rqUID IS NOT NULL AND spName IS NOT NULL THEN
+			RETURN TRUE;
+		ELSE
+			RETURN FALSE;
+		END IF;
+	END;
+END MODULE;
+
+/**
+ * Установка параметров для логгирования.
+ **/
+CREATE COMPUTE MODULE HTTPResponseFromIMAP_SetLogParams
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		DECLARE inpId CHARACTER InputRoot.XMLNSC.IMAP.Message.(XMLNSC.Attribute)id;
+		DECLARE rqUID, operUID, spName CHARACTER;
+		
+		CALL ParseMessageId(inpId, rqUID, operUID, spName);
+		CALL SetLogParams(rqUID, operUID, spName);
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE SetLogParams(IN rqUID CHARACTER, IN operUID CHARACTER, IN spName CHARACTER)
+	BEGIN
+		SET Environment.ErrParams.RqUID 		= rqUID;
+		SET Environment.UserProperties.RqUID	= rqUID;
+		SET Environment.UserProperties.RqTm		= CURRENT_TIMESTAMP;
+		SET Environment.UserProperties.OperUID	= COALESCE(operUID, 'UNKNOWN');
+		SET Environment.UserProperties.SPName	= spName;
+	END;
+END MODULE;

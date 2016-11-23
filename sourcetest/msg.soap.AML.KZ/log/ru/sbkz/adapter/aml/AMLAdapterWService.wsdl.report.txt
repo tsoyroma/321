@@ -1,0 +1,24 @@
+
+
+Importing file: I:\workspace_broker_sberkz\msg.soap.AML.KZ\wsdl\AMLAdapterWService.wsdl
+
+BIP0224W The message set has no XML Wire Format layer defined. Only the logical information will appear in the model.
+Copying source WSDL AMLAdapterWService.wsdl to AMLAdapterWService.wsdl.
+The WSDL import will proceed with bindings AMLAdapterPTSoapBinding.
+Creating wsdl schema document for file:///I:/workspace_broker_sberkz/msg.soap.AML.KZ/wsdl/AMLAdapterWService.wsdl.
+Parsing wsdl binding {http://sbkz.ru/adapter/AML}AMLAdapterPTSoapBinding.
+Parsing wsdl binding input getXMLmessage.
+Parsing wsdl binding output getXMLmessage.
+Processing doc style for operation getXMLmessage.
+Populating WSDL schema msg.soap.AML.KZ/ru/sbkz/adapter/aml/AMLAdapterWService.mxsd.
+Removing unnecessary import statement with namespace http://www.w3.org/XML/1998/namespace from schema file:/I:/workspace_broker_sberkz/msg.soap.AML.KZ/msg.soap.AML.KZ/org/xmlsoap/schemas/soap/envelope/soapenv11.mxsd.  This statement was not resolved and is never used.
+Creating file msg.soap.AML.KZ/ru/sbkz/adapter/aml/AMLAdapterWService.mxsd in the workspace.
+Creating file msg.soap.AML.KZ/ru/sbkz/adapter/aml/AMLAdapterWService_InlineSchema1.mxsd in the workspace.
+
+Elapsed time processing this message definition file: 0.732 seconds
+Number of warnings for this message definition file: 1
+
+
+Number of files processed: 1
+
+

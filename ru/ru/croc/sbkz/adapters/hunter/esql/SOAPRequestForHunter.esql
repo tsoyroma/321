@@ -1,0 +1,320 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.hunter.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Внешняя переменная для указания URL веб-сервиса
+DECLARE HttpWebServiceUrl_OnlineMatching EXTERNAL CHARACTER 'UNKNOWN';
+DECLARE HttpWebServiceUrl_UpdateMetadata EXTERNAL CHARACTER 'UNKNOWN';
+-- Внешняя переменная для указания таймаута веб-сервиса
+DECLARE HttpWebServiceTimeout EXTERNAL CHARACTER 'UNKNOWN';
+
+-- Внешняя переменная для указания имени пользователя
+DECLARE HttpWebServiceUsername EXTERNAL CHARACTER 'UNKNOWN';
+-- Внешняя переменная для указания пароля
+DECLARE HttpWebServicePassword EXTERNAL CHARACTER 'UNKNOWN';
+
+DECLARE XSD_DATE_TIME_FORMAT CONSTANT CHARACTER 'IU';
+
+DECLARE soap_ns NAMESPACE 'http://schemas.xmlsoap.org/soap/envelope/';
+DECLARE wsa_ns NAMESPACE 'http://schemas.xmlsoap.org/ws/2004/08/addressing';
+DECLARE wsse_ns NAMESPACE 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd';
+DECLARE wsu_ns NAMESPACE 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd';
+DECLARE xsd_ns NAMESPACE 'http://www.w3.org/2001/XMLSchema';
+/**
+ * Сохранение исходного сообщения в Environment.
+ **/
+CREATE COMPUTE MODULE SOAPRequestForHunter_SaveOrigMsg
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.Source.MQMD 		= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 	= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 		= InputBody;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+/**
+ * Формирование тела SOAP-запроса (KZOnlineMatchingRq -> Match)
+ **/
+CREATE COMPUTE MODULE SOAPRequestForHunter_ConvertMDO2Hunter_OnlineMatching
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE ns_hunter NAME 'Match'; 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZOnlineMatchingRq;
+		
+		SET outRef.ns_hunter:controlXml 			= inRef.controlXml;
+		SET outRef.ns_hunter:batchXml 				= inRef.batchXml;
+		SET outRef.ns_hunter:username 				= HttpWebServiceUsername;
+		SET outRef.ns_hunter:password 				= HttpWebServicePassword;
+		
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_OnlineMatching;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+				
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Восстановление заголовков MQ для ответа.
+ **/
+CREATE COMPUTE MODULE SOAPRequestForHunter_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+	
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		CALL SetMQReplyDestination(Environment.UserProperties.Source, OutputLocalEnvironment);
+		
+		SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Формирование сообщения в формате МДО (MatchResponse -> KZOnlineMatchingRs)
+ **/
+CREATE COMPUTE MODULE SOAPRequestForHunter_ConvertHunter2MDO_OnlineMatching
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.KZOnlineMatchingRs AS outRef;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);
+		
+		SET outRef.matchResult 		= COALESCE(InputRoot.XMLNSC.*:MatchResponse.*:MatchResult,'');
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+/**
+* Определяет операцию для обработки ответа.
+**/
+CREATE COMPUTE MODULE SOAPRequestForHunter_DetectResponseOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.UserProperties.Operation;
+		DECLARE labelName CHARACTER;
+	
+		CASE Operation
+		WHEN 'KZOnlineMatchingRq' THEN
+			SET labelName = 'KZOnlineMatchingRs';
+		WHEN 'KZUpdMetadataRq' THEN
+			SET labelName = 'KZUpdMetadataRs';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+	
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Определяет обрабатываемую операцию (запрос)
+ **/
+CREATE COMPUTE MODULE SOAPRequestForHunter_DetectRequestOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		SET Environment.UserProperties.Operation = Operation;
+		DECLARE labelName CHARACTER;
+	
+		CASE Operation
+		WHEN 'KZOnlineMatchingRq' THEN
+			SET labelName = 'KZOnlineMatchingRq';
+		WHEN 'KZUpdMetadataRq' THEN
+			IF InputRoot.MQMD.ReplyToQ <> '' THEN
+				SET labelName = 'KZUpdMetadataRq';
+			ELSE 
+				SET labelName = 'KZUpdMetadataRq.async';
+			END IF;
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+	
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Формирование тела SOAP-запроса (KZUpdMetadataRq -> updateMetadataRequest)
+ **/
+CREATE COMPUTE MODULE SOAPRequestForHunter_ConvertMDO2Hunter_UpdateMetadata
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE headerRef REFERENCE TO OutputRoot;
+		DECLARE guid CHARACTER UUIDASCHAR;
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZUpdMetadataRq;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAMESPACE soap_ns NAME 'Envelope';
+		SET OutputRoot.XMLNSC.soap_ns:Envelope.(XMLNSC.NamespaceDecl)xmlns:soap 		= soap_ns;
+		SET OutputRoot.XMLNSC.soap_ns:Envelope.(XMLNSC.NamespaceDecl)xmlns:xsd 			= xsd_ns;
+		SET OutputRoot.XMLNSC.soap_ns:Envelope.(XMLNSC.NamespaceDecl)xmlns:wsa 			= wsa_ns;
+		SET OutputRoot.XMLNSC.soap_ns:Envelope.(XMLNSC.NamespaceDecl)xmlns:wsse 		= wsse_ns;
+		SET OutputRoot.XMLNSC.soap_ns:Envelope.(XMLNSC.NamespaceDecl)xmlns:wsu	 		= wsu_ns;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.soap_ns:Envelope AS headerRef NAMESPACE soap_ns NAME 'Header';
+		
+		SET headerRef.wsa_ns:Action 					= 'http://www.mclsoftware.co.uk/UpdateMetadataWebService/v1/UpdateMetadataService.wsdl:updateMetadataIn';
+		SET headerRef.wsa_ns:MessageID					= 'urn:uuid:' || FIELDVALUE(inRef.RqUID);
+		SET headerRef.wsa_ns:ReplyTo.wsa_ns:Address		= 'http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous';
+		SET headerRef.wsa_ns:To							= 'http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous';
+		
+		SET headerRef.wsse_ns:Security.(XMLNSC.Attribute)soap_ns:mustUnderstand				= '1';
+		SET headerRef.wsse_ns:Security.wsu_ns:Timestamp.(XMLNSC.Attribute)wsu_ns:Id			= 'Timestamp-' || guid;
+		SET headerRef.wsse_ns:Security.wsu_ns:Timestamp.wsu_ns:Created						= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT XSD_DATE_TIME_FORMAT) || 'Z';
+		SET headerRef.wsse_ns:Security.wsu_ns:Timestamp.wsu_ns:Expires						= CAST((CURRENT_TIMESTAMP + INTERVAL '5' SECOND) AS CHARACTER FORMAT XSD_DATE_TIME_FORMAT) || 'Z';
+		SET headerRef.wsse_ns:Security.wsse_ns:UsernameToken.(XMLNSC.Attribute)wsu_ns:Id	= 'Timestamp-' || guid;
+		
+		SET headerRef.wsse_ns:Security.wsse_ns:UsernameToken.wsse_ns:Username						 = HttpWebServiceUsername;
+		SET headerRef.wsse_ns:Security.wsse_ns:UsernameToken.wsse_ns:Password						 = HttpWebServicePassword;
+		SET headerRef.wsse_ns:Security.wsse_ns:UsernameToken.wsse_ns:Password.(XMLNSC.Attribute)Type = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText';
+		SET headerRef.wsse_ns:Security.wsse_ns:UsernameToken.wsse_ns:Nonce							 = 'kYLZeesGTzOlPzVwwrBDPA==';
+		SET headerRef.wsse_ns:Security.wsse_ns:UsernameToken.wsu_ns:Created							 = '2007-02-22T19:38:06Z';
+		
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.soap_ns:Envelope NAMESPACE soap_ns NAME 'Body';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.soap_ns:Envelope.soap_ns:Body AS outRef NAMESPACE ns_upd_metadata NAME 'updateMetadataRequest'; 
+		
+		
+		
+		
+		CREATE LASTCHILD OF outRef NAMESPACE ns_upd_metadata NAME 'submissions';
+		DECLARE subm REFERENCE TO outRef;
+		FOR dataRec AS inRef.DataRec[] DO 
+			CREATE LASTCHILD OF outRef.*:submissions AS subm NAMESPACE ns_submission NAME 'submission';
+			SET subm.ns_submission:clientID		= THE(SELECT ITEM idExt.Value FROM dataRec.PersonInfo.PersonIdExt[] AS idExt WHERE idExt.Key = 'TRID');
+			SET subm.ns_submission:identifier	= THE(SELECT ITEM idExt.Value FROM dataRec.PersonInfo.PersonIdExt[] AS idExt WHERE idExt.Key = 'ID');
+			
+			CREATE LASTCHILD OF subm NAMESPACE ns_submission NAME 'fields';
+			DECLARE field REFERENCE TO outRef;
+			FOR dataField AS dataRec.DataField[] DO
+				CREATE LASTCHILD OF subm.*:fields AS field NAMESPACE ns_submission NAME 'field';
+				SET field.(XMLNSC.Attribute)name 		= dataField.FieldName;
+				SET field.ns_submission:new_value		= dataField.FieldNewValue;
+			END FOR;			
+		END FOR;
+		
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_UpdateMetadata;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+
+/**
+ * Формирование сообщения в формате МДО (updateMetadataResponse -> KZUpdMetadataRs)
+ **/
+CREATE COMPUTE MODULE SOAPRequestForHunter_ConvertHunter2MDO_UpdateMetadata
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.KZUpdMetadataRs AS outRef;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:updateMetadataResponse;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);
+		
+		SET outRef.OriginalResponse 						= CAST(ASBITSTREAM(InputRoot.XMLNSC CCSID 1208) AS CHARACTER CCSID 1208);
+		
+		DECLARE idExt REFERENCE TO outRef;
+		DECLARE dataField REFERENCE TO outRef;
+		DECLARE errRec REFERENCE TO outRef;
+		DECLARE dataRec REFERENCE TO outRef;
+				
+		SET outRef.ErrRecords.ErrCount  			VALUE   = inRef.*:submissions.*:failedUpdates.count;
+		FOR subm AS inRef.*:submissions.*:failedUpdates.*:submission[] DO
+			CREATE LASTCHILD OF outRef.ErrRecords AS errRec NAME 'ErrRecord';
+			SET errRec.RecCount						VALUE   = subm.*:errors.count;
+			CREATE LASTCHILD OF errRec NAME 'PersonInfo';
+			CREATE LASTCHILD OF errRec.PersonInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key									= 'TRID';
+			SET idExt.Value									= subm.*:clientID;
+			CREATE LASTCHILD OF errRec.PersonInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key									= 'ID';
+			SET idExt.Value									= subm.*:identifier;
+			
+			FOR error AS subm.*:errors.*:error[] DO
+				CREATE LASTCHILD OF errRec AS dataField NAME 'DataField';
+				SET dataField.Message						= error.*:message;
+				SET dataField.Number						= error.*:number;
+				SET dataField.ValueCount			VALUE	= error.*:values.count;
+				FOR errValue AS error.*:values.*:value[] DO
+					CREATE LASTCHILD OF dataField NAME 'FieldValue' VALUE FIELDVALUE(errValue);
+				END FOR;
+			END FOR;
+		END FOR;
+		
+		SET outRef.DataRecords.DataCount  			VALUE   = inRef.*:submissions.*:successfulUpdates.count;
+		FOR subm AS inRef.*:submissions.*:successfulUpdates.*:submission[] DO
+			CREATE LASTCHILD OF outRef.DataRecords AS dataRec NAME 'DataRecord';
+			SET dataRec.RecCount					VALUE   = subm.*:fields.count;
+			CREATE LASTCHILD OF dataRec NAME 'PersonInfo';
+			CREATE LASTCHILD OF dataRec.PersonInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key									= 'TRID';
+			SET idExt.Value									= subm.*:clientID;
+			CREATE LASTCHILD OF dataRec.PersonInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key									= 'ID';
+			SET idExt.Value									= subm.*:identifier;
+			
+			FOR field AS subm.*:fields.*:field[] DO
+				CREATE LASTCHILD OF dataRec AS dataField NAME 'DataField';
+				SET dataField.Name					VALUE	= field.*:name;
+				SET dataField.FieldOldValue					= field.*:old_value;
+				SET dataField.FieldNewValue					= field.*:new_value;
+			END FOR;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+

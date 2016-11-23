@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmEmailOutput.msgnode="ComIbmEmailOutput.msgnode" xmlns:ComIbmFileOutput.msgnode="ComIbmFileOutput.msgnode" xmlns:ComIbmFilter.msgnode="ComIbmFilter.msgnode" xmlns:ComIbmFlowOrder.msgnode="ComIbmFlowOrder.msgnode" xmlns:ComIbmJavaCompute.msgnode="ComIbmJavaCompute.msgnode" xmlns:ComIbmMQInput.msgnode="ComIbmMQInput.msgnode" xmlns:ComIbmResetContentDescriptor.msgnode="ComIbmResetContentDescriptor.msgnode"
+    xmlns:ComIbmThrow.msgnode="ComIbmThrow.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow" xmlns:ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow="ru/croc/sbrf/bp/common/flow/ErrorHandlerSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow" xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbkz/adapters/gcvp/flow/FileRequestForGCVP.msgflow"
+    nsPrefix="ru_croc_sbkz_adapters_gcvp_flow_FileRequestForGCVP.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.SMTPServer" name="SMTPServer" lowerBound="1" defaultValueLiteral="172.16.100.61:25">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.ToAddress" name="ToAddress" lowerBound="1" defaultValueLiteral="export@mail.sberbank.kz">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.FromAddress" name="FromAddress" lowerBound="1" defaultValueLiteral="ksh-test@sberbank.kz">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.ReplyToAddress" name="ReplyToAddress" lowerBound="1" defaultValueLiteral="ksh-test@sberbank.kz">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.EmailSubject" name="EmailSubject" lowerBound="1" defaultValueLiteral="Hjv3wfjmDG">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.XPriority" name="XPriority" lowerBound="1" defaultValueLiteral="1">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.OutputDirectory" name="OutputDirectory" defaultValueLiteral="/data1/10/export/gcvp">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="FileRequestForGCVP" bundleName="ru/croc/sbkz/adapters/gcvp/flow/FileRequestForGCVP" pluginId="AdaptersKZ"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/AdaptersKZ/icons/full/obj16/FileRequestForGCVP.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/AdaptersKZ/icons/full/obj30/FileRequestForGCVP.gif"/>
+    <composition>
+      <nodes xmi:type="ComIbmMQInput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_3" location="-7,111" queueName="ESB.GCVP.SINGLE.REQUEST" messageDomainProperty="XMLNSC">
+        <translation xmi:type="utility:ConstantString" string="ESB.GCVP.SINGLE.REQUEST"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_4" location="146,111" EventReceiverProp="A_GCVP" EventSourceProp="ESB">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflow"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_5" location="273,107" CurrentOperation="Сообщение получено адаптером ГЦВП" CurrentEventSource="ESB" CurrentEventReceiver="A_GCVP" SourceQueue="ESB.GCVP.SINGLE.REQUEST">
+        <translation xmi:type="utility:ConstantString" string="ESB -> A_GCVP"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_7" location="964,323" rotation="TOP_TO_BOTTOM" CurrentOperation="Сообщение передано в ГЦВП" CurrentEventSource="A_GCVP" CurrentEventReceiver="GCVP" SourceQueue="ESB.GCVP.SINGLE.REQUEST">
+        <translation xmi:type="utility:ConstantString" string="A_GCVP -> GCVP"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="678,175" computeExpression="esql://routine/ru.croc.sbkz.adapters.gcvp.esql#FileRequestForGCVP_ConvertMDO2GCVPIIN.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertMDO2GCVPIIN"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_9" location="355,107" dataSource="SBKZORA" computeExpression="esql://routine/ru.croc.sbkz.adapters.gcvp.esql#FileRequestForGCVP_GenerateFileIdAndSaveRequestInfo.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="GenerateFileIdAndSaveRequestInfo"/>
+      </nodes>
+      <nodes xmi:type="ComIbmFilter.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_6" location="545,108" filterExpression="esql://routine/ru.croc.sbkz.adapters.gcvp.esql#FileRequestForGCVP_IsIINRequest.Main">
+        <translation xmi:type="utility:ConstantString" string="IsIINRequest"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_8" location="674,74" computeExpression="esql://routine/ru.croc.sbkz.adapters.gcvp.esql#FileRequestForGCVP_ConvertMDO2GCVPRNN.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertMDO2GCVPRNN"/>
+      </nodes>
+      <nodes xmi:type="ComIbmThrow.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_12" location="279,190" rotation="TOP_TO_BOTTOM" messageText="Something going wrong the flow. The exception has been logged.">
+        <translation xmi:type="utility:ConstantString" string="ErrorRethrow"/>
+      </nodes>
+      <nodes xmi:type="ComIbmEmailOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_10" location="858,633" rotation="TOP_TO_BOTTOM" attachmentContent="$Root/MRM" attachmentContentType="application/octet-stream" attachmentContentEncoding="base64">
+        <translation xmi:type="utility:ConstantString" string="Email Output"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_13" location="849,536" rotation="TOP_TO_BOTTOM" computeExpression="esql://routine/ru.croc.sbkz.adapters.gcvp.esql#FileRequestForGCVP_SetEmailOptions.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="SetEmailOptions"/>
+      </nodes>
+      <nodes xmi:type="ComIbmResetContentDescriptor.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_2" location="826,138" rotation="TOP_TO_BOTTOM" messageDomain="BLOB" resetMessageDomain="true">
+        <translation xmi:type="utility:ConstantString" string="ConvertOutputToBLOB"/>
+      </nodes>
+      <nodes xmi:type="ComIbmFileOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_11" location="755,534" rotation="TOP_TO_BOTTOM">
+        <translation xmi:type="utility:ConstantString" string="File Output"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_14" location="858,431" rotation="TOP_TO_BOTTOM" computeExpression="esql://routine/ru.croc.sbkz.adapters.gcvp.esql#FileRequestForGCVP_Passthrough.Main">
+        <translation xmi:type="utility:ConstantString" string="Passthrough"/>
+      </nodes>
+      <nodes xmi:type="ComIbmJavaCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_16" location="824,332" rotation="TOP_TO_BOTTOM" javaClass="ru.croc.sbkz.adapters.gcvp.java.IBM1174OutputConverter">
+        <translation xmi:type="utility:ConstantString" string="ConvertFromUTF8To1174"/>
+      </nodes>
+      <nodes xmi:type="ComIbmFlowOrder.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_15" location="862,238" rotation="TOP_TO_BOTTOM">
+        <translation xmi:type="utility:ConstantString" string="Flow Order"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_13" targetNode="FCMComposite_1_9" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_8" targetNode="FCMComposite_1_1" sourceNode="FCMComposite_1_6" sourceTerminalName="OutTerminal.true" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_9" targetNode="FCMComposite_1_8" sourceNode="FCMComposite_1_6" sourceTerminalName="OutTerminal.false" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_12" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_9" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_11" targetNode="FCMComposite_1_10" sourceNode="FCMComposite_1_13" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_8" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_15" targetNode="FCMComposite_1_11" sourceNode="FCMComposite_1_14" sourceTerminalName="OutTerminal.out1" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_17" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_14" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_14" targetNode="FCMComposite_1_14" sourceNode="FCMComposite_1_16" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_15" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_16" sourceNode="FCMComposite_1_15" sourceTerminalName="OutTerminal.first" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_10" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_15" sourceTerminalName="OutTerminal.second" targetTerminalName="InTerminal.Input"/>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.Basic" configurable="true" userDefined="true" describedAttribute="Property.SMTPServer">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.SMTPServer" bundleName="ru/croc/sbkz/adapters/gcvp/flow/FileRequestForGCVP" pluginId="AdaptersKZ"/>
+        <propertyDescriptor groupName="Group.Basic" configurable="true" userDefined="true" describedAttribute="Property.ToAddress">
+          <propertyName xmi:type="utility:TranslatableString" key="Property.ToAddress" bundleName="ru/croc/sbkz/adapters/gcvp/flow/FileRequestForGCVP" pluginId="AdaptersKZ"/>
+          <propertyDescriptor groupName="Group.Basic" configurable="true" userDefined="true" describedAttribute="Property.FromAddress">
+            <propertyName xmi:type="utility:TranslatableString" key="Property.FromAddress" bundleName="ru/croc/sbkz/adapters/gcvp/flow/FileRequestForGCVP" pluginId="AdaptersKZ"/>
+            <propertyDescriptor groupName="Group.Basic" configurable="true" userDefined="true" describedAttribute="Property.ReplyToAddress">
+              <propertyName xmi:type="utility:TranslatableString" key="Property.ReplyToAddress" bundleName="ru/croc/sbkz/adapters/gcvp/flow/FileRequestForGCVP" pluginId="AdaptersKZ"/>
+              <propertyDescriptor groupName="Group.Basic" configurable="true" userDefined="true" describedAttribute="Property.EmailSubject">
+                <propertyName xmi:type="utility:TranslatableString" key="Property.EmailSubject" bundleName="ru/croc/sbkz/adapters/gcvp/flow/FileRequestForGCVP" pluginId="AdaptersKZ"/>
+                <propertyDescriptor groupName="Group.Basic" configurable="true" userDefined="true" describedAttribute="Property.XPriority">
+                  <propertyName xmi:type="utility:TranslatableString" key="Property.XPriority" bundleName="ru/croc/sbkz/adapters/gcvp/flow/FileRequestForGCVP" pluginId="AdaptersKZ"/>
+                  <propertyDescriptor groupName="Group.Basic" configurable="true" describedAttribute="Property.OutputDirectory">
+                    <propertyName xmi:type="utility:TranslatableString" key="Property.OutputDirectory" bundleName="ru/croc/sbkz/adapters/gcvp/flow/FileRequestForGCVP" pluginId="AdaptersKZ"/>
+                  </propertyDescriptor>
+                </propertyDescriptor>
+              </propertyDescriptor>
+            </propertyDescriptor>
+          </propertyDescriptor>
+        </propertyDescriptor>
+      </propertyDescriptor>
+    </propertyOrganizer>
+    <attributeLinks promotedAttribute="Property.OutputDirectory" overriddenNodes="FCMComposite_1_11">
+      <overriddenAttribute href="ComIbmFileOutput.msgnode#Property.outputDirectory"/>
+    </attributeLinks>
+    <stickyBoard>
+      <stickyNote location="187,294" association="FCMComposite_1_12">
+        <body xmi:type="utility:ConstantString" string="В будущем следует заменить&#xA;на подпоток, который обрабатывает&#xA;все возможные (и нужные для перехвата)&#xA;ошибки"/>
+      </stickyNote>
+    </stickyBoard>
+  </eClassifiers>
+</ecore:EPackage>

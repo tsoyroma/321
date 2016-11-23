@@ -1,0 +1,97 @@
+BROKER SCHEMA ru.croc.sbkz.utils
+
+/**
+ * Копирование заголовков из InputRoot в OutputRoot.
+ * Осуществляется путем воссоздания всех доменов из InputRoot
+ * в OutputRoot. Функцию можно применять только на "чистый" OutputRoot,
+ * т.е. на тот, в котором еще не было никаких присвоений и не содержит никаких
+ * дочерних узлов.
+ **/
+CREATE PROCEDURE CopyMessageHeaders(IN inRoot REFERENCE, IN outRoot REFERENCE) BEGIN
+	DECLARE I INTEGER 1;
+	DECLARE J INTEGER;
+	DECLARE domainName CHARACTER;
+	
+	SET J = CARDINALITY(inRoot.*[]);
+	WHILE I < J DO
+		SET domainName = FIELDNAME(inRoot.*[I]);
+		IF domainName = 'Properties' THEN
+			SET outRoot.*[I] = inRoot.*[I]; 
+		ELSE
+			CREATE LASTCHILD OF outRoot DOMAIN(domainName) NAME domainName;
+			SET outRoot.*[<] = inRoot.*[I];
+		END IF;
+		SET I = I + 1;
+	END WHILE;
+END;
+
+/**
+ * Копирование всего сообщения из InputRoot в OutputRoot.
+ * Осуществляется путем воссоздания всех доменов из InputRoot
+ * в OutputRoot. Функцию можно применять только на "чистый" OutputRoot,
+ * т.е. на тот, в котором еще не было никаких присвоений и не содержит никаких
+ * дочерних узлов.
+ **/
+CREATE PROCEDURE CopyWholeMessage(IN inRoot REFERENCE, IN outRoot REFERENCE) BEGIN
+	DECLARE I INTEGER 1;
+	DECLARE J INTEGER;
+	DECLARE domainName CHARACTER;
+	SET J = CARDINALITY(inRoot.*[]);
+	WHILE I <= J DO
+		SET domainName = FIELDNAME(inRoot.*[I]);
+		IF domainName = 'Properties' THEN
+			SET outRoot.*[I] = inRoot.*[I]; 
+		ELSE
+			CREATE LASTCHILD OF outRoot DOMAIN(domainName) NAME domainName;
+			SET outRoot.*[<] = inRoot.*[I];
+		END IF;
+		SET I = I + 1;
+	END WHILE;
+END;
+
+/**
+ * Конкатенирует имя и отчество в единое поле через пробел. Обрезает лишние пробелы.
+ **/
+CREATE FUNCTION combineFirstNames(IN firstName CHARACTER, IN middleName CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN TRIM(COALESCE(firstName, '') || COALESCE(' ' || middleName, ''));
+END;
+
+/**
+ * Извлекает первое имя из строки, в которой через пробел указаны несколько имен (или имя+отчество).
+ **/
+CREATE FUNCTION parseFormerName(IN firstNames CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF CONTAINS(firstNames, ' ') THEN
+		RETURN SUBSTRING(TRIM(firstNames) BEFORE ' ');
+	ELSE 
+		RETURN firstNames;
+	END IF;
+END;
+
+/**
+ * Извлекает второе и последующие имена (отчество) из строки, в которой через пробел указаны несколько имен (или имя+отчество).
+ **/
+CREATE FUNCTION parseLatterName(IN firstNames CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN TRIM(SUBSTRING(TRIM(firstNames) AFTER ' '));
+END;
+
+/**
+ * Очистка номера телефона от нецифровых значений 
+ **/
+CREATE FUNCTION cleanupPhoneNum(IN phone CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE result CHARACTER '';
+	DECLARE strLen INTEGER LENGTH(phone);
+	DECLARE i INTEGER 1;
+	WHILE i<=strLen DO
+		DECLARE chr CHARACTER SUBSTRING(phone FROM i FOR 1);
+		IF chr IN ('0', '1', '2', '3', '4', '5', '6', '7', '8', '9') THEN
+			SET result = result || chr;
+		END IF;
+		SET i = i + 1;
+	END WHILE;
+	RETURN result;
+END;
+

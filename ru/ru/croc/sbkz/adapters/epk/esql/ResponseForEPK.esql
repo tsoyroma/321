@@ -1,0 +1,127 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.epk.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+
+/**
+ * Восстановление MQ-заголовка исходного сообщения
+ **/
+CREATE COMPUTE MODULE ResponseForEPK_AddOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Маршрутизация в соответствии с операцией
+ **/
+CREATE COMPUTE MODULE ResponseForEPK_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZExpMDMLegalClientDataRs' THEN
+			SET labelName = 'KZExpMDMLegalClientDataRs';
+		WHEN 'KZExpMDMProvateClientDataRs' THEN
+			SET labelName = 'KZExpMDMProvateClientDataRs';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown message format', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+	Нотификация о сохранении клиента ЮЛ в CRM - KZExpMDMLegalClientDataRs
+*/
+CREATE COMPUTE MODULE ResponseForEPK_ConvertMDO2EPK_ClientCommitLegal
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'CLIENTCOMMIT');	
+
+		DECLARE source REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Sources.Source AS source;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE cifId CHARACTER NULL;
+		DECLARE sourceSystemId CHARACTER NULL;
+		DECLARE sourceSystemCode CHARACTER NULL;
+		
+		FOR orgId AS inRef.OrgInfo.OrgIdExt[] DO
+			IF orgId.Key='CIF' THEN
+				SET cifId 					= orgId.Value;
+			ELSEIF orgId.Key = inRef.SPName THEN
+				SET sourceSystemId 			= orgId.Value;
+				SET sourceSystemCode 		= orgId.Key;
+			END IF;
+		END FOR;
+		
+		SET source.CifId 					= cifId;	
+		SET source.Surrogate 				= sourceSystemId;	
+		SET source.ObjectType 				= 'ORGANIZATION';	
+		SET source.SourceSystemCode 		= sourceSystemCode;	
+		
+		--SET source.TimeStamp				= inRef.OrgInfo.DTModify;
+		SET source.TimeStamp				= Environment.UserProperties.TimeStamp;
+		SET source.User						= inRef.OrgInfo.ABSManager;
+		SET source.Comment					= CASE WHEN inRef.Status.*:StatusCode <> '0' THEN inRef.Status.*:StatusDesc ELSE NULL END;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Уведомление о приёме карточки клиента - ФЛ
+ **/
+CREATE COMPUTE MODULE ResponseForEPK_ConvertMDO2EPK_ClientCommitPrivate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartEPKRq(InputRoot, OutputRoot, 'CLIENTCOMMIT');	
+		DECLARE source REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Sources.Source AS source;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE cifId CHARACTER NULL;
+		DECLARE sourceSystemId CHARACTER NULL;
+		DECLARE sourceSystemCode CHARACTER NULL;
+		
+		FOR personId AS inRef.PersonInfo.PersonIdExt[] DO
+			IF personId.Key = 'CIF' THEN
+				SET cifId 					= personId.Value;
+			ELSEIF personId.Key = inRef.SPName THEN
+				SET sourceSystemId 			= personId.Value;
+				SET sourceSystemCode 		= personId.Key;
+			END IF;
+		END FOR;
+		
+		IF sourceSystemId IS NULL THEN
+			THROW USER EXCEPTION VALUES('Unknown source system client identifier');
+		END IF;
+		
+		SET source.CifId 					= cifId;	
+		SET source.Surrogate 				= sourceSystemId;	
+		SET source.ObjectType 				= 'PERSON';	
+		SET source.SourceSystemCode 		= sourceSystemCode;	
+		
+		SET source.TimeStamp				= inRef.PersonInfo.DTModify;
+		SET source.User						= inRef.PersonInfo.ABSManager;
+		SET source.Comment					= CASE WHEN inRef.Status.*:StatusCode <> '0' THEN inRef.Status.*:StatusDesc ELSE NULL END;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

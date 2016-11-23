@@ -1,0 +1,33 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pshep.esql
+
+
+CREATE PROCEDURE FillMDOStandartElementsRs (IN inroot REFERENCE, IN outroot REFERENCE, IN amlStatus CHARACTER)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;
+	
+	SET outroot.*:*[<].Status.ifxca:StatusCode VALUE	= CASE
+			WHEN amlStatus IN ('0', '1', '2') THEN '0'
+			WHEN amlStatus IN ('3') THEN '1001'
+			END;
+	/*
+	SET outroot.*:*[<].Status.ifxca:StatusDesc VALUE	= inroot.*:*[<].Status.StatusDesc;
+	*/
+END;
+
+
+
+CREATE PROCEDURE FillMDOStandardElementsRq (IN inRef REFERENCE, IN outRef REFERENCE, IN msgType CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF outRef DOMAIN('XMLNSC') NAME 'XMLNSC';
+	DECLARE outBody REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef.XMLNSC AS outBody NAME msgType;
+	SET outBody.RqUID		= FIELDVALUE(inRef.RqUID);
+	SET outBody.RqTm		= FIELDVALUE(inRef.RqTm);	
+	SET outBody.OperUID		= '';
+	SET outBody.SPName		= '';
+	SET outBody.BankInfo	= '';
+END;
+

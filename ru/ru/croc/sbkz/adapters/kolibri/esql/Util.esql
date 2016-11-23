@@ -1,0 +1,253 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.kolibri.esql
+
+DECLARE DATE_QP   CONSTANT CHARACTER 'yyyy-MM-dd''T''HH:mm:ss.SSSZZZ';
+DECLARE DATE_KOLI CONSTANT CHARACTER 'yyyy-MM-dd''T''HH:mm:ss.SSSSSSZZZ';
+
+/**
+ * Заполнение стандартных полей МДО в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillMDOStandardElementsRs (IN outRef REFERENCE, IN origRef REFERENCE, IN localEnv REFERENCE)
+BEGIN
+	DECLARE status CHARACTER COALESCE(FIELDVALUE(localEnv.SOAP.*:Envelope.*:Body.*:Fault.*:faultCode),'0');
+	
+	SET outRef.RqUID							= origRef.RqUID;
+	SET outRef.RqTm								= origRef.RqTm;
+	SET outRef.OperUID							= '';
+	SET outRef.SPName							= origRef.SPName;
+	
+	SET outRef.Status.ifxca:StatusCode			= status;
+	SET outRef.Status.ifxca:Severity			= 'Info';
+	SET outRef.Status.ifxca:StatusDesc			= '';		
+END;
+
+CREATE FUNCTION getCounter(IN inRef REFERENCE, IN symbol CHARACTER) RETURNS INTEGER
+BEGIN	
+	DECLARE COUNTER INTEGER 0;
+	
+	DECLARE I INTEGER 1;
+	DECLARE J INTEGER CARDINALITY(inRef.*[]);
+	
+	WHILE I <= J DO
+		
+		IF FIELDNAME(inRef.[I]) = symbol THEN
+			
+			SET COUNTER = COUNTER + 1;
+			
+		END IF;	
+		
+		SET I = I + 1;
+		
+	END WHILE;	
+	
+	RETURN COUNTER;	
+END;
+
+CREATE FUNCTION getPositions(IN inRef REFERENCE, IN symbol CHARACTER) RETURNS CHARACTER
+BEGIN	
+	DECLARE POSITIONS CHARACTER '';
+	
+	DECLARE I INTEGER 1;
+	DECLARE J INTEGER CARDINALITY(inRef.*[]);
+	
+	WHILE I <= J DO
+		
+		IF FIELDNAME(inRef.[I]) = symbol THEN
+			
+			SET POSITIONS = POSITIONS || '' || I;
+			
+		END IF;	
+		
+		SET I = I + 1;
+		
+	END WHILE;	
+	
+	RETURN POSITIONS;	
+END;
+
+CREATE PROCEDURE FillCycleKolibri(IN inRef REFERENCE, IN outRef REFERENCE, IN nameSpace CHARACTER, IN nameField CHARACTER)
+BEGIN	
+	DECLARE I INTEGER 1;
+	DECLARE J INTEGER CARDINALITY(inRef.*[]);
+	DECLARE fieldName CHARACTER '';
+	
+	DECLARE oRef REFERENCE TO outRef;
+	
+	CASE nameSpace 
+	WHEN 'mtblitz' THEN
+		
+		IF nameField <> '' THEN
+			 CREATE LASTCHILD OF outRef AS oRef NAMESPACE mtblitz NAME nameField;
+		END IF;
+		
+	WHEN 'ind' THEN
+		
+		IF nameField <> '' THEN
+			 CREATE LASTCHILD OF outRef AS oRef NAMESPACE ind NAME nameField;
+		END IF;
+	
+	WHEN 'ca' THEN
+		
+		IF nameField <> '' THEN
+			 CREATE LASTCHILD OF outRef AS oRef NAMESPACE ca NAME nameField;
+		END IF;
+	
+	WHEN 'orgs' THEN
+		
+		IF nameField <> '' THEN
+			 CREATE LASTCHILD OF outRef AS oRef NAMESPACE orgs NAME nameField;
+		END IF;
+	
+	WHEN 'mt' THEN
+		
+		IF nameField <> '' THEN
+			 CREATE LASTCHILD OF outRef AS oRef NAMESPACE mt NAME nameField;
+		END IF;
+	
+	WHEN 'iam' THEN
+		
+		IF nameField <> '' THEN
+			 CREATE LASTCHILD OF outRef AS oRef NAMESPACE iam NAME nameField;
+		END IF;	
+			
+	END CASE;
+	
+	WHILE I<=J DO
+		
+		SET fieldName = FIELDNAME(inRef.[I]);
+		DECLARE fieldCount INTEGER CARDINALITY(inRef.[I].*[]);
+		
+		IF fieldName <> 'gid' AND fieldName <> 'pgid' THEN
+				
+			CASE nameSpace 
+			WHEN 'mtblitz' THEN
+				
+				IF fieldCount = 0 THEN			
+					SET oRef.mtblitz:{fieldName} = FIELDVALUE(inRef.[I]);
+				ELSE				
+					CREATE LASTCHILD OF oRef NAMESPACE mtblitz NAME fieldName;
+				END IF;
+			
+			WHEN 'ind' THEN
+				
+				IF fieldCount = 0 THEN			
+					SET oRef.ind:{fieldName} = FIELDVALUE(inRef.[I]);
+				ELSE				
+					CREATE LASTCHILD OF oRef NAMESPACE ind NAME fieldName;
+				END IF;
+			
+			WHEN 'ca' THEN
+				
+				IF fieldCount = 0 THEN			
+					SET oRef.ca:{fieldName} = FIELDVALUE(inRef.[I]);
+				ELSE				
+					CREATE LASTCHILD OF oRef NAMESPACE ca NAME fieldName;
+				END IF;
+				
+			WHEN 'orgs' THEN
+				
+				IF fieldCount = 0 THEN			
+					SET oRef.orgs:{fieldName} = FIELDVALUE(inRef.[I]);
+				ELSE				
+					CREATE LASTCHILD OF oRef NAMESPACE orgs NAME fieldName;
+				END IF;
+			
+			WHEN 'mt' THEN
+				
+				IF fieldCount = 0 THEN			
+					SET oRef.mt:{fieldName} = FIELDVALUE(inRef.[I]);
+				ELSE				
+					CREATE LASTCHILD OF oRef NAMESPACE mt NAME fieldName;
+				END IF;
+			
+			WHEN 'iam' THEN
+				
+				IF fieldCount = 0 THEN			
+					SET oRef.iam:{fieldName} = FIELDVALUE(inRef.[I]);
+				ELSE				
+					CREATE LASTCHILD OF oRef NAMESPACE iam NAME fieldName;
+				END IF;	
+				
+			END CASE;
+		
+		END IF;
+			
+		SET I = I + 1;
+		
+	END WHILE;		
+END;	
+ 
+CREATE PROCEDURE FillSomeField(IN inRef REFERENCE, IN outRef REFERENCE, IN nameSpace CHARACTER, IN nameField CHARACTER)
+BEGIN
+	DECLARE COUNT INTEGER 1; -- счетчик
+    DECLARE FIELDS INTEGER CARDINALITY(inRef.*[]);
+    
+    DECLARE oRef REFERENCE TO outRef;
+    
+    CASE nameSpace 
+			WHEN 'mtblitz' THEN
+    
+			    WHILE COUNT <= FIELDS DO       	
+			       	IF FIELDNAME(inRef.[COUNT]) = nameField THEN        		
+			      		CREATE LASTCHILD OF outRef AS oRef NAMESPACE mtblitz NAME nameField;
+			       		SET oRef = FIELDVALUE(inRef.[COUNT]);          		
+			       	END IF;        	
+			       	SET COUNT = COUNT + 1;        	
+			    END WHILE;
+			
+    		WHEN 'ind' THEN 
+    			
+    			WHILE COUNT <= FIELDS DO        	
+			       	IF FIELDNAME(inRef.[COUNT]) = nameField THEN        		
+			      		CREATE LASTCHILD OF outRef AS oRef NAMESPACE ind NAME nameField;
+			       		SET oRef = FIELDVALUE(inRef.[COUNT]);          		
+			       	END IF;        	
+			       	SET COUNT = COUNT + 1;        	
+			    END WHILE;
+			
+    		WHEN 'ca' THEN
+    			
+    			WHILE COUNT <= FIELDS DO        	
+			       	IF FIELDNAME(inRef.[COUNT]) = nameField THEN        		
+			      		CREATE LASTCHILD OF outRef AS oRef NAMESPACE ca NAME nameField;
+			       		SET oRef = FIELDVALUE(inRef.[COUNT]);          		
+			       	END IF;        	
+			       	SET COUNT = COUNT + 1;        	
+			    END WHILE;
+			    
+    		WHEN 'orgs' THEN
+    			
+    			WHILE COUNT <= FIELDS DO        	
+			       	IF FIELDNAME(inRef.[COUNT]) = nameField THEN        		
+			      		CREATE LASTCHILD OF outRef AS oRef NAMESPACE orgs NAME nameField;
+			       		SET oRef = FIELDVALUE(inRef.[COUNT]);          		
+			       	END IF;        	
+			       	SET COUNT = COUNT + 1;        	
+			    END WHILE;
+			    
+    		WHEN 'iam' THEN
+    			
+    			WHILE COUNT <= FIELDS DO        	
+			       	IF FIELDNAME(inRef.[COUNT]) = nameField THEN        		
+			      		CREATE LASTCHILD OF outRef AS oRef NAMESPACE iam NAME nameField;
+			       		SET oRef = FIELDVALUE(inRef.[COUNT]);          		
+			       	END IF;        	
+			       	SET COUNT = COUNT + 1;        	
+			    END WHILE;
+			
+    		WHEN 'mt' THEN
+    			
+    			WHILE COUNT <= FIELDS DO        	
+			       	IF FIELDNAME(inRef.[COUNT]) = nameField THEN        		
+			      		CREATE LASTCHILD OF outRef AS oRef NAMESPACE mt NAME nameField;
+			       		SET oRef = FIELDVALUE(inRef.[COUNT]);          		
+			       	END IF;        	
+			       	SET COUNT = COUNT + 1;        	
+			    END WHILE;
+			    
+	END CASE;                    	    
+END;
+
+CREATE FUNCTION convertFromQPtoKOLI (IN inDate CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CAST(CAST(inDate AS TIMESTAMP FORMAT 'yyyy-MM-dd''T''HH:mm:ss.SSSZZZ') AS CHARACTER FORMAT 'yyyy-MM-dd''T''HH:mm:ss.SSSSSSZZZ');
+END; 

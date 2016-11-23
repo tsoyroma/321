@@ -1,0 +1,28 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.way.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE FileResponseFromWAY_SetFilename
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN	
+		
+		SET Environment.UserProperties.RqUID = Environment.UserProperties.FileExchange.RqUID;
+		
+		IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+			CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		END IF;
+
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.FileExchange.MsgId AS BLOB);
+		SET OutputRoot.MQMD.Format		= MQFMT_STRING;
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+		
+		SET OutputRoot.XMLNSC 			= InputRoot.XMLNSC; 
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+

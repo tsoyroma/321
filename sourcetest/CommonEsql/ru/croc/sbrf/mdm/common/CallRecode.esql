@@ -1,0 +1,100 @@
+BROKER SCHEMA ru.croc.sbrf.mdm.common
+
+
+/*
+перекодировка из ИС в МДМ
+*/
+CREATE COMPUTE MODULE CodeConversions_ToMDM
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+
+		-- корневой элемент сообщения
+		DECLARE rootRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		-- определю идентификатор системы
+		DECLARE sysId CHARACTER;
+		-- определю из узла SPName сообщения
+		SET sysId = getSysId(FIELDVALUE(rootRef.SPName));
+
+		-- инициализирую контекст
+		DECLARE ctx ROW;
+		CALL initContext(ctx, rootRef, sysId);
+
+		-- задам формат даты
+		SET ctx.DateFormat = Environment.UserProperties.DateFormat;
+		-- задам формат даты/времени
+		SET ctx.DateTimeFormat = Environment.UserProperties.DateTimeFormat;
+
+		-- если не задана валюта договора, то это обязательное для МДМ поле заполняю значением "без валюты"
+		IF EXISTS(OutputRoot.XMLNSC.*[<].AgreemtInfo[]) THEN
+			IF 0 = CARDINALITY(OutputRoot.XMLNSC.*[<].AgreemtInfo.ProductCurrency[]) THEN
+				SET OutputRoot.XMLNSC.*[<].AgreemtInfo.ProductCurrency = TransactionsWithoutCurrency;
+			END IF;
+		END IF;
+		
+		-- перекодирую идентификаторы
+		CALL recodeMDO(rootRef, ctx);
+		
+		--Устанавливаем проритет сообщений для операций создания/модификации клиентов/продуктов
+		DECLARE operationRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE operationName CHARACTER FIELDNAME(operationRef);
+		IF operationName IN ('CustAddRq', 'CustModRq', 'AgreemtAddRq', 'AgreemtModRq', 'CustOrgAddRq','CustOrgModRq','AgreemtOrgAddRq','AgreemtOrgModRq') THEN
+           SET OutputRoot.MQMD.Priority = 1;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+		
+
+	
+	
+END MODULE;
+
+/*
+перекодировка из МДМ в ИС
+*/
+CREATE COMPUTE MODULE CodeConversions_FromMDM
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+
+		-- корневой элемент сообщения
+		DECLARE rootRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		-- определю идентификатор системы
+		DECLARE sysId CHARACTER;
+		-- код системы беру из переменной среды
+		SET sysId = getSysId(Environment.UserProperties.SPName);
+
+		-- инициализирую контекст
+		DECLARE ctx ROW;
+		CALL initContext(ctx, rootRef, sysId);
+
+		-- задам формат даты
+		SET ctx.DateFormat = Environment.UserProperties.DateFormat;
+		-- задам формат даты/времени
+		SET ctx.DateTimeFormat = Environment.UserProperties.DateTimeFormat;
+		-- задам значения признаков (тип Boolean)
+		SET ctx.ValueYes = COALESCE(Environment.UserProperties.ValueYes, 'True');
+		SET ctx.ValueNo = COALESCE(Environment.UserProperties.ValueNo, 'False');
+		-- значение признака, означающее что св-во IsPrimary узла IndustId 
+		-- надо перекодировать как Boolean, а не 0/1
+		SET ctx.IsPrimaryAsBoolean = Environment.UserProperties.IsPrimaryAsBoolean;
+
+		-- перекодирую идентификаторы
+		CALL recodeMDO(rootRef, ctx);
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+

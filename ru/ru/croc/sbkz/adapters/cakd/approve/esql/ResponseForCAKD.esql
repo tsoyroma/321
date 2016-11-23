@@ -1,0 +1,1224 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.cakd.approve.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE ResponseForCAKD_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZBlackListRs' THEN
+			SET labelName = 'KZBlackListRs';
+		WHEN 'KZGetCreditHistoryRs' THEN
+			SET labelName = 'KZGetCreditHistoryRs';
+		WHEN 'KZGetPensionRs' THEN
+			SET labelName = 'KZGetPensionRs';		
+		WHEN 'KZCheckMDMPersonInfoRs' THEN 
+			SET labelName = 'KZCheckMDMPersonInfoRs';	 			
+		WHEN 'KZSendMDMPrivateClientDataRs' THEN
+			SET labelName = 'KZSendMDMPrivateClientDataRs';					
+		WHEN 'KZLSBOOResponse' THEN
+			SET labelName = 'KZLSBOOResponse';		
+		WHEN 'KZGetCreditFromCRMRs' THEN -- Сервис по обращению в crmretail u07357 20.07.15
+			SET labelName = 'KZGetCreditFromCRMRs';	
+		WHEn 'KZSetRequestStatusRs' THEN -- 21.07.2015 u07357
+			SET labelName = 'KZSetRequestStatusRs';		
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in CAKD(ResponseForCAKD)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCAKD_Convert2CAKD
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'AML_OUT';
+						 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE cur_date CHARACTER CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		
+		SET outRef.UID				= Environment.UserProperties.RqUID;
+		SET outRef.RESPONSE_DATE	= cur_date;
+		SET outRef.ERROR_CODE		= inRef.TerrStatus;
+		SET outRef.ERROR_TEXT		= inRef.BLStatus;
+		SET outRef.AML_RESULT		= inRef.AMLStatus;
+		
+		PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCAKD_AddOrigMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCAKD_Convert2CAKD_PKB
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'PKB_OUT';
+						 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE cur_date CHARACTER CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		
+		SET outRef.UID				= Environment.UserProperties.RqUID;
+		SET outRef.RESPONSE_DATE	= cur_date;
+		
+		-- Сообщения об ошибках от ПКБ иногда отсутвует в этих полях
+		--SET outRef.ERROR_CODE		= inRef.Status.*:StatusCode;
+		--SET outRef.ERROR_TEXT		= inRef.Status.*:StatusDesc;
+
+		--SET outRef.ERROR_CODE		= inRef.StatusCodeCAKD; 
+		--SET outRef.ERROR_TEXT		= inRef.StatusDescCAKD;		
+		
+		SET outRef.ERROR_CODE		= '0';--inRef.StatusCodeCAKD; 
+		SET outRef.ERROR_TEXT		= '';--inRef.StatusDescCAKD;
+		
+		SET outRef.PKB_RESPONSE = '<Root>
+  <Title intitle="СУБЪЕКТ КРЕДИТНОГО ОТЧЕТА" name="tblTitle" title="Республика Казахстан. ТОО «Первое кредитное бюро»"/>
+  <Header EntityType="Individual" ReportCode="Report.ReportName.Advanced" intitle="СУБЪЕКТ КРЕДИТНОГО ОТЧЕТА" name="tblHeader" stitle="Данные о субъекте кредитной истории" subject="Физическое лицо" title="Кредитный отчет - расширенный">
+    <FIUniqueNumberID id="" title="Уникальный номер финансового учреждения" value=""/>
+    <RegistrationID stitle="ID субъекта" title="Регистрационный ИД" value="3476400"/>
+    <RNN id="1" title="РНН" value="150420005225"/>
+    <SIC id="3" title="СИК" value="8CRMZS09YC9NT004"/>
+    <IIN id="14" title="ИИН" value="841103302281"/>
+    <DateOfBirth title="Дата рождения" value="03.11.1984"/>
+    <Gender title="Пол" value="Мужской"/>
+    <Surname title="Фамилия в настоящее время" value="КОЙШИН"/>
+    <Name stitle="ФИО" title="Имя" value="МЕРЕКЕ"/>
+    <FathersName title="Отчество" value="БИЛАШЕВИЧ"/>
+    <BirthName title="Фамилия по рождению" value=""/>
+    <CityOfBirth title="Место рождения  (город)" value=""/>
+    <Education id="" title="Образование" value=""/>
+    <MatrialStatus id="" title="Семейное положение" value=""/>
+    <RegionOfBirth title="Место рождения ( область, район)" value=""/>
+    <CountryOfBirth title="Страна рождения (код страны)" value=""/>
+  </Header>
+  <SubjectDetails name="SubjectDetails" stitle="Дополнительная информация" title="СУБЪЕКТ, СЕМЬЯ И ЗАНЯТОСТЬ  ">
+    <NumberOfDependents title="Кол-во иждивенцев до 18 лет" value="0"/>
+    <NumberOfChildern stitle="старше 18 лет"/>
+    <NumberOfDependents stitle2="Количество иждивенцев" stitle3="Возраст иждивенцев"/>
+    <NumberOfChildern title="Кол-во иждивенцев старше 18 лет" value="0"/>
+    <NumberOfDependents stitle="до 18 лет"/>
+    <StreetAddress title="Улица" value="ЖУМЫСКЕР 2"/>
+    <Street title="Улица" value="ЖУМЫСКЕР 2"/>
+    <City title="Город" value="г.Атырау"/>
+    <ZipCode title="Почтовый индекс" value=""/>
+    <Region title="Область, район" value="Атырауская область"/>
+    <Country title="Cтрана" value="Казахстан"/>
+    <Number title="Номер дома" value=""/>
+    <CellularPhone title="Номер сотового телефона" value=" +7(701)1802831; 87011802831"/>
+    <HomePhone title="Домашний телефон" value=" дом.: 87122265546, моб.: 87011802831, раб.: 87122250838, конт.: 87017709724 ДРУГ ЕРЛАН"/>
+    <OfficePhone title="Рабочий телефон" value=""/>
+    <Fax title="Номер факса" value=""/>
+    <Email title="E-Mail" value=""/>
+    <EmployeesSalary title="Зарплата (нетто)" value=""/>
+  </SubjectDetails>
+  <SubjectsAddress stitle="Адреса" stitle2="Контакты" title="Постоянное место жительства">
+    <Address title="Текущие" type="Current">
+      <AddressType title="Тип адреса" value="Постоянное место жительства"/>
+      <Street title="Улица" value="АТЫРАУ ПОС. ЖУМИСКЕР ,  175,  кв."/>
+      <Number stitle="№ дома/квартиры" title="Номер дома" value=""/>
+      <ZipCode title="Почтовый индекс" value=""/>
+      <City title="Город" value=""/>
+      <Region stitle="Населенный пункт" title="Область, район" value=""/>
+      <HomePhone title="Домашний телефон" value="дом.: 87122265546, моб.: 87011802831, раб.: 87122250838, конт.: 87017709724 ДРУГ ЕРЛАН"/>
+      <OfficePhone title="Рабочий телефон" value=""/>
+      <Fax title="Номер факса" value=""/>
+      <CellularPhone title="Номер сотового телефона" value="+7(701)1802831; 87011802831"/>
+      <EmailAddress title="E-Mail" value=""/>
+      <WebPageAddress title="Сайт" value=""/>
+      <AddressInserted title="Дата" value="10.03.2015"/>
+      <PostBox title="Почтовый ящик" value=""/>
+      <AdditionalInfo title="Дополнительная информация" value=""/>
+    </Address>
+    <Address title="Текущие" type="Current">
+      <AddressType title="Тип адреса" value="Постоянное место жительства"/>
+      <Street title="Улица" value="ЖУМЫСКЕР 2"/>
+      <Number stitle="№ дома/квартиры" title="Номер дома" value=""/>
+      <ZipCode title="Почтовый индекс" value=""/>
+      <City title="Город" value="г.Атырау"/>
+      <Region stitle="Населенный пункт" title="Область, район" value="Атырауская область"/>
+      <HomePhone title="Домашний телефон" value="дом.: 87122265546, моб.: 87011802831, раб.: 87122250838, конт.: 87017709724 ДРУГ ЕРЛАН"/>
+      <OfficePhone title="Рабочий телефон" value=""/>
+      <Fax title="Номер факса" value=""/>
+      <CellularPhone title="Номер сотового телефона" value="+7(701)1802831; 87011802831"/>
+      <EmailAddress title="E-Mail" value=""/>
+      <WebPageAddress title="Сайт" value=""/>
+      <AddressInserted title="Дата" value="12.06.2015"/>
+      <PostBox title="Почтовый ящик" value=""/>
+      <AdditionalInfo title="Дополнительная информация" value=""/>
+    </Address>
+  </SubjectsAddress>
+  <SubjectsAddress stitle="Адреса" stitle2="Контакты" title="Постоянное место жительства">
+    <Address title="Текущие" type="Current">
+      <AddressType title="Тип адреса" value="Постоянное место жительства"/>
+      <Street title="Улица" value="АТЫРАУ ПОС. ЖУМИСКЕР ,  175,  кв."/>
+      <Number stitle="№ дома/квартиры" title="Номер дома" value=""/>
+      <ZipCode title="Почтовый индекс" value=""/>
+      <City title="Город" value=""/>
+      <Region stitle="Населенный пункт" title="Область, район" value=""/>
+      <HomePhone title="Домашний телефон" value="дом.: 87122265546, моб.: 87011802831, раб.: 87122250838, конт.: 87017709724 ДРУГ ЕРЛАН"/>
+      <OfficePhone title="Рабочий телефон" value=""/>
+      <Fax title="Номер факса" value=""/>
+      <CellularPhone title="Номер сотового телефона" value="+7(701)1802831; 87011802831"/>
+      <EmailAddress title="E-Mail" value=""/>
+      <WebPageAddress title="Сайт" value=""/>
+      <AddressInserted title="Дата" value="10.03.2015"/>
+      <PostBox title="Почтовый ящик" value=""/>
+      <AdditionalInfo title="Дополнительная информация" value=""/>
+    </Address>
+  </SubjectsAddress>
+  <IdentificationDocuments stitle="Документы" title="ДОКУМЕНТЫ УДОСТОВЕРЯЮЩИЕ ЛИЧНОСТЬ – НАСТОЯЩАЯ И ИСТОРИЧЕСКАЯ ИНФОРМАЦИЯ">
+    <Document rank="Первичная оценка" stitle="Текущие" type="Current">
+      <Name id="1" title="Вид документа" value="РНН"/>
+      <DateOfRegistration title="Дата записи в систему" value="27.05.2007"/>
+      <DateOfIssuance title="Дата выдачи" value="01.01.1900"/>
+      <DateOfExpiration title="Срок действия" value="01.01.2098"/>
+      <Number title="Номер" value="150420005225"/>
+      <IssuanceLocation title="Кем выдан" value=""/>
+      <DateOfInserted title="Дата получения сведений кред.бюро" value="09.07.2007"/>
+    </Document>
+    <Document rank="Первичная оценка" stitle="Текущие" type="Current">
+      <Name id="14" title="Вид документа" value="Индивидуальный идентификационный номер (ИИН)"/>
+      <DateOfRegistration title="Дата записи в систему" value="18.12.2012"/>
+      <DateOfIssuance title="Дата выдачи" value="01.01.1900"/>
+      <DateOfExpiration title="Срок действия" value="01.01.2098"/>
+      <Number title="Номер" value="841103302281"/>
+      <IssuanceLocation title="Кем выдан" value=""/>
+      <DateOfInserted title="Дата получения сведений кред.бюро" value="18.12.2012"/>
+    </Document>
+    <Document rank="Вторичная оценка" stitle="Текущие" type="Current">
+      <Name id="7" title="Вид документа" value="Удостоверение личности"/>
+      <DateOfRegistration title="Дата записи в систему" value="27.05.2007"/>
+      <DateOfIssuance title="Дата выдачи" value="02.07.2002"/>
+      <DateOfExpiration title="Срок действия" value="01.01.2098"/>
+      <Number title="Номер" value="012985427"/>
+      <IssuanceLocation title="Кем выдан" value=""/>
+      <DateOfInserted title="Дата получения сведений кред.бюро" value="09.07.2007"/>
+    </Document>
+    <Document rank="Вторичная оценка" stitle="Текущие" type="Current">
+      <Name id="3" title="Вид документа" value="СИК"/>
+      <DateOfRegistration title="Дата записи в систему" value="01.01.1900"/>
+      <DateOfIssuance title="Дата выдачи" value="01.01.1900"/>
+      <DateOfExpiration title="Срок действия" value="01.01.2098"/>
+      <Number title="Номер" value="8CRMZS09YC9NT004"/>
+      <IssuanceLocation title="Кем выдан" value=""/>
+      <DateOfInserted title="Дата получения сведений кред.бюро" value="29.11.2007"/>
+    </Document>
+    <Document rank="Вторичная оценка" stitle="Текущие" type="Current">
+      <Name id="7" title="Вид документа" value="Удостоверение личности"/>
+      <DateOfRegistration title="Дата записи в систему" value="17.06.2010"/>
+      <DateOfIssuance title="Дата выдачи" value="24.12.2009"/>
+      <DateOfExpiration title="Срок действия" value="-"/>
+      <Number title="Номер" value="024684792"/>
+      <IssuanceLocation title="Кем выдан" value=""/>
+      <DateOfInserted title="Дата получения сведений кред.бюро" value="18.08.2010"/>
+    </Document>
+    <Document rank="Первичная оценка" stitle="Исторические" type="Historical">
+      <Name id="" title="Вид документа" value=""/>
+      <DateOfRegistration title="Дата записи в систему" value="01.01.1900"/>
+      <DateOfIssuance title="Дата выдачи" value="-"/>
+      <DateOfExpiration title="Срок действия" value="-"/>
+      <Number title="Номер" value="841103302281"/>
+      <IssuanceLocation title="Кем выдан" value=""/>
+      <DateOfInserted title="Дата получения сведений кред.бюро" value="23.12.2011"/>
+    </Document>
+  </IdentificationDocuments>
+  <ClassificationOfBorrower name="ClassificationOfBorrower" title="СОЦИАЛЬНО-ЭКОНОМИЧЕСКИЙ СТАТУС">
+    <BorrowerClassification id="1" title="Классификация субъекта" value="Физическое лицо"/>
+    <Patent title="Номер патента" value=""/>
+    <Resident id="1" title="Резидент/Нерезидент" value="Резидент"/>
+    <SubjectsPosition title="Род занятий" value=""/>
+    <Citizenship id="110" title="Гражданство" value="Казахстан"/>
+    <SubjectsEmployment title="Характер занятости клиента" value=""/>
+    <ForeignersCitizenship title="Гражданство иностранца" value=""/>
+    <EconomicActivityGroup title="Отрасль" value="Прочее"/>
+  </ClassificationOfBorrower>
+  <NegativeData name="NegativeData" title="СТАТУС СУБЪЕКТА">
+    <NegativeStatus title="Действующие договора" type="current" typeTitle="Текущие">
+      <NegativeStatusOfClient>
+        <NegativeStatusOfClient title="Статус субъекта" value=""/>
+        <RegistrationDate title="Последняя дата записи в систему" value="22.12.2015"/>
+      </NegativeStatusOfClient>
+      <NegativeStatusOfContract>
+        <NegativeStatusOfContract id="1" title="Статус договора" value="Стандартные кредиты"/>
+        <RegistrationDate title="Последняя дата записи в систему" value="22.12.2015"/>
+        <SubjectRole title="Роль субъекта" value="Заёмщик"/>
+        <SubjectRoleEn value="Borrower"/>
+      </NegativeStatusOfContract>
+    </NegativeStatus>
+    <NegativeStatus title="Завершенные договора" type="historical" typeTitle="Исторический">
+      <NegativeStatusOfContract>
+        <NegativeStatusOfContract id="1" title="Статус договора" value="Стандартные кредиты"/>
+        <RegistrationDate title="Последняя дата записи в систему" value="09.07.2007"/>
+        <SubjectRole title="Роль субъекта" value="Заёмщик"/>
+        <SubjectRoleEn value="Borrower"/>
+      </NegativeStatusOfContract>
+      <NegativeStatusOfContract>
+        <NegativeStatusOfContract id="2" title="Статус договора" value="Уступка/переуступка права требования по кредиту другому лицу"/>
+        <RegistrationDate title="Последняя дата записи в систему" value="30.03.2015"/>
+        <SubjectRole title="Роль субъекта" value="Заёмщик"/>
+        <SubjectRoleEn value="Borrower"/>
+      </NegativeStatusOfContract>
+      <NegativeStatusOfContract>
+        <NegativeStatusOfContract id="1" title="Статус договора" value="Стандартные кредиты"/>
+        <RegistrationDate title="Последняя дата записи в систему" value="12.01.2015"/>
+        <SubjectRole title="Роль субъекта" value="Заёмщик"/>
+        <SubjectRoleEn value="Borrower"/>
+      </NegativeStatusOfContract>
+    </NegativeStatus>
+    <NegativeStatus title="Отозванные договора" type="withdrawn" typeTitle="Текущие"/>
+  </NegativeData>
+  <SummaryInformation title="ОБЩАЯ ИНФОРМАЦИЯ - ДОГОВОРА">
+    <ExistingContracts title="Действующие договора">
+      <SubjectRole title="Заёмщик" type="Borrower">
+        <NumberOfContracts title="Количество" value="1 (KZT)"/>
+        <TotalOutstandingDebt title="Общая непогашенная сумма" value="87 015,97 KZT"/>
+        <TotalDebtOverdue title="Общая сумма просроченных взносов" value="0"/>
+        <ContractStatuses>
+          <ContractStatus count="1" value="Стандартные кредиты"/>
+        </ContractStatuses>
+      </SubjectRole>
+    </ExistingContracts>
+    <TerminatedContracts title="Завершенные договора">
+      <SubjectRole title="Заёмщик" type="Borrower">
+        <NumberOfContracts title="Количество" value="3 (KZT)"/>
+        <TotalOutstandingDebt title="Общая непогашенная сумма" value="0"/>
+        <TotalDebtOverdue title="Общая сумма просроченных взносов" value="0"/>
+        <ContractStatuses>
+          <ContractStatus count="2" value="Стандартные кредиты"/>
+          <ContractStatus count="1" value="Уступка/переуступка права требования по кредиту другому лицу"/>
+        </ContractStatuses>
+      </SubjectRole>
+    </TerminatedContracts>
+    <WithdrawnApplications title="Отозванные договора"/>
+    <NumberOfApplications title="КОЛИЧЕСТВО ОТКАЗАННЫХ/ОТОЗВАННЫХ ЗАЯВЛЕНИЙ"/>
+    <NumberOfInquiries title="Количество запросов (12м)" value="4">
+      <FirstQuarter title="1- ый квартал" value="0"/>
+      <SecondQuarter title="2- ой квартал" value="1"/>
+      <ThirdQuarter title="3- ий квартал" value="3"/>
+      <FourthQuarter title="4- ой квартал" value="0"/>
+    </NumberOfInquiries>
+  </SummaryInformation>
+  <ExistingContracts name="ExistingContracts" stitle="Действующие договора" title="ПОДРОБНАЯ ИНФОРМАЦИЯ – ДЕЙСТВУЮЩИЕ ДОГОВОРА">
+    <Contract ContractType="Кредитный договор" ContractTypeCode="Contract.Type .CreditContract" Currency="KZT">
+      <CodeOfContract title="Код контракта" value="R1977691-003_001-103-329"/>
+      <AgreementNumber title="Номер договора" value="R1977691-003"/>
+      <AgreementNumberGuarantee title="Номер договора банковской гарантии" value=""/>
+      <TypeOfFounding id="9" title="Вид финансирования" value="Кредитная карта"/>
+      <PurposeOfCredit id="01" title="Цель кредита" value="Приобретение/покупка"/>
+      <CurrencyCode title="Код валюты" value="KZT"/>
+      <ContractStatus id="1" title="Статус договора" value="Стандартные кредиты"/>
+      <DateOfApplication title="Дата заявки" value="-"/>
+      <DateOfCreditStart title="Дата начала срока действия договора" value="26.05.2015"/>
+      <DateOfCreditEnd title="Дата окончания срока действия договора" value="26.05.2017"/>
+      <DateOfRealRepayment title="Фактическая дата погашения" value="-"/>
+      <DateAgreementGuarantee title="Дата договора банковской гарантии/поручительства" value="-"/>
+      <GuaranteeEvent title="Обстоятельство (событие) прекращения обязательства банка" value=""/>
+      <LastUpdate title="Информация по состоянию на" value="12.12.2015"/>
+      <Collateral>
+        <TypeOfGuarantee title="Вид обеспечения" value="Бланковые"/>
+        <ValueOfGuarantee title="Стоимость обеспечения" value="0,00 KZT"/>
+        <TypeOfValueOfGuarantee title="Вид стоимости обеспечения" value="Рыночная стоимость"/>
+        <AdditionalInformation title="" value=""/>
+        <PlaceOfGuarantee title="" value=""/>
+      </Collateral>
+      <ClassificationOfContract title="Классификация договора" value="Однородный"/>
+      <TotalAmount title="Общая сумма кредита/валюта" value=""/>
+      <Amount title="Использованная сумма" value=""/>
+      <CreditUsage id="" title="" value=""/>
+      <ResidualAmount title="Использованная сумма (подлежащая погашению)" value="87 015,97 KZT"/>
+      <CreditLimit title="Сумма кредитного лимита" value="193 560,00 KZT"/>
+      <NumberOfOutstandingInstalments title="Кол-во непогашенных (предстоящих)  платежей" value=""/>
+      <NumberOfInstalments title="Общее количество платежей" value=""/>
+      <OutstandingAmount title="Непогашенная сумма по кредиту" value=""/>
+      <PeriodicityOfPayments id="" title="Периодичность платежей" value=""/>
+      <MethodOfPayments id="" title="Форма расчёта" value=""/>
+      <NumberOfOverdueInstalments title="Количество дней просрочки" value="0"/>
+      <OverdueAmount title="Сумма просроченных взносов" value="0,00 KZT"/>
+      <MonthlyInstalmentAmount title="Минимальный платеж" value="36 134,00 KZT"/>
+      <InterestRate title="Процентная ставка" value=""/>
+      <SubjectRole number="1" title="Роль субъекта" value="Заёмщик"/>
+      <FinancialInstitution id="126" title="Источник информации (Кредитор)" value="АО Kaspi Bank"/>
+      <SpecialRelationship title="Признак связанности с банком особыми отношениями" value=""/>
+      <AnnualEffectiveRate title="Годовая эффективная ставка вознаграждения" value=""/>
+      <NominalRate title="Номинальная ставка вознаграждения" value=""/>
+      <AmountProvisions title="Размер провизии" value=""/>
+      <LoanAccount title="Ссудный счет" value=""/>
+      <GracePrincipal title="Льготный период по основному долгу" value=""/>
+      <GracePay title="Льготный период по вознаграждению" value=""/>
+      <PlaceOfDisbursement id="" title="Место освоения кредита" value=""/>
+      <PaymentsCalendar>
+        <Year title="2015">
+          <Payment number="1" overdue="" title="" value=""/>
+          <Payment number="2" overdue="" title="" value=""/>
+          <Payment number="3" overdue="" title="" value=""/>
+          <Payment number="4" overdue="" title="" value=""/>
+          <Payment number="5" overdue="-" title="Май" value="-"/>
+          <Payment number="6" overdue="0" title="Июнь" value="0"/>
+          <Payment number="7" overdue="0" title="Июль" value="0"/>
+          <Payment number="8" overdue="0" title="Август" value="0"/>
+          <Payment number="9" overdue="0" title="Сентябрь" value="0"/>
+          <Payment number="10" overdue="0" title="Октябрь" value="0"/>
+          <Payment number="11" overdue="0" title="Ноябрь" value="0"/>
+          <Payment number="12" overdue="0" title="Декабрь" value="0"/>
+        </Year>
+      </PaymentsCalendar>
+      <ContractThirdParty title="Наименование цессионария" value=""/>
+      <ParentContractCode title="Номер родительского контракта" value=""/>
+      <ParentProvider id="" title="Поставщик родительского контракта"/>
+      <ParentContractStatus id="" title="Статус родительского контракта" value=""/>
+      <ParentOperationDate title="Дата операции в родительском процессе" value="-"/>
+      <Fine title="Пеня" value=""/>
+      <Penalty title="Штраф" value=""/>
+      <BranchLocation title="Местонахождение филиала" value=""/>
+      <ProlongationCount title="Кол-во пролонгаций" value=""/>
+      <NumberOfTransactions title="Количество транзакций" value=""/>
+      <InstalmentAmount title="Сумма периодического платежа" value="36 134,00 KZT"/>
+      <ActualDate title="Дата фактической выдачи" value="26.05.2015"/>
+      <DateOfInserted title="Дата получения сведений кред.бюро" value="22.12.2015"/>
+      <NumberOfOverdueInstalmentsMax title="Максимальное количество дней просрочки с начала действия договора" value="0"/>
+      <NumberOfOverdueInstalmentsMaxDate title="Дата актуальности информации" value="-"/>
+      <NumberOfOverdueInstalmentsMaxAmount title="Сумма просроченных взносов" value="0"/>
+      <OverdueAmountMax title="Максимальная сумма просроченных взносов с начала действия договора" value="0"/>
+      <OverdueAmountMaxDate title="Дата актуальности информации" value="-"/>
+      <OverdueAmountMaxCount title="Количество дней просрочки" value="0"/>
+      <CreditObject id="03" title="Объект кредитования" value="Потребительские товары и услуги (кроме автотранспорта)"/>
+      <InterconnectedSubjects name="InterconnectedSubjects" title="СВЯЗАННЫЕ ОБЬЕКТЫ (2-Я ФАЗА)"/>
+    </Contract>
+  </ExistingContracts>
+  <TerminatedContracts name="TerminatedContracts" stitle="Завершенные договора" title="ПОДРОБНАЯ ИНФОРМАЦИЯ – ЗАВЕРШЕННЫЕ КОНТРАКТЫ">
+    <Contract ContractType="Рассроченный (кредит)" ContractTypeCode="Contract.Type .Instalment" Currency="KZT">
+      <CodeOfContract title="Код контракта" value="TDA(CY50)-011720903"/>
+      <AgreementNumber title="Номер договора" value=""/>
+      <AgreementNumberGuarantee title="Номер договора банковской гарантии" value=""/>
+      <TypeOfFounding id="2" title="Вид финансирования" value="Займ"/>
+      <PurposeOfCredit id="6" title="Цель кредита" value="Прочие потребительские цели"/>
+      <CurrencyCode title="Код валюты" value="KZT"/>
+      <ContractStatus id="1" title="Статус договора" value="Стандартные кредиты"/>
+      <DateOfApplication title="Дата заявки" value="-"/>
+      <DateOfCreditStart title="Дата начала срока действия договора" value="27.05.2007"/>
+      <DateOfCreditEnd title="Дата окончания срока действия договора" value="23.10.2007"/>
+      <DateOfRealRepayment title="Фактическая дата погашения" value="28.10.2007"/>
+      <DateAgreementGuarantee title="Дата договора банковской гарантии/поручительства" value="-"/>
+      <GuaranteeEvent title="Обстоятельство (событие) прекращения обязательства банка" value="-"/>
+      <LastUpdate title="Информация по состоянию на" value="25.07.2008"/>
+      <Collateral>
+        <TypeOfGuarantee title="Вид обеспечения" value="Другие способы обеспечения"/>
+        <ValueOfGuarantee title="Стоимость обеспечения" value="87 308,00 KZT"/>
+        <TypeOfValueOfGuarantee title="Вид стоимости обеспечения" value="Рыночная стоимость"/>
+        <AdditionalInformation title="" value=""/>
+        <PlaceOfGuarantee title="" value=""/>
+      </Collateral>
+      <ClassificationOfContract title="Классификация договора" value="СТАНДАРТНЫЙ(0%)"/>
+      <TotalAmount title="Общая сумма кредита/валюта" value="88 181,00 KZT"/>
+      <Amount title="Использованная сумма" value=""/>
+      <CreditUsage id="" title="" value=""/>
+      <ResidualAmount title="Использованная сумма (подлежащая погашению)" value=""/>
+      <CreditLimit title="Сумма кредитного лимита" value=""/>
+      <NumberOfOutstandingInstalments title="Кол-во непогашенных (предстоящих)  платежей" value="0"/>
+      <NumberOfInstalments title="Общее количество платежей" value="10"/>
+      <OutstandingAmount title="Непогашенная сумма по кредиту" value="0,00 KZT"/>
+      <PeriodicityOfPayments id="2" title="Периодичность платежей" value="Ежемесячные платежи -30 дней"/>
+      <MethodOfPayments id="7" title="Форма расчёта" value="Возмещение непогашенной суммы страховой компанией"/>
+      <NumberOfOverdueInstalments title="Количество дней просрочки" value="0"/>
+      <OverdueAmount title="Сумма просроченных взносов" value="0,00 KZT"/>
+      <MonthlyInstalmentAmount title="Сумма периодического платежа" value="0,00 KZT"/>
+      <InterestRate title="Процентная ставка" value=""/>
+      <SubjectRole number="1" title="Роль субъекта" value="Заёмщик"/>
+      <FinancialInstitution id="126" title="Источник информации (Кредитор)" value="АО &quot;Kaspi Bank&quot;"/>
+      <SpecialRelationship title="Признак связанности с банком особыми отношениями" value=""/>
+      <AnnualEffectiveRate title="Годовая эффективная ставка вознаграждения" value=""/>
+      <NominalRate title="Номинальная ставка вознаграждения" value=""/>
+      <AmountProvisions title="Размер провизии" value=""/>
+      <LoanAccount title="Ссудный счет" value=""/>
+      <GracePrincipal title="Льготный период по основному долгу" value=""/>
+      <GracePay title="Льготный период по вознаграждению" value=""/>
+      <PlaceOfDisbursement id="" title="Место освоения кредита" value=""/>
+      <PaymentsCalendar>
+        <Year title="2007">
+          <Payment number="1" overdue="" title="" value=""/>
+          <Payment number="2" overdue="" title="" value=""/>
+          <Payment number="3" overdue="" title="" value=""/>
+          <Payment number="4" overdue="" title="" value=""/>
+          <Payment number="5" overdue="-" title="Май" value="-"/>
+          <Payment number="6" overdue="0" title="Июнь" value="0"/>
+          <Payment number="7" overdue="0" title="Июль" value="0"/>
+          <Payment number="8" overdue="0" title="Август" value="0"/>
+          <Payment number="9" overdue="-" title="Сентябрь" value="-"/>
+          <Payment number="10" overdue="0" title="Октябрь" value="0"/>
+          <Payment number="11" overdue="" title="" value=""/>
+          <Payment number="12" overdue="" title="" value=""/>
+        </Year>
+      </PaymentsCalendar>
+      <ContractThirdParty title="Наименование цессионария" value=""/>
+      <ParentContractCode title="Номер родительского контракта" value=""/>
+      <ParentProvider id="" title="Поставщик родительского контракта"/>
+      <ParentContractStatus id="" title="Статус родительского контракта" value=""/>
+      <ParentOperationDate title="Дата операции в родительском процессе" value="-"/>
+      <Fine title="Пеня" value=""/>
+      <Penalty title="Штраф" value=""/>
+      <BranchLocation title="Местонахождение филиала" value=""/>
+      <ProlongationCount title="Кол-во пролонгаций" value=""/>
+      <NumberOfTransactions title="Количество транзакций" value=""/>
+      <InstalmentAmount title="Сумма периодического платежа" value=""/>
+      <ActualDate title="Дата фактической выдачи" value="-"/>
+      <DateOfInserted title="Дата получения сведений кред.бюро" value="06.08.2008"/>
+      <NumberOfOverdueInstalmentsMax title="Максимальное количество дней просрочки с начала действия договора" value="0"/>
+      <NumberOfOverdueInstalmentsMaxDate title="Дата актуальности информации" value="-"/>
+      <NumberOfOverdueInstalmentsMaxAmount title="Сумма просроченных взносов" value="0"/>
+      <OverdueAmountMax title="Максимальная сумма просроченных взносов с начала действия договора" value="0"/>
+      <OverdueAmountMaxDate title="Дата актуальности информации" value="-"/>
+      <OverdueAmountMaxCount title="Количество дней просрочки" value="0"/>
+      <CreditObject id="" title="Объект кредитования" value=""/>
+      <InterconnectedSubjects name="InterconnectedSubjects" title="СВЯЗАННЫЕ ОБЬЕКТЫ (2-Я ФАЗА)"/>
+    </Contract>
+    <Contract ContractType="Рассроченный (кредит)" ContractTypeCode="Contract.Type .Instalment" Currency="KZT">
+      <CodeOfContract title="Код контракта" value="705889581"/>
+      <AgreementNumber title="Номер договора" value="15744932-101417ЭК07К"/>
+      <AgreementNumberGuarantee title="Номер договора банковской гарантии" value=""/>
+      <TypeOfFounding id="19" title="Вид финансирования" value="Займ с правом обратного выкупа"/>
+      <PurposeOfCredit id="02" title="Цель кредита" value="Ремонт"/>
+      <CurrencyCode title="Код валюты" value="KZT"/>
+      <ContractStatus id="2" title="Статус договора" value="Уступка/переуступка права требования по кредиту другому лицу - Тайм Инвест"/>
+      <DateOfApplication title="Дата заявки" value="02.11.2007"/>
+      <DateOfCreditStart title="Дата начала срока действия договора" value="02.11.2007"/>
+      <DateOfCreditEnd title="Дата окончания срока действия договора" value="02.11.2009"/>
+      <DateOfRealRepayment title="Фактическая дата погашения" value="28.11.2012"/>
+      <DateAgreementGuarantee title="Дата договора банковской гарантии/поручительства" value="-"/>
+      <GuaranteeEvent title="Обстоятельство (событие) прекращения обязательства банка" value=""/>
+      <LastUpdate title="Информация по состоянию на" value="27.03.2015"/>
+      <Collateral>
+        <TypeOfGuarantee title="Вид обеспечения" value="Бланковые"/>
+        <ValueOfGuarantee title="Стоимость обеспечения" value="0,00 KZT"/>
+        <TypeOfValueOfGuarantee title="Вид стоимости обеспечения" value="Рыночная стоимость"/>
+        <AdditionalInformation title="" value=""/>
+        <PlaceOfGuarantee title="" value=""/>
+      </Collateral>
+      <ClassificationOfContract title="Классификация договора" value="Стандартный"/>
+      <TotalAmount title="Общая сумма кредита/валюта" value="333 000,00 KZT"/>
+      <Amount title="Использованная сумма" value=""/>
+      <CreditUsage id="" title="" value=""/>
+      <ResidualAmount title="Использованная сумма (подлежащая погашению)" value=""/>
+      <CreditLimit title="Сумма кредитного лимита" value=""/>
+      <NumberOfOutstandingInstalments title="Кол-во непогашенных (предстоящих)  платежей" value="0"/>
+      <NumberOfInstalments title="Общее количество платежей" value="0"/>
+      <OutstandingAmount title="Непогашенная сумма по кредиту" value="0,00 KZT"/>
+      <PeriodicityOfPayments id="2" title="Периодичность платежей" value="Ежемесячные платежи -30 дней"/>
+      <MethodOfPayments id="6" title="Форма расчёта" value="Другие"/>
+      <NumberOfOverdueInstalments title="Количество дней просрочки" value="0"/>
+      <OverdueAmount title="Сумма просроченных взносов" value="0,00 KZT"/>
+      <MonthlyInstalmentAmount title="Сумма периодического платежа" value="0,00 KZT"/>
+      <InterestRate title="Процентная ставка" value=""/>
+      <SubjectRole number="1" title="Роль субъекта" value="Заёмщик"/>
+      <FinancialInstitution id="163" title="Источник информации (Кредитор)" value="АО &quot;Альянс Банк&quot;"/>
+      <SpecialRelationship title="Признак связанности с банком особыми отношениями" value=""/>
+      <AnnualEffectiveRate title="Годовая эффективная ставка вознаграждения" value=""/>
+      <NominalRate title="Номинальная ставка вознаграждения" value=""/>
+      <AmountProvisions title="Размер провизии" value=""/>
+      <LoanAccount title="Ссудный счет" value=""/>
+      <GracePrincipal title="Льготный период по основному долгу" value=""/>
+      <GracePay title="Льготный период по вознаграждению" value=""/>
+      <PlaceOfDisbursement id="" title="Место освоения кредита" value=""/>
+      <PaymentsCalendar>
+        <Year title="2008">
+          <Payment number="1" overdue="-" title="Январь" value="-"/>
+          <Payment number="2" overdue="20 778,00 KZT" title="Февраль" value="1"/>
+          <Payment number="3" overdue="-" title="Март" value="-"/>
+          <Payment number="4" overdue="42 716,00 KZT" title="Апрель" value="1"/>
+          <Payment number="5" overdue="54 140,00 KZT" title="Май" value="1"/>
+          <Payment number="6" overdue="65 879,00 KZT" title="Июнь" value="1"/>
+          <Payment number="7" overdue="77 942,00 KZT" title="Июль" value="1"/>
+          <Payment number="8" overdue="90 337,00 KZT" title="Август" value="1"/>
+          <Payment number="9" overdue="103 073,00 KZT" title="Сентябрь" value="1"/>
+          <Payment number="10" overdue="103 073,00 KZT" title="Октябрь" value="0"/>
+          <Payment number="11" overdue="116 160,00 KZT" title="Ноябрь" value="0"/>
+          <Payment number="12" overdue="0" title="Декабрь" value="1"/>
+        </Year>
+        <Year title="2009">
+          <Payment number="1" overdue="0" title="Январь" value="1"/>
+          <Payment number="2" overdue="0" title="Февраль" value="1"/>
+          <Payment number="3" overdue="0" title="Март" value="1"/>
+          <Payment number="4" overdue="0" title="Апрель" value="1"/>
+          <Payment number="5" overdue="0" title="Май" value="1"/>
+          <Payment number="6" overdue="0" title="Июнь" value="1"/>
+          <Payment number="7" overdue="0" title="Июль" value="1"/>
+          <Payment number="8" overdue="0" title="Август" value="1"/>
+          <Payment number="9" overdue="0" title="Сентябрь" value="1"/>
+          <Payment number="10" overdue="0" title="Октябрь" value="667"/>
+          <Payment number="11" overdue="0" title="Ноябрь" value="693"/>
+          <Payment number="12" overdue="0" title="Декабрь" value="721"/>
+        </Year>
+      </PaymentsCalendar>
+      <ContractThirdParty title="Наименование цессионария" value="Тайм Инвест"/>
+      <ParentContractCode title="Номер родительского контракта" value=""/>
+      <ParentProvider id="" title="Поставщик родительского контракта"/>
+      <ParentContractStatus id="" title="Статус родительского контракта" value=""/>
+      <ParentOperationDate title="Дата операции в родительском процессе" value="-"/>
+      <Fine title="Пеня" value="0,00 KZT"/>
+      <Penalty title="Штраф" value=""/>
+      <BranchLocation title="Местонахождение филиала" value=""/>
+      <ProlongationCount title="Кол-во пролонгаций" value=""/>
+      <NumberOfTransactions title="Количество транзакций" value=""/>
+      <InstalmentAmount title="Сумма периодического платежа" value=""/>
+      <ActualDate title="Дата фактической выдачи" value="-"/>
+      <DateOfInserted title="Дата получения сведений кред.бюро" value="30.03.2015"/>
+      <NumberOfOverdueInstalmentsMax title="Максимальное количество дней просрочки с начала действия договора" value="721"/>
+      <NumberOfOverdueInstalmentsMaxDate title="Дата актуальности информации" value="24.12.2009"/>
+      <NumberOfOverdueInstalmentsMaxAmount title="Сумма просроченных взносов" value="0"/>
+      <OverdueAmountMax title="Максимальная сумма просроченных взносов с начала действия договора" value="116 160,00 KZT"/>
+      <OverdueAmountMaxDate title="Дата актуальности информации" value="13.11.2008"/>
+      <OverdueAmountMaxCount title="Количество дней просрочки" value="0"/>
+      <CreditObject id="03" title="Объект кредитования" value="Потребительские товары и услуги (кроме автотранспорта)"/>
+      <InterconnectedSubjects name="InterconnectedSubjects" title="СВЯЗАННЫЕ ОБЬЕКТЫ (2-Я ФАЗА)"/>
+    </Contract>
+    <Contract ContractType="Кредитный договор" ContractTypeCode="Contract.Type .CreditContract" Currency="KZT">
+      <CodeOfContract title="Код контракта" value="R1977691-001_001-103-329"/>
+      <AgreementNumber title="Номер договора" value="R1977691-001"/>
+      <AgreementNumberGuarantee title="Номер договора банковской гарантии" value=""/>
+      <TypeOfFounding id="9" title="Вид финансирования" value="Кредитная карта"/>
+      <PurposeOfCredit id="01" title="Цель кредита" value="Приобретение/покупка"/>
+      <CurrencyCode title="Код валюты" value="KZT"/>
+      <ContractStatus id="1" title="Статус договора" value="Стандартные кредиты"/>
+      <DateOfApplication title="Дата заявки" value="-"/>
+      <DateOfCreditStart title="Дата начала срока действия договора" value="17.06.2010"/>
+      <DateOfCreditEnd title="Дата окончания срока действия договора" value="17.06.2016"/>
+      <DateOfRealRepayment title="Фактическая дата погашения" value="16.11.2014"/>
+      <DateAgreementGuarantee title="Дата договора банковской гарантии/поручительства" value="-"/>
+      <GuaranteeEvent title="Обстоятельство (событие) прекращения обязательства банка" value=""/>
+      <LastUpdate title="Информация по состоянию на" value="06.01.2015"/>
+      <Collateral>
+        <TypeOfGuarantee title="Вид обеспечения" value="Бланковые"/>
+        <ValueOfGuarantee title="Стоимость обеспечения" value="0,00 KZT"/>
+        <TypeOfValueOfGuarantee title="Вид стоимости обеспечения" value="Рыночная стоимость"/>
+        <AdditionalInformation title="" value=""/>
+        <PlaceOfGuarantee title="" value=""/>
+      </Collateral>
+      <ClassificationOfContract title="Классификация договора" value="Однородный"/>
+      <TotalAmount title="Общая сумма кредита/валюта" value=""/>
+      <Amount title="Использованная сумма" value=""/>
+      <CreditUsage id="" title="" value=""/>
+      <ResidualAmount title="Использованная сумма (подлежащая погашению)" value="0,00 KZT"/>
+      <CreditLimit title="Сумма кредитного лимита" value="230 000,00 KZT"/>
+      <NumberOfOutstandingInstalments title="Кол-во непогашенных (предстоящих)  платежей" value=""/>
+      <NumberOfInstalments title="Общее количество платежей" value=""/>
+      <OutstandingAmount title="Непогашенная сумма по кредиту" value=""/>
+      <PeriodicityOfPayments id="" title="Периодичность платежей" value=""/>
+      <MethodOfPayments id="" title="Форма расчёта" value=""/>
+      <NumberOfOverdueInstalments title="Количество дней просрочки" value="0"/>
+      <OverdueAmount title="Сумма просроченных взносов" value="0,00 KZT"/>
+      <MonthlyInstalmentAmount title="Минимальный платеж" value="3 379,34 KZT"/>
+      <InterestRate title="Процентная ставка" value=""/>
+      <SubjectRole number="1" title="Роль субъекта" value="Заёмщик"/>
+      <FinancialInstitution id="126" title="Источник информации (Кредитор)" value="АО Kaspi Bank"/>
+      <SpecialRelationship title="Признак связанности с банком особыми отношениями" value=""/>
+      <AnnualEffectiveRate title="Годовая эффективная ставка вознаграждения" value=""/>
+      <NominalRate title="Номинальная ставка вознаграждения" value=""/>
+      <AmountProvisions title="Размер провизии" value=""/>
+      <LoanAccount title="Ссудный счет" value=""/>
+      <GracePrincipal title="Льготный период по основному долгу" value=""/>
+      <GracePay title="Льготный период по вознаграждению" value=""/>
+      <PlaceOfDisbursement id="" title="Место освоения кредита" value=""/>
+      <PaymentsCalendar>
+        <Year title="2012">
+          <Payment number="1" overdue="" title="" value=""/>
+          <Payment number="2" overdue="" title="" value=""/>
+          <Payment number="3" overdue="" title="" value=""/>
+          <Payment number="4" overdue="" title="" value=""/>
+          <Payment number="5" overdue="" title="" value=""/>
+          <Payment number="6" overdue="" title="" value=""/>
+          <Payment number="7" overdue="" title="" value=""/>
+          <Payment number="8" overdue="" title="" value=""/>
+          <Payment number="9" overdue="" title="" value=""/>
+          <Payment number="10" overdue="" title="" value=""/>
+          <Payment number="11" overdue="" title="" value=""/>
+          <Payment number="12" overdue="0" title="Декабрь" value="0"/>
+        </Year>
+        <Year title="2013">
+          <Payment number="1" overdue="0" title="Январь" value="0"/>
+          <Payment number="2" overdue="0" title="Февраль" value="0"/>
+          <Payment number="3" overdue="0" title="Март" value="0"/>
+          <Payment number="4" overdue="0" title="Апрель" value="0"/>
+          <Payment number="5" overdue="0" title="Май" value="0"/>
+          <Payment number="6" overdue="0" title="Июнь" value="0"/>
+          <Payment number="7" overdue="0" title="Июль" value="0"/>
+          <Payment number="8" overdue="0" title="Август" value="0"/>
+          <Payment number="9" overdue="0" title="Сентябрь" value="0"/>
+          <Payment number="10" overdue="0" title="Октябрь" value="0"/>
+          <Payment number="11" overdue="0" title="Ноябрь" value="0"/>
+          <Payment number="12" overdue="0" title="Декабрь" value="0"/>
+        </Year>
+        <Year title="2014">
+          <Payment number="1" overdue="0" title="Январь" value="0"/>
+          <Payment number="2" overdue="0" title="Февраль" value="0"/>
+          <Payment number="3" overdue="0" title="Март" value="0"/>
+          <Payment number="4" overdue="0" title="Апрель" value="0"/>
+          <Payment number="5" overdue="0" title="Май" value="0"/>
+          <Payment number="6" overdue="0" title="Июнь" value="0"/>
+          <Payment number="7" overdue="0" title="Июль" value="0"/>
+          <Payment number="8" overdue="0" title="Август" value="0"/>
+          <Payment number="9" overdue="0" title="Сентябрь" value="0"/>
+          <Payment number="10" overdue="0" title="Октябрь" value="0"/>
+          <Payment number="11" overdue="0" title="Ноябрь" value="0"/>
+          <Payment number="12" overdue="" title="" value=""/>
+        </Year>
+      </PaymentsCalendar>
+      <ContractThirdParty title="Наименование цессионария" value=""/>
+      <ParentContractCode title="Номер родительского контракта" value=""/>
+      <ParentProvider id="" title="Поставщик родительского контракта"/>
+      <ParentContractStatus id="" title="Статус родительского контракта" value=""/>
+      <ParentOperationDate title="Дата операции в родительском процессе" value="-"/>
+      <Fine title="Пеня" value=""/>
+      <Penalty title="Штраф" value=""/>
+      <BranchLocation title="Местонахождение филиала" value=""/>
+      <ProlongationCount title="Кол-во пролонгаций" value=""/>
+      <NumberOfTransactions title="Количество транзакций" value=""/>
+      <InstalmentAmount title="Сумма периодического платежа" value="3 379,34 KZT"/>
+      <ActualDate title="Дата фактической выдачи" value="17.06.2010"/>
+      <DateOfInserted title="Дата получения сведений кред.бюро" value="12.01.2015"/>
+      <NumberOfOverdueInstalmentsMax title="Максимальное количество дней просрочки с начала действия договора" value="0"/>
+      <NumberOfOverdueInstalmentsMaxDate title="Дата актуальности информации" value="-"/>
+      <NumberOfOverdueInstalmentsMaxAmount title="Сумма просроченных взносов" value="0"/>
+      <OverdueAmountMax title="Максимальная сумма просроченных взносов с начала действия договора" value="0"/>
+      <OverdueAmountMaxDate title="Дата актуальности информации" value="-"/>
+      <OverdueAmountMaxCount title="Количество дней просрочки" value="0"/>
+      <CreditObject id="03" title="Объект кредитования" value="Потребительские товары и услуги (кроме автотранспорта)"/>
+      <InterconnectedSubjects name="InterconnectedSubjects" title="СВЯЗАННЫЕ ОБЬЕКТЫ (2-Я ФАЗА)"/>
+    </Contract>
+  </TerminatedContracts>
+  <ExistingApplications name="ExistingApplications" title="ПОДРОБНАЯ ИНФОРМАЦИЯ – ДЕЙСТВУЮЩИЕ ЗАЯВКИ"/>
+  <RejectedApplications name="RejectedApplications" title="ПОДРОБНАЯ ИНФОРМАЦИЯ – ОТКЛОНЕННЫЕ ЗАЯВКИ"/>
+  <WithdrawnApplications name="WithdrawnApplications" stitle="Отозванные договора" title="ПОДРОБНАЯ ИНФОРМАЦИЯ – ОТОЗВАННЫЕ ЗАЯВКИ"/>
+  <InterconnectedSubjects name="InterconnectedSubjects" title="СВЯЗАННЫЕ ОБЬЕКТЫ (2-Я ФАЗА)">
+    <InterconnectedSubject>
+      <TypeOfLink title="Роль субъекта" value="Заёмщик"/>
+      <SubjectCode title="Регистрационный ИД" value="3476400"/>
+    </InterconnectedSubject>
+    <InterconnectedSubject>
+      <TypeOfLink title="Роль субъекта" value="Заёмщик"/>
+      <SubjectCode title="Регистрационный ИД" value="3476400"/>
+    </InterconnectedSubject>
+    <InterconnectedSubject>
+      <TypeOfLink title="Роль субъекта" value="Заёмщик"/>
+      <SubjectCode title="Регистрационный ИД" value="3476400"/>
+    </InterconnectedSubject>
+    <InterconnectedSubject>
+      <TypeOfLink title="Роль субъекта" value="Заёмщик"/>
+      <SubjectCode title="Регистрационный ИД" value="3476400"/>
+    </InterconnectedSubject>
+  </InterconnectedSubjects>
+  <NumberOfQueries title="Количество произведенных участниками ПКБ запросов" value="4">
+    <DetailsQueries7days title="Детализация запросов за 7 дней"/>
+    <Days30 title="За 30 дней" value="0"/>
+    <Days90 title="За 90 дней" value="0"/>
+    <Days120 title="За 120 дней" value="1"/>
+    <Days180 title="За 180 дней" value="3"/>
+    <Days360 title="За 360 дней" value="4"/>
+  </NumberOfQueries>
+  <RelatedCompanies title="Аффилированность"/>
+  <PublicSources title="Дополнительная информация из публичных источников">
+    <MvdCriminalInvestigations title="Розыск преступников министерством внутренних дел Республики Казахстан">
+      <Source title="Ссылка на источник" value="http://mvd.gov.kz/portal/page/portal/mvd/MVD/mvd_nav_roz/look"/>
+      <RefreshDate title="Дата последнего обновления на источнике" value="-"/>
+      <ActualDate title="Дата получения сведений кредитным бюро" value="2015-12-25 15:12:59.000"/>
+      <Status id="2" title="Статус субъекта" value="Субъект не найден в базе данных розыска МВД РК"/>
+    </MvdCriminalInvestigations>
+    <MvdMissingInvestigations title="Розыск без вести пропавших министерством внутренних дел Республики Казахстан">
+      <Source title="Ссылка на источник" value="http://mvd.gov.kz/portal/page/portal/mvd/MVD/mvd_nav_roz/lookface"/>
+      <RefreshDate title="Дата последнего обновления на источнике" value="-"/>
+      <ActualDate title="Дата получения сведений кредитным бюро" value="2015-12-25 15:12:59.000"/>
+      <Status id="2" title="Статус субъекта" value="Субъект не найден в базе данных розыска МВД РК"/>
+    </MvdMissingInvestigations>
+  </PublicSources>
+  <Footer EndOfReport="КОНЕЦ КРЕДИТНОГО ОТЧЕТА" name="tblFooter">
+    <DateOfIssue title="Дата выдачи" value="25.12.2015 17:24:02"/>
+    <ContactInfo value="Первое кредитное бюро - Республика Казахстан г. Алматы, 050059 мкр. Самал-3, дом 25, 1-й этаж. Тел.: +7 (727) 300 01 50, +7 (727) 300 01 58. Факс: +7 (727) 300 01 51. E&apos;mail: info@1cb.kz Сайт: www.1cb.kz"/>
+    <Contracts>
+      <AdditionalInformation stitle="Дополнительная информация"/>
+      <Balance stitle="Баланс"/>
+      <Collaterals stitle="Залоги"/>
+      <Contract stitle="Договор"/>
+      <DaysOverdue stitle="Дни просрочки"/>
+      <Payment stitle="Платежная дисциплина"/>
+      <RelatedSubjects stitle="Связанные субьекты">
+        <Documents stitle="Документы"/>
+        <FIO stitle="ФИО/Наименование"/>
+        <SubjectRole stitle="Роль субъекта"/>
+      </RelatedSubjects>
+      <Status stitle="Состояние"/>
+      <TypeOfGuarantee stitle="Вид обеспечения"/>
+      <ValueOfGuarantee stitle="Стоимость обеспечения"/>
+      <ProlongationStartDate stitle="Дата пролонгации"/>
+      <ProlongationEndDate stitle="Дата завершения пролонгации"/>
+      <Collateral>
+        <TypeOfGuarantee stitle="Вид обеспечения"/>
+        <ValueOfGuarantee stitle="Стоимость обеспечения"/>
+        <TypeOfValueOfGuarantee stitle="Вид стоимости обеспечения"/>
+        <PlaceOfGuarantee stitle="Местоположение залога"/>
+      </Collateral>
+    </Contracts>
+    <Footer stitle="© ТОО «Первое кредитное бюро». Все права защищены."/>
+    <ExistingContracts stitle="Действующие договора"/>
+    <TerminatedContracts stitle="Завершенные договора"/>
+    <WithdrawnApplications stitle="Отозванные договора"/>
+    <NoAddresses stitle="Нет данных об адресах субъекта"/>
+    <NoContacts stitle="Нет данных о контактах субъекта"/>
+    <Guarant stitle="Гарант"/>
+    <Borrower stitle="Заёмщик/Созаёмщик"/>
+    <SubjectRole stitle="Роль субъекта"/>
+    <NoDocuments stitle="Нет данных о документах субъекта"/>
+    <NoExistingContracts stitle="Субъект не имеет действующих договоров"/>
+    <NoNegativeStatus stitle=""/>
+    <NoTerminatedContracts stitle="Субьект не имеет завершенных договоров"/>
+    <NoWithdrawnApplications stitle="Субьект не имеет отозванных договоров"/>
+    <TitleDetailedInformation stitle="Подробная информация"/>
+    <TitleAdditionalInformation stitle="Дополнительная информация"/>
+    <TitleLiabilities stitle="Обязательства">
+      <ContractsNumber stitle="Количество"/>
+      <ContractsPhase stitle="Фаза договора"/>
+      <ContractStatus stitle="Статус договора"/>
+      <OutstandingAmount stitle="Непогашенная сумма/валюта"/>
+      <OverdueAmount stitle="Просроченная сумма/валюта"/>
+    </TitleLiabilities>
+    <InterconnectedSubjects>
+      <TypeOfLink title="Роль субъекта"/>
+      <SubjectCode title="ID субъекта"/>
+      <SubjectName title="ФИО/Наименование"/>
+      <SubjectRNN title="РНН"/>
+      <SubjectIIN title="ИИН"/>
+    </InterconnectedSubjects>
+    <TitleSummaryInformation stitle="Общая информация"/>
+    <Contract stitle="Контракт"/>
+    <SubjectDetails stitle="Количество произведенных запросов"/>
+    <AmountOverdue stitle="Сумма просрочки"/>
+    <MaxOverdueAmount title="Сумма просроченных взносов"/>
+    <MaxOverdueCount title="Количество дней просрочки"/>
+    <PaymentsCalendar title="Платежная дисциплина за 24 месяца">
+      <Description1 title="*« - » - Поставщик информации не  предоставил данные"/>
+      <Description2 title="« 0 » - Просрочки отсутствуют"/>
+    </PaymentsCalendar>
+    <NoSubjects title="Данных по субъектам нет"/>
+    <NoViolations title="Данных по штрафам нет"/>
+    <InformationFromDB title="Раздел 1. Информация из БДКИ"/>
+    <InformationFromPS title="Раздел 2. Информация из ГБД и других источников"/>
+    <InformationFromPSS title="Раздел 2. Информация из дополнительных источников"/>
+  </Footer>
+</Root>';
+		
+/* Для ситуаций
+    	<NS1:StatusCode xmlns:NS1="http://sberbank.ru/dem/commonAggregates/15">0</NS1:StatusCode>
+		<NS2:StatusDesc xmlns:NS2="http://sberbank.ru/dem/commonAggregates/15">Клиент найден, пустой список отчетов</NS2:StatusDesc>
+*/
+		/*IF inRef.Status.*:StatusDesc <> '' THEN 		
+		  SET outRef.ERROR_CODE		= 111; --- в случае ошибок от ПКБ, в САКД передавать 111
+		  SET outRef.ERROR_TEXT		= inRef.Status.*:StatusDesc;
+		END IF;   
+
+	    IF (CARDINALITY(inRef.PKB_RESPONSE_XML[]) = 0) then  
+		  SET outRef.PKB_RESPONSE		= ' ';
+	    ELSE
+		  --SET outRef.PKB_RESPONSE		= inRef.Report;           -- HTML отчёт
+		  SET outRef.PKB_RESPONSE.Root	= inRef.PKB_RESPONSE_XML; -- XML отчёт
+	    END IF;		  
+
+		IF outRef.ERROR_TEXT <> '' AND outRef.PKB_RESPONSE = '' THEN			 		
+		  SET outRef.PKB_RESPONSE		= 'Ошибка';
+	    END IF;		*/  
+		
+		PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyMessageHeaders(IN inRoot REFERENCE, IN outRoot REFERENCE) BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		DECLARE domainName CHARACTER;
+		
+		SET J = CARDINALITY(inRoot.*[]);
+		WHILE I < J DO
+			SET domainName = FIELDNAME(inRoot.*[I]);
+			IF domainName = 'Properties' THEN
+				SET outRoot.*[I] = inRoot.*[I]; 
+			ELSE
+				CREATE LASTCHILD OF outRoot DOMAIN(domainName) NAME domainName;
+				SET outRoot.*[<] = inRoot.*[I];
+			END IF;
+			SET I = I + 1;
+	    END WHILE;
+    END;
+	
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCAKD_Convert2CAKD_GCVP
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GCVP_OUT';		
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.KZGetPensionRs;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC."GCVP_OUT";
+		
+		DECLARE cur_date CHARACTER CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		
+		SET OutRs.UID 				= InpRs.RqUID;
+		SET OutRs."RESPONSE_DATE"		= cur_date;
+		
+		SET OutRs."ERROR_CODE" 		= FIELDVALUE(InpRs.Status.*:StatusCode);
+		
+		IF OutRs."ERROR_CODE" <> 0 THEN
+		SET OutRs."ERROR_TEXT" 		= getStatusText(FIELDVALUE(InpRs.Status.*:StatusDesc));
+		ELSE
+			SET OutRs."ERROR_TEXT" = '';
+		END IF;
+		 
+		DECLARE GCVPResponse REFERENCE TO OutRs;
+        CREATE LASTCHILD OF OutRs AS GCVPResponse NAME 'GCVP_RESPONSE';            
+        
+
+		DECLARE gPersonIdType CHARACTER;				
+        SET gPersonIdType = InpRs.PersonInfo.PersonIdType;
+
+		DECLARE aaaGCVP CHARACTER;
+		DECLARE ZZZ_DATE CHARACTER;			
+		
+		--DECLARE averageSum CHARACTER;
+		-- 26.01.2016 Данное вычесление требуется для определения средней суммы по ОПВ -- 
+        
+        DECLARE averageSum INTEGER 0;
+        DECLARE resultAverage CHARACTER '0'; -- инициализаровал как 0, чтобы в случае отсутвия полей не вылетал нул.
+        DECLARE enumCount INTEGER CARDINALITY(InpRs.PensionRecord[]);
+        DECLARE sum CHARACTER;
+        
+        FOR items AS InpRs.PensionRecord[] DO
+        	
+        	SET sum = ROUND(CAST(items.SumMon AS DECIMAL), 0);
+        	SET averageSum = averageSum + CAST(sum AS INTEGER);        	
+        	
+        END FOR;
+         -- Добавил условие на проверку. Т.к. язык не позволяет делить на ноль        
+		IF enumCount <> 0 THEN
+			SET resultAverage = ROUND(CAST(averageSum / 6 AS DECIMAL),0);
+		END IF;		
+		
+        --- !!! переделать
+		DECLARE aaaFFF01 CHARACTER;
+		DECLARE aaaFFF02 CHARACTER;
+		DECLARE aaaFFF03 CHARACTER;
+		DECLARE aaaFFF04 CHARACTER;
+		DECLARE aaaFFF05 CHARACTER;
+		DECLARE aaaFFF06 CHARACTER;
+		DECLARE aaaFFF07 CHARACTER;
+		DECLARE aaaFFF08 CHARACTER;
+		DECLARE aaaFFF09 CHARACTER;
+          
+     --   IF gPersonIdType = '2' THEN -- ИИН
+			FOR postAddrZZZ AS InpRs.FirstRecord[] DO
+				SET ZZZ_DATE = convertFromGCVPToCAKDDate(postAddrZZZ.birthDate);
+				
+				SET aaaFFF01  = InpRs.param1id; --postAddrZZZ.requestNumber; 
+		        SET aaaFFF02  = InpRs.param2iin; 
+		        
+	            IF postAddrZZZ.surName IS NOT NULL THEN	        
+		           SET aaaFFF03  = postAddrZZZ.surName;
+		        ELSE   
+		           SET aaaFFF03  = '';
+				END IF;
+	
+	            IF postAddrZZZ.firstName IS NOT NULL THEN	        
+		           SET aaaFFF04  = postAddrZZZ.firstName;
+		        ELSE   
+		           SET aaaFFF04  = '';
+				END IF;
+	
+	            IF postAddrZZZ.middleName IS NOT NULL THEN	        
+		           SET aaaFFF05  = postAddrZZZ.middleName;
+		        ELSE   
+		           SET aaaFFF05  = '';
+				END IF;
+		         
+		        SET aaaFFF06  = ZZZ_DATE; 
+		        SET aaaFFF07  = postAddrZZZ.status; 
+		        SET aaaFFF08  = enumCount; 
+		        SET aaaFFF09  = SUBSTRING(postAddrZZZ.avgOVPSumm BEFORE '.');
+				
+		        SET aaaGCVP  = COALESCE(aaaFFF01,'')    || 
+	                    '|' || COALESCE(aaaFFF02,'')    || 
+	                    '|' || COALESCE(aaaFFF03,'')    || 
+	                    '|' || COALESCE(aaaFFF04,'')    || 
+	                    '|' || COALESCE(aaaFFF05,'')    || 
+	                    '|' || COALESCE(aaaFFF06,'')    || 
+	                    '|' || COALESCE(aaaFFF07,'')    || 
+	                    '|' || COALESCE(aaaFFF08,'')    || 
+	                    '|' || resultAverage		    || '\n'; 
+	/*
+		        SET aaaGCVP  = FIELDVALUE(postAddrZZZ.requestNumber)     || 
+		                    '|' || FIELDVALUE(postAddrZZZ.IIN)           || 
+		                    '|' || FIELDVALUE(postAddrZZZ.surName)       || 
+		                    '|' || FIELDVALUE(postAddrZZZ.firstName)     || 
+		                    '|' || FIELDVALUE(postAddrZZZ.middleName)    || 
+		                    '|' || FIELDVALUE(ZZZ_DATE)                  || 
+		                    '|' || FIELDVALUE(postAddrZZZ.status)        || 
+		                    '|' || FIELDVALUE(postAddrZZZ.enumNum)       || 
+		                    '|' || FIELDVALUE(postAddrZZZ.avgOVPSumm)    || '\n';
+		                   */ 
+		/*	SET aaaGCVP  = aaaFFF01    || 
+	                    '|' || aaaFFF02    || 
+	                    '|' || aaaFFF03    || 
+	                    '|' || aaaFFF04    || 
+	                    '|' || aaaFFF05    || 
+	                    '|' || aaaFFF06    || 
+	                    '|' || aaaFFF07    || 
+	                    '|' || aaaFFF08    || 
+	                    '|' || aaaFFF09;
+	                    */
+			END FOR;
+       -- END IF;  
+
+        SET GCVPResponse = aaaGCVP;
+		DECLARE IsdDATE CHARACTER CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');				
+
+		DECLARE IsdNAME CHARACTER;				
+		DECLARE IsdSTROKA CHARACTER;				
+		DECLARE IsdSUM CHARACTER;		
+		DECLARE IsMsum CHARACTER;		
+       
+			FOR postAddr AS InpRs.PensionRecord[] DO
+	          /*
+			  SET GCVPResponse = GCVPResponse || postAddr.DatePmt               || 
+			                              '|' || postAddr.OrgInfo.*:Name         || 
+			                              '||' || postAddr.PersonInfo.PersonId;
+			                              
+	
+	          */		  
+			  SET IsdDATE 	   = convertFromGCVPToCAKDDate(postAddr.DatePmt);
+			  SET IsdNAME 	   = REPLACE(postAddr.OrgInfo.*:Name, '"', ''); -- !!! обработка кавычек 
+			  
+			  SET IsdSTROKA = COALESCE(IsdDATE, '')   || '|';
+			  SET IsdSTROKA = IsdSTROKA || COALESCE(IsdNAME, '') || '||' ;
+			  SET IsdSTROKA = IsdSTROKA || COALESCE(postAddr.PersonInfo.PersonId, '') || '|';
+			  SET IsdSUM = COALESCE(postAddr.SumMon, '');
+			  SET IsMsum = SUBSTRING(IsdSUM BEFORE '.');
+			  SET IsdSTROKA = IsdSTROKA || IsMsum || '\n';
+			  
+			  ---SET IsdSTROKA = IsdDATE ||  '|'  || IsdNAME || '||' || postAddr.PersonInfo.PersonId || '\n';
+			                              		                              
+			  SET GCVPResponse = GCVPResponse  || IsdSTROKA;		                              
+			END FOR;
+				
+		PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+				
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+	
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForTransact_ConvertMDO2Transact_GetPersonData
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetPersonDataByIdRs';		
+		
+		CALL FillCAKDStandartElementsRs(InputBody, OutputRoot.XMLNSC, Environment);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZCheckMDMPersonInfoRs;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.GetPersonDataByIdRs;
+		DECLARE outPerson REFERENCE TO outRef;
+		
+		SET outRef.CountsClient 	= '';
+		
+		DECLARE counter INTEGER 0;
+		FOR inPerson AS inRef.PersonInfo[] DO
+			DECLARE idEpk CHARACTER;
+			SET idEpk = replaceAbsentValue(THE(SELECT ITEM idExt.Value FROM inPerson.PersonIdExt[] AS idExt WHERE idExt.Key='CIF'),'ERROR');
+			
+			IF isNegativeNumber(idEpk)=FALSE THEN				
+				CREATE LASTCHILD OF outRef AS outPerson NAME 'PersonInfo';
+				SET outPerson.IIN					= replaceAbsentValue(THE(SELECT ITEM idExt.Value FROM inPerson.PersonIdExt[] AS idExt WHERE idExt.Key='IIN'),'ERROR');
+				SET outPerson.IdEPK					= idEpk;
+				SET outPerson.Surname				= inPerson.*:PersonName.*:LastName;
+				SET outPerson.Name					= inPerson.*:PersonName.*:FirstName;
+				SET outPerson.FatherName			= inPerson.*:PersonName.*:MiddleName;
+				IF FIELDVALUE(inPerson.*:BirthDt) <> '' THEN
+					SET outPerson.DateBirth				= FIELDVALUE(inPerson.*:BirthDt);
+				END IF;
+				SET outPerson.PriznakVip			= inPerson.StatusVIP;
+				SET outPerson.Category				= COALESCE(inPerson.ClientCategory,'None');
+				
+				SET counter = counter + 1;
+			ELSE
+				CREATE LASTCHILD OF outRef AS outPerson NAME 'PersonInfo';
+				SET outPerson.IIN					= replaceAbsentValue(THE(SELECT ITEM idExt.Value FROM inPerson.PersonIdExt[] AS idExt WHERE idExt.Key='IIN'),'ERROR');	
+				SET outPerson.IdEPK					= idEpk;	
+						
+			END IF;
+		END FOR;
+		
+		SET outRef.CountsClient 	= counter;
+		PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCAKD_ConvertMDO2Transact_UpdatePersonData
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'UpdatePersonDataToEpkRs';		
+		
+		CALL FillCAKDStandartElementsRs(InputBody, OutputRoot.XMLNSC, Environment);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZSendMDMPrivateClientDataRs;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.UpdatePersonDataToEpkRs;
+		DECLARE outPerson REFERENCE TO outRef;
+		
+		SET outRef.CountsClient 	= CARDINALITY(inRef.PersonInfo[]);
+		FOR inPerson AS inRef.PersonInfo[] DO
+			CREATE LASTCHILD OF outRef AS outPerson NAME 'PersonInfo';
+			SET outPerson.IIN					= THE(SELECT ITEM idExt.Value FROM inPerson.PersonIdExt[] AS idExt WHERE idExt.Key='CAKD');
+			SET outPerson.IdEPK					= THE(SELECT ITEM idExt.Value FROM inPerson.PersonIdExt[] AS idExt WHERE idExt.Key='CIF');
+		END FOR;
+		PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCAKD_ConvertMDO2Transact_KZLSBOOResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;	
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'LSBOO_OUT';
+						 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE cur_date CHARACTER CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		
+		SET outRef.UID				= inRef.RqUID;
+		SET outRef.RESPONSE_DATE	= cur_date;
+		SET outRef.ERROR_CODE		= inRef.Status.*:StatusCode;
+		SET outRef.ERROR_TEXT		= inRef.Status.*:StatusDesc;
+		
+		IF NOT EXISTS(inRef.GSLResponse.GSLResponseAttributes.NotFound[])THEN
+			SET outRef.LSBOO_RESULT		= '1';
+		ELSE 
+			SET outRef.LSBOO_RESULT		= '2';
+	
+		END IF;
+		
+		IF inRef.Status.*:StatusCode <> '0' THEN
+			SET outRef.LSBOO_RESULT		= '3';
+		END IF;
+		--PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+--u07357 20.07.2015
+CREATE COMPUTE MODULE ResponseForCAKD_ConvertMDO2_KZGetCreditFromCRMRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetCreditFromCRM_OUT';
+						 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef.RqUID = inRef.RqUID;
+		SET outRef.RqTm = inRef.RqTm;
+		
+		SET outRef.Status = inRef.Status;
+		SET outRef.IIN = inRef.IIN;
+		DECLARE creditinfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS creditinfo NAME 'CreditInfo';
+		SET creditinfo.IdCRM 		= inRef.CreditList.IdCRM;
+		SET creditinfo.ProductId 	= inRef.CreditList.ProductName;
+		SET creditinfo.Rate 		= inRef.CreditList.Rate;
+		SET creditinfo.CreditTerm 	= inRef.CreditList.CreditTerm;
+		SET creditinfo.CurrencyCode = inRef.CreditList.CurrencyCode;
+		SET creditinfo.CreditSumma 	= inRef.CreditList.CreditSumma;
+		SET creditinfo.MonthPayment = inRef.CreditList.MonthPayment;		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCAKD_ConvertMDO2_KZSetRequestStatusRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'SetRequestStatus_OUT';
+						 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef.RqUID = inRef.RqUID;
+		SET outRef.RqTm = inRef.RqTm;
+		
+		SET outRef.Status = inRef.Status;
+		RETURN TRUE;
+	END;
+END MODULE;

@@ -1,0 +1,95 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.dynfiletransfer.esql
+
+
+CREATE COMPUTE MODULE DynFileScheduler_ExecuteFile
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		 CALL CopyMessageHeaders();
+		 
+		 -- Set Source ---
+		 SET OutputRoot.XMLNSC.FileTransferRequest.RqUID = 'test_15';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.RqTM = CURRENT_GMTTIMESTAMP;
+		 --SET OutputRoot.XMLNSC.FileTransferRequest.Source.Domain = '172.16.100.3';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Source.Domain = ''; 	
+		 --SET OutputRoot.XMLNSC.FileTransferRequest.Source.Host = '172.16.100.3';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Source.Host = '';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Source.Port = 22;
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Source.Protocol = 'LOCAL';
+		 --SET OutputRoot.XMLNSC.FileTransferRequest.Source.Login = 'bankadm';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Source.Login = 'esbkzusr';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Source.Key = '/home/esbkzusr/.ssh/pr_key.ppk';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Source.Phrase = null;
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Source.Password = null;
+		 --SET OutputRoot.XMLNSC.FileTransferRequest.Source.Directory = 'c:/DealExporter/Result';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Source.Directory = '/home/esbkzusr/FileIN';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Source.FileGetPattern = 'MULTIPLE';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Source.File = '([^.]+)\.xml';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Source.FileAfterReadAction = 'DELETE';
+		
+		--SET DESTINATION ----
+		 
+		 --SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Domain = 'qpragma.sberbank.kz';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Domain = '192.168.123.2';
+		 --SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Host = 'qpragma.sberbank.kz';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Host = '172.16.101.56';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Port = 22;
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Protocol = 'SFTP';
+		 --SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Login = 'bankadm';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Login = 'fisher';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Key = '/home/esbkzusr/.ssh/pr_key.ppk';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Phrase = null;
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Password = null;
+		 --SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Directory = '/albis/bis/imp-exp/deal/imp/reut';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Destination.Directory = '/home/fisher/FileUT';
+		 SET OutputRoot.XMLNSC.FileTransferRequest.Destination.FileExistAction = 'DUPLICATE';
+		 
+		 --CALL CopyEntireMessage();
+		RETURN TRUE;
+
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE DynFileScheduler_ConvertFromBLOBtoXMLNSC
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CREATE FIRSTCHILD OF OutputRoot.XMLNSC 
+                  PARSE ( 
+                        InputRoot.BLOB.BLOB
+                        CCSID 1208
+                        OPTIONS FolderBitStream + ValidateNone);
+		
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

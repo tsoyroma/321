@@ -1,0 +1,585 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.integra.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE HTTPRequestForIntegra_SaveOrigMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.Source.MQMD 			= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 		= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties	= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 			= InputBody;		
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForIntegra_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZIntegraAutoSubscriptionRq' THEN
+			SET labelName = 'KZIntegraAutoSubscriptionRq';
+		WHEN 'KZIntegraAutoPaymentListRq' THEN
+			SET labelName = 'KZIntegraAutoPaymentListRq';
+		WHEN 'KZAutoSubscriptionModRq' THEN
+			SET labelName = 'KZAutoSubscriptionModRq';	
+		WHEN 'KZAutoSubscriptionStatusModRq' THEN
+			SET labelName = 'KZAutoSubscriptionStatusModRq';
+		WHEN 'KZIntegraAutoSubscriptionDetailInfoRq' THEN
+			SET labelName = 'KZIntegraAutoSubscriptionDetailInfoRq';
+		WHEN 'KZIntegraAutoPaymentDetailInfoRq' THEN
+			SET labelName = 'KZIntegraAutoPaymentDetailInfoRq';			 			
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in HTTPRequestForIntegra', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForIntegra_Convert_ERROR
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		-- Получение описания ошибки
+		DECLARE sErrDescr CHARACTER;
+		DECLARE sErrNumber CHARACTER;
+		CALL ru.croc.sbrf.mdm.common.GetExcDescription(InputExceptionList, sErrDescr, sErrNumber);
+
+		-- Формирование структуры сообщения-ответа
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.UFXMsg AS outRef;	
+		
+		SET outRef.(XMLNSC.Attribute)"direction"		=  'Rs';
+		SET outRef.(XMLNSC.Attribute)"msg_type"			=  'Information';
+		SET outRef.(XMLNSC.Attribute)"resp_class"		=  'I';
+		SET outRef.(XMLNSC.Attribute)"resp_code"		=  '-400';
+		SET outRef.(XMLNSC.Attribute)"resp_text"		=  sErrDescr;
+		SET outRef.(XMLNSC.Attribute)"scheme"			=  'WAY4Appl';
+		SET outRef.(XMLNSC.Attribute)"version"			=  '2.0';	
+					
+		SET outRef.MsgId	=	Environment.UserProperties.RqUID;
+		
+		DECLARE source REFERENCE TO outRef;
+		
+		CREATE FIELD outRef.Source AS source;
+		
+		SET source.(XMLNSC.Attribute)"app"				=  'Web';
+		
+		CREATE FIELD outRef.MsgData;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForIntegra_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+	
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		--CALL SetMQReplyDestination(Environment.UserProperties, OutputLocalEnvironment);
+		
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = Environment.UserProperties.ReplyToQ;
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName =	Environment.UserProperties.ReplyToQMgr;
+		
+		SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс GASL получения списка подписок по платежным инструментам u06068 14.01.2015 KZIntegraAutoSubscriptionRq -> GetAutoSubscriptionListRq
+ */
+CREATE COMPUTE MODULE HTTPRequestForIntegra_ConvertMDO2WAY_KZIntegraAutoSubscriptionRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZIntegraAutoSubscriptionRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'GetAutoSubscriptionListRq';
+		  
+		SET outRoot.(XMLNSC.Attribute)"uuid" = inRoot.RqUID;
+		SET outRoot.(XMLNSC.Attribute)"DateTime" = inRoot.RqTm;
+		SET outRoot.(XMLNSC.Attribute)"SPName" = inRoot.SPName;
+		
+		DECLARE autoPayments REFERENCE TO outRoot;
+		DECLARE autoPayment REFERENCE TO outRoot;
+		
+		DECLARE cardAcctId REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS autoPayments NAME 'AutoPayments';
+		
+		FOR bank AS inRoot.BankAcctRec[] DO
+		
+		CREATE LASTCHILD OF autoPayments AS autoPayment NAME 'AutoPayment';
+		
+		CREATE LASTCHILD OF autoPayment AS cardAcctId NAME 'CardAcctId';  
+		
+		SET cardAcctId.CardNum 		= bank.CardNum;  
+		SET cardAcctId.CustId		= bank.CustId;
+		SET cardAcctId.RbBrchId		= bank.RbBrchId;
+		
+		END FOR;
+		
+		DECLARE filter REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS filter NAME 'Filter';
+		
+		SET filter.AutopayStatuses.AutopayStatus  =  inRoot.AutopayStatus; 
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс GAPL получения списка платежей по подписке u06068 15.01.2015 KZIntegraAutoPaymentListRq -> GetAutoPaymentListRq
+ */
+CREATE COMPUTE MODULE HTTPRequestForIntegra_ConvertMDO2WAY_KZIntegraAutoPaymentListRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZIntegraAutoPaymentListRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'GetAutoPaymentListRq';
+		  
+		SET outRoot.(XMLNSC.Attribute)"uuid" = inRoot.RqUID;
+		SET outRoot.(XMLNSC.Attribute)"DateTime" = inRoot.RqTm;
+		SET outRoot.(XMLNSC.Attribute)"SPName" = inRoot.SPName;
+
+		DECLARE autoPayments REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS autoPayments NAME 'AutoPayments';  
+		
+		SET autoPayments.AutoPayment.AutopayId 		= inRoot.AutopayId;  
+		
+		DECLARE filter REFERENCE TO outRoot;
+		DECLARE paymentStatuses REFERENCE TO outRoot;
+		DECLARE paymentStatus REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS filter NAME 'Filter';
+		
+		CREATE LASTCHILD OF filter AS paymentStatuses NAME 'PaymentStatuses';
+		
+		FOR items AS inRoot.PaymentStatus[] DO
+			
+			CREATE LASTCHILD OF paymentStatuses AS paymentStatus NAME 'PaymentStatus';
+			
+			SET paymentStatus = FIELDVALUE(items);
+
+		END FOR;	
+		
+		SET filter.DateFrom	= REPLACE(CAST(inRoot.StartDtTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');	
+		SET filter.DateTo	= REPLACE(CAST(inRoot.EndDtTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForIntegra_ConvertMDO_KZAutoSubscriptionModRq
+   	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZAutoSubscriptionModRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'AutoSubscriptionModRq';
+		SET outRoot.(XMLNSC.Attribute)"uuid" 		= inRoot.RqUID;
+		SET outRoot.(XMLNSC.Attribute)"DateTime" 	= inRoot.RqTm;
+		SET outRoot.(XMLNSC.Attribute)"SPName" 		= 'BP_ERIB';
+		
+		SET outRoot.AutoPayments.AutoPayment.AutopayId 							= inRoot.AutoPayments.AutoPayment.AutopayId;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.RequestId 				= inRoot.AutoPayments.AutoPayment.AutoPayInfo.RequestId;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.AutopayName 			= inRoot.AutoPayments.AutoPayment.AutoPayInfo.AutopayName;		
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.ExeEventCode 			= inRoot.AutoPayments.AutoPayment.AutoPayInfo.ExeEventCode;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.SummaKindCode 			= inRoot.AutoPayments.AutoPayment.AutoPayInfo.SummaKindCode;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.StartDate 				= inRoot.AutoPayments.AutoPayment.AutoPayInfo.StartDate;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.UpdateDate 			= inRoot.AutoPayments.AutoPayment.AutoPayInfo.UpdateDate;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.MaxSumWritePerMonth 	= inRoot.AutoPayments.AutoPayment.AutoPayInfo.MaxSumWritePerMonth;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.IrreducibleAmt 		= inRoot.AutoPayments.AutoPayment.AutoPayInfo.IrreducibleAmt;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.CurAmt 				= inRoot.AutoPayments.AutoPayment.AutoPayInfo.CurAmt;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.NextPayDate			= inRoot.AutoPayments.AutoPayment.AutoPayInfo.NextPayDate;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.ChannelType 			= inRoot.AutoPayments.AutoPayment.AutoPayInfo.ChannelType;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.SPNum 					= inRoot.AutoPayments.AutoPayment.AutoPayInfo.SPNum;		
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.BranchId 				= inRoot.AutoPayments.AutoPayment.AutoPayInfo.BranchId;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.AgencyId 				= inRoot.AutoPayments.AutoPayment.AutoPayInfo.AgencyId;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.RegionId 				= inRoot.AutoPayments.AutoPayment.AutoPayInfo.RegionId;
+		
+		DECLARE recipient REFERENCE TO outRoot;
+		DECLARE requisites REFERENCE TO outRoot;
+		DECLARE objs_req REFERENCE TO outRoot;
+		DECLARE obj_req REFERENCE TO outRoot;		
+		DECLARE counter INTEGER 1;
+		DECLARE firstly BOOLEAN TRUE;
+		DECLARE oRoot REFERENCE TO outRoot;
+		
+		/*DECLARE nameBS CHARACTER inRoot.RecipientRec.CodeRecipientBS;
+		DECLARE result CHARACTER;
+		
+		DECLARE res CHARACTER; 
+		
+		DECLARE kisc CHARACTER;
+		
+		SET kisc = SUBSTRING(nameBS FROM 0 FOR  4);
+		 
+		CALL removeDigits(nameBS,result);
+		
+		IF kisc = 'KISC' THEN
+			CALL removeChar(nameBS,res);
+		ELSE
+			SET res = nameBS;
+		END IF;	*/
+
+		CREATE LASTCHILD OF outRoot.AutoPayments.AutoPayment AS oRoot NAME 'Billing';
+		   
+		/*SET oRoot.(XMLNSC.Attribute)"UID" 	 = ConvertToBilling(inRoot.RqUID);
+		SET oRoot.(XMLNSC.Attribute)"DateTime" = inRoot.RqTm;
+		SET oRoot.(XMLNSC.Attribute)"SystemId" = inRoot.SPName;
+		SET oRoot.GroupId		=	inRoot.OperUID;*/
+		
+		/*IF inRoot.RecipientRec.TaxId <> '' AND inRoot.RecipientRec.BIC <> '' AND inRoot.RecipientRec.AcctId <> '' THEN
+		
+			CREATE LASTCHILD OF outRoot AS recipient NAME 'Recipient';
+			
+			SET recipient.(XMLNSC.Attribute)"name"  = result;
+			
+			CREATE LASTCHILD OF recipient AS requisites NAME 'Requisites';
+			
+			CREATE LASTCHILD OF requisites AS objs_req NAME 'objects';
+			
+			CREATE LASTCHILD OF objs_req AS obj_req NAME 'object';
+			SET obj_req.(XMLNSC.Attribute)"name"	=	'TaxId';
+			SET obj_req.(XMLNSC.Attribute)"value"	=	inRoot.RecipientRec.TaxId;
+			
+			CREATE LASTCHILD OF objs_req AS obj_req NAME 'object';
+			SET obj_req.(XMLNSC.Attribute)"name"	=	'BIC';
+			SET obj_req.(XMLNSC.Attribute)"value"	=	inRoot.RecipientRec.BIC;
+			
+			CREATE LASTCHILD OF objs_req AS obj_req NAME 'object';
+			SET obj_req.(XMLNSC.Attribute)"name"	=	'AcctId';
+			SET obj_req.(XMLNSC.Attribute)"value"	=	inRoot.RecipientRec.AcctId;
+		
+		END IF;*/
+		
+		SET oRoot.Source		=	'65756876';
+		
+		DECLARE clazz CHARACTER;
+		
+		SET clazz = COALESCE(THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Clazz'), 'operation');
+				
+		/*IF clazz = '0' THEN
+			SET outRoot.Clazz   =   'operation';
+		END IF;*/
+		
+		DECLARE id CHARACTER; 
+		
+		SET id = COALESCE(THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Id'), 'invoices');
+		
+		/*IF id = '0' THEN
+			SET outRoot.Id   =   'invoices';
+		END IF; */
+		
+		SET oRoot.Target.(XMLNSC.Attribute)"clazz" = clazz;
+		SET oRoot.Target.(XMLNSC.Attribute)"id"	= id;
+		--SET outRoot.Target.(XMLNSC.Attribute)"id"	= 'invoices';
+		SET oRoot.Target 		=	'prep';		
+		SET oRoot.Code		=	inRoot.RecipientRec.CodeRecipientBS;
+		/*IF res <> '' THEN
+			SET outRoot.Code		=	res;
+		ELSE
+			SET outRoot.Code		=	nameBS;
+		END IF;	*/
+		DECLARE buffer CHARACTER THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Amount');
+		
+		--SET oRoot.IsAutoPay = COALESCE(inRoot.IsAutoPayment,null);
+		
+		IF buffer <> '' THEN 
+		
+			DECLARE pay REFERENCE TO outRoot;	
+			CREATE LASTCHILD OF oRoot AS pay NAME 'Pay';
+			
+			SET pay.(XMLNSC.Attribute)"Ref" = inRoot.MadeOperationId;
+			
+			SET pay.Amount = THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Amount');
+			SET pay.Target  = THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Target');
+			SET pay.Currency = 'KZT';
+			SET pay.DateTime = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		
+		END IF;
+		
+		DECLARE first_element CHARACTER;
+		DECLARE second_element CHARACTER;
+		DECLARE third_element CHARACTER;
+		DECLARE input CHARACTER;
+		DECLARE compare INTEGER;
+		
+		DECLARE body REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF oRoot AS body NAME 'Body';		
+		SET body.(XMLNSC.Attribute)"name"  = 'invoices';
+		SET body.(XMLNSC.Attribute)"type"  = 'string';
+		
+		DECLARE objs REFERENCE TO body; 
+		DECLARE obj  REFERENCE TO body;
+		DECLARE outer_obj REFERENCE TO objs;
+		DECLARE inner_obj REFERENCE TO objs;
+				 	
+		DECLARE obj_general REFERENCE TO objs;
+		DECLARE obj_element REFERENCE TO objs;		
+		
+		CREATE LASTCHILD OF body AS objs NAME 'objects';		
+		
+		DECLARE fs BOOLEAN TRUE;
+			
+		FOR req AS inRoot.RecipientRec.Requisites.Requisite[] DO
+			
+			CASE req.NameBS 
+			WHEN 'Target' THEN
+
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Target';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+			/*WHEN 'Amount' THEN
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Amount';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;*/
+			WHEN 'Invoice' THEN 
+				CREATE LASTCHILD OF objs AS obj NAME 'object';				
+				SET obj.(XMLNSC.Attribute)"name"  = 'Invoice';
+				SET obj.(XMLNSC.Attribute)"title" = req.NameVisible;
+				SET obj.(XMLNSC.Attribute)"type"  = req.Type;
+				
+				DECLARE bill_val CHARACTER;
+				SET bill_val =  THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Regions');
+				IF bill_val = '' THEN
+					SET obj.(XMLNSC.Attribute)"value" = req.EnteredData.DataItem;
+				ELSE
+					SET obj.(XMLNSC.Attribute)"value" = bill_val;
+				END IF;
+			ELSE
+				 --IF nameBS IN ('ALSECO','IVC','0004','0137','0229','0232','0465','0619','0679','0695','0697','0698') THEN
+				 	
+				 	SET input = req.NameBS;
+				 	  
+				 	--CALL parseNameBS(input, first_element);
+				 	CALL parseNameBS(input, second_element);
+				 	CALL getNameBS(input, third_element);
+				 	
+				 	SET compare = CAST(second_element AS INTEGER);		 	
+				 	
+				 	
+				 	IF compare <> counter THEN
+				 		
+				 		IF req.NameVisible NOT IN('Clazz','Id','way4code','Amount','Сумма','Баланс','BalanceAmount','AccountAddress','IVC_ADDRESS','Date','ExpireDate','HeatingSquare','2','LodgerAmount','IVC_FIO','Итоговая Сумма','PID','Список регионов') THEN 
+				 		
+					 		IF fs = TRUE THEN
+						 			
+						 			CREATE LASTCHILD OF objs AS obj NAME 'object';
+									SET obj.(XMLNSC.Attribute)"name"  = 'Items';	
+									SET obj.(XMLNSC.Attribute)"type"  = 'list';							
+										
+						 			CREATE LASTCHILD OF obj AS outer_obj NAME 'objects';
+																
+									SET fs = FALSE;
+																
+						 	END IF;
+					 		
+					 		CREATE LASTCHILD OF outer_obj AS inner_obj NAME 'object';
+					 		SET inner_obj.(XMLNSC.Attribute)"name" = 'Item';
+					 		SET inner_obj.(XMLNSC.Attribute)"type" = 'list';
+					 		SET inner_obj.(XMLNSC.Attribute)"key"  =  second_element;--THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Field_'||second_element||'_ServiceID');
+					 		
+					 		CREATE LASTCHILD OF inner_obj AS obj_general NAME 'objects';
+					 		 
+					 		CREATE LASTCHILD OF obj_general AS obj_element NAME 'object'; 
+					 		SET obj_element.(XMLNSC.Attribute)"name" = convertNameBs(third_element);
+					 		SET obj_element.(XMLNSC.Attribute)"title" = req.NameVisible;
+							SET obj_element.(XMLNSC.Attribute)"type"  = req.Type;
+							SET obj_element.(XMLNSC.Attribute)"value" = COALESCE(req.EnteredData.DataItem,'0.0');				 		
+					 		
+					 		SET counter = counter + 1;	
+				 		
+				 		END IF;
+				 		
+				 	ELSE
+				 		
+				 		IF req.NameVisible NOT IN('Clazz','Id','way4code','Amount','Сумма','Баланс','BalanceAmount','AccountAddress','IVC_ADDRESS','Date','ExpireDate','HeatingSquare','2','LodgerAmount','IVC_FIO','Итоговая Сумма','PID','Список регионов') THEN 
+				 		
+					 		IF firstly = TRUE THEN
+					 			
+					 			IF fs = TRUE THEN 
+						 			
+							 			CREATE LASTCHILD OF objs AS obj NAME 'object';
+									 	SET obj.(XMLNSC.Attribute)"name"  = 'Items';	
+									 	SET obj.(XMLNSC.Attribute)"type"  = 'list';
+									 	
+									 	CREATE LASTCHILD OF obj AS outer_obj NAME 'objects';
+							 			
+							 			SET fs = FALSE;
+						 			
+						 		END IF;
+					 			
+					 			CREATE LASTCHILD OF outer_obj AS inner_obj NAME 'object';
+					 			SET inner_obj.(XMLNSC.Attribute)"name" = 'Item';
+					 			SET inner_obj.(XMLNSC.Attribute)"type" = 'list';
+					 			SET inner_obj.(XMLNSC.Attribute)"key"  = second_element;--THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Field_'||second_element||'_ServiceID');
+					 			
+					 			CREATE LASTCHILD OF inner_obj AS obj_general NAME 'objects';
+					 			
+					 			SET firstly = FALSE;
+					 			
+					 		END IF;				 		
+					 		 
+					 		CREATE LASTCHILD OF obj_general AS obj_element NAME 'object'; 
+					 		SET obj_element.(XMLNSC.Attribute)"name" = convertNameBs(third_element);
+					 		SET obj_element.(XMLNSC.Attribute)"title" = req.NameVisible;
+							SET obj_element.(XMLNSC.Attribute)"type"  = req.Type;
+							SET obj_element.(XMLNSC.Attribute)"value" = COALESCE(req.EnteredData.DataItem,'0.0');
+				 		
+				 	END IF;
+				  --END IF;		
+				 END IF;
+			END CASE;	 	 			 
+		END FOR;	
+		
+		
+		SET outRoot.AutoPayments.AutoPayment.CardAcctId.CardNum 				= inRoot.CardAcctId.CardNum;
+		SET outRoot.AutoPayments.AutoPayment.CardAcctId.CardType 				= inRoot.CardAcctId.CardType;
+		SET outRoot.AutoPayments.AutoPayment.CardAcctId.EndDt	 				= inRoot.CardAcctId.EndDt;
+		SET outRoot.AutoPayments.AutoPayment.CardAcctId.CustId	 				= inRoot.CardAcctId.CustId;
+		SET outRoot.AutoPayments.AutoPayment.CardAcctId.LastName 				= inRoot.CardAcctId.LastName;
+		SET outRoot.AutoPayments.AutoPayment.CardAcctId.FirstName 				= inRoot.CardAcctId.FirstName;
+		SET outRoot.AutoPayments.AutoPayment.CardAcctId.AddrType 				= inRoot.CardAcctId.AddrType;
+		SET outRoot.AutoPayments.AutoPayment.CardAcctId.Addr3	 				= inRoot.CardAcctId.Addr3;
+		SET outRoot.AutoPayments.AutoPayment.CardAcctId.RbBrchId				= inRoot.CardAcctId.RbBrchId;
+		
+		SET outRoot.AutoPayments.AutoPayment.Execute							= inRoot.Execute;
+		SET outRoot.AutoPayments.AutoPayment.NeedConfirmation					= inRoot.NeedConfirmation;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForIntegra_ConvertMDO_KZAutoSubscriptionStatusModRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZAutoSubscriptionStatusModRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'AutoSubscriptionStatusModRq';
+		SET outRoot.(XMLNSC.Attribute)"uuid" 		= inRoot.RqUID;
+		SET outRoot.(XMLNSC.Attribute)"DateTime" 	= inRoot.RqTm;
+		SET outRoot.(XMLNSC.Attribute)"SPName" 		= 'BP_ERIB';
+		SET outRoot.AutoPayments.AutoPayment.AutopayId = inRoot.AutopayId;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.RequestId = inRoot.RequestId;
+		SET outRoot.AutoPayments.AutoPayment.ActionType = inRoot.ActionType;
+		SET outRoot.AutoPayments.AutoPayment.NeedConfirmation = inRoot.NeedConfirmation;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForIntegra_ConvertMDO_KZIntegraAutoSubscriptionDetailInfoRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZIntegraAutoSubscriptionDetailInfoRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'GetAutoSubscriptionDetailInfoRq';
+		SET outRoot.(XMLNSC.Attribute)"uuid" 		= inRoot.RqUID;
+		SET outRoot.(XMLNSC.Attribute)"DateTime" 	= inRoot.RqTm;
+		SET outRoot.(XMLNSC.Attribute)"SPName" 		= 'BP_ERIB';
+		
+		DECLARE autoPayments REFERENCE TO outRoot;
+		DECLARE autoPayment  REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS autoPayments NAME 'AutoPayments';
+		
+		FOR items AS inRoot.AutoSubscriptionId[] DO
+			
+			CREATE LASTCHILD OF autoPayments AS autoPayment NAME 'AutoPayment';
+			
+			SET autoPayment.AutopayId	=	items.AutopayId;
+			
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForIntegra_ConvertMDO_KZIntegraAutoPaymentDetailInfoRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZIntegraAutoPaymentDetailInfoRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'GetAutoPaymentDetailInfoRq';
+		SET outRoot.(XMLNSC.Attribute)"uuid" 		= inRoot.RqUID;
+		SET outRoot.(XMLNSC.Attribute)"DateTime" 	= inRoot.RqTm;
+		SET outRoot.(XMLNSC.Attribute)"SPName" 		= 'BP_ERIB';
+		
+		DECLARE autoPayments REFERENCE TO outRoot;
+		DECLARE autoPayment  REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS autoPayments NAME 'AutoPayments';
+		
+		FOR items AS inRoot.AutoSubscriptionId[] DO
+			
+			CREATE LASTCHILD OF autoPayments AS autoPayment NAME 'AutoPayment';
+			
+			SET autoPayment.Payments.Payment.PaymentId	=	items.PaymentId;
+			
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

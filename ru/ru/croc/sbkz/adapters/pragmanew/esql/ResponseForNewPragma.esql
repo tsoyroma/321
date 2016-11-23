@@ -1,0 +1,789 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pragmanew.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+/**
+ * Восстановление MQ-заголовка исходного сообщения
+ **/
+CREATE COMPUTE MODULE ResponseForNewPragma_AddOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Перенаправление на нужную ветку в соответствии с операцией
+ **/
+CREATE COMPUTE MODULE ResponseForNewPragma_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		/*CASE Operation
+		WHEN 'KZExpPersonInfoRs' THEN
+			SET labelName = 'KZExpPersonInfoRs';
+		WHEN 'KZGetMDMPersonInfoByAttrRs' THEN
+			SET labelName = 'KZGetMDMPersonInfoByAttrRs';
+		WHEN 'KZSendMDMPrivateClientDataRs' THEN
+			SET labelName = 'KZSendMDMPrivateClientDataRs';
+		WHEN 'KZGetClassifierRs' THEN
+			SET labelName = 'KZGetClassifierRs';
+		WHEN 'KZGetAllClassifiersRs' THEN
+			SET labelName = 'KZGetAllClassifiersRs';
+		WHEN 'KZUpdClassifierRs' THEN
+			SET labelName = 'KZUpdClassifierRs';
+		WHEN 'KZGetMDMLegalInfoByAttrRs' THEN
+			SET labelName = 'KZGetMDMLegalInfoByAttrRs';
+		WHEN 'KZSendMDMLegalClientDataRs' THEN
+			SET labelName = 'KZSendMDMLegalClientDataRs';
+		WHEN 'KZExpLegalClientDataRs' THEN
+			SET labelName = 'KZExpLegalClientDataRs';
+		WHEN 'KZExpFinAccountRs' THEN
+			SET labelName = 'KZExpFinAccountRs';
+		--- КОЛИБРИ ---	
+		WHEN 'KZSvcCodeInqRs' THEN
+			SET labelName = 'KZSvcCodeInqRs';
+		WHEN 'KZFIXferAddRs' THEN
+			SET labelName = 'KZFIXferAddRs';
+		WHEN 'KZFIXferRcvRs' THEN
+			SET labelName = 'KZFIXferRcvRs';
+		WHEN 'KZFIXferRevRs' THEN
+			SET labelName = 'KZFIXferRevRs';
+		WHEN 'KZFIXferAdviseRs' THEN
+			SET labelName = 'KZFIXferAdviseRs';
+		WHEN 'KZFIXferModLockRs' THEN
+			SET labelName = 'KZFIXferModLockRs';
+		WHEN 'KZFIXferModRs' THEN
+			SET labelName = 'KZFIXferModRs';
+		WHEN 'KZFIXferLockCanRs' THEN
+			SET labelName = 'KZFIXferLockCanRs';
+		WHEN 'KZFIXferAdviseCanRs' THEN
+			SET labelName = 'KZFIXferAdviseCanRs';
+		WHEN 'KZGetCurrencyRs' THEN
+			SET labelName = 'KZGetCurrencyRs';		
+		WHEN 'KZGetPensionRs' THEN
+			SET labelName = 'KZGetPensionRs';	
+		WHEN 'KZBlackListRs' THEN
+			SET labelName = 'KZBlackListRs';
+		--AML Offline reponse
+		WHEN 'KZOfflineOperationRs' THEN
+			SET labelName = 'KZOfflineOperationRs';
+		--AML IPDL reponse
+		WHEN 'KZBlackListIPDLRs' THEN
+			SET labelName = 'KZBlackListIPDLRs';
+																					
+		--- КОЛИБРИ ---	
+		
+		/* Organization Notify */
+		/*WHEN 'PragmaEnvelope' THEN
+			DECLARE ServiceCode CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode);
+			CASE ServiceCode
+			-- OrganisationNotify_Request 		
+			WHEN 'EntitySync' THEN
+				SET labelName = 'OrganizationNotify';
+			WHEN 'EntityNotify' THEN
+				SET labelName = 'OrganizationNotify';
+			ELSE
+				-- Непонятный тэг
+				THROW USER EXCEPTION VALUES ('Unknown message format in ResponseForNewPragma(CRM Corp)', ServiceCode);
+			END CASE;*/
+		
+		ELSE
+			-- Неизвестный тип сообщения 
+			DECLARE Operation2 CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].SystemCode);
+			CASE Operation2 
+			WHEN 'PSHEP' THEN
+				SET labelName = 'PSHEP_ReadyPramaEnvelope';
+			ELSE
+				
+				IF Operation2 IS NOT NULL THEN
+					THROW USER EXCEPTION VALUES ('Unknown format XML in ResponseForNewPragma', Operation2);
+				ELSE				
+					THROW USER EXCEPTION VALUES ('Unknown format XML in ResponseForNewPragma', Operation);
+				END IF;
+			END CASE;
+		END CASE;*/
+		
+		 CASE Operation
+           WHEN 'KZExpPersonInfoRs' THEN
+           		SET labelName = 'KZExpPersonInfoRs';
+           WHEN 'KZGetMDMPersonInfoByAttrRs' THEN
+           		SET labelName = 'KZGetMDMPersonInfoByAttrRs';
+           WHEN 'KZSendMDMPrivateClientDataRs' THEN
+           		SET labelName = 'KZSendMDMPrivateClientDataRs';
+           WHEN 'KZGetClassifierRs' THEN
+           		SET labelName = 'KZGetClassifierRs';
+           WHEN 'KZGetAllClassifiersRs' THEN
+           		SET labelName = 'KZGetAllClassifiersRs';
+           WHEN 'KZUpdClassifierRs' THEN
+           		SET labelName = 'KZUpdClassifierRs';
+           WHEN 'KZGetMDMLegalInfoByAttrRs' THEN
+          		SET labelName = 'KZGetMDMLegalInfoByAttrRs';
+           WHEN 'KZSendMDMLegalClientDataRs' THEN
+           		SET labelName = 'KZSendMDMLegalClientDataRs';
+           WHEN 'KZExpLegalClientDataRs' THEN
+           		SET labelName = 'KZExpLegalClientDataRs';
+           WHEN 'KZExpFinAccountRs' THEN
+          		 SET labelName = 'KZExpFinAccountRs';
+                               --- КОЛИБРИ ---              
+           WHEN 'KZSvcCodeInqRs' THEN
+           		SET labelName = 'KZSvcCodeInqRs';
+           WHEN 'KZFIXferAddRs' THEN
+           		SET labelName = 'KZFIXferAddRs';
+           WHEN 'KZFIXferRcvRs' THEN
+           		SET labelName = 'KZFIXferRcvRs';
+           WHEN 'KZFIXferRevRs' THEN
+          		SET labelName = 'KZFIXferRevRs';
+           WHEN 'KZFIXferAdviseRs' THEN
+           		SET labelName = 'KZFIXferAdviseRs';
+           WHEN 'KZFIXferModLockRs' THEN
+           		SET labelName = 'KZFIXferModLockRs';
+           WHEN 'KZFIXferModRs' THEN
+           		SET labelName = 'KZFIXferModRs';
+           WHEN 'KZFIXferLockCanRs' THEN
+           		SET labelName = 'KZFIXferLockCanRs';
+           WHEN 'KZFIXferAdviseCanRs' THEN
+           		SET labelName = 'KZFIXferAdviseCanRs';
+           WHEN 'KZGetCurrencyRs' THEN
+           		SET labelName = 'KZGetCurrencyRs';                    
+           WHEN 'KZGetPensionRs' THEN
+           		SET labelName = 'KZGetPensionRs';       
+           WHEN 'KZBlackListRs' THEN
+           		SET labelName = 'KZBlackListRs';
+                               --AML Offline reponse
+           WHEN 'KZOfflineOperationRs' THEN
+           		SET labelName = 'KZOfflineOperationRs';
+                               --AML IPDL reponse
+           WHEN 'KZBlackListIPDLRs' THEN
+           		SET labelName = 'KZBlackListIPDLRs';
+           	
+           --SMS 29.01
+		   WHEN 'KZSendSMSRs' THEN	
+		   		SET labelName = 'LoanSMSSend';	
+          
+                               -- Другие кейсы
+           ELSE
+           			-- Проверяем сообщение ПШЭП-а ли это 
+           DECLARE Operation2 CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].SystemCode);
+           CASE Operation2 
+           WHEN 'PSHEP' THEN
+           		SET labelName = 'PSHEP_ReadyPramaEnvelope';
+           ELSE
+           -- Проверяем код сервиса, ответ от CRM Corp
+           /* Organization Notify */
+           DECLARE ServiceCode CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode);
+           	CASE ServiceCode
+           -- OrganisationNotify_Request                                
+           	WHEN 'OrganizationNotify' THEN
+           		SET labelName = 'OrganizationNotify';
+           	WHEN 'OrganizationGetClient' THEN
+				SET labelName = 'OrganizationGetClient';	
+					
+           	ELSE
+           -- Непонятный тэг
+           THROW USER EXCEPTION VALUES ('Unknown message format in ResponseForNewPragma(CRM Corp)', Operation);
+           	END CASE;
+           END CASE;
+           END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Ответ в МАБПК Прагма "Экспорт данных по ФЛ и счетам из МАБПК в СРМ": KZExpPersonInfoRs -> PersonExp
+ **/
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'PersonExp');
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Ответ в МАБПК Прагма "Запрос на поиск клиента ФЛ": KZGetMDMPersonInfoByAttrRs -> PersonGetData
+ **/
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'PersonGetData');
+		
+		CREATE FIELD OutputRoot.XMLNSC.*[<].ResponseData.Persons;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData.Persons;
+
+		DECLARE outPerson REFERENCE TO outRef;
+		DECLARE index INTEGER 0;
+		FOR inPersonInfo AS inRef.PersonInfo[] DO
+			CREATE LASTCHILD OF outRef AS outPerson NAME 'Person';
+			SET index = index + 1;
+			CALL transformPersonDataFromESBToNewPragma(inPersonInfo, outPerson, index);
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Ответ в МАБПК Прагма "Запрос на сохранение клиента ФЛ": KZSendMDMPrivateClientDataRs -> PersonSetData
+ **/
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'PersonSetData');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		IF EXISTS(inRef.PersonInfo[]) THEN
+			DECLARE id CHARACTER NULL;
+			DECLARE integrationID CHARACTER NULL;
+			
+			FOR inPersonIdExt AS inRef.PersonInfo.PersonIdExt[] DO
+				IF inPersonIdExt.Key = 'MABPK' THEN
+					SET id = inPersonIdExt.Value;
+				END IF;
+				IF inPersonIdExt.Key = 'CIF' THEN
+					SET integrationID = inPersonIdExt.Value;
+				END IF;
+			END FOR;
+			SET outRef.ResponseData.Persons.Person.Id				= id;
+			SET outRef.ResponseData.Persons.Person.IntegrationID	= integrationID;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ на "Запрос информации обо всех НСИ": KZGetAllClassifiersRq -> ClassifierGetAllData
+ * Ответ на "Запрос информации о наличии НСИ": KZGetClassifierRq -> ClassifierGetData
+ **/
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_GetClassifier
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE msgType CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE serviceCode CHARACTER '';
+		IF msgType = 'KZGetAllClassifiersRs' THEN
+			SET serviceCode = 'ClassifierGetAllData';
+		ELSEIF msgType = 'KZGetClassifierRs' THEN
+			SET serviceCode = 'ClassifierGetData';
+		ELSEIF msgType = 'KZUpdClassifierRs' THEN
+			SET serviceCode = 'ClassifierUpdateData';
+		END IF;
+			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, serviceCode);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		CREATE FIELD OutputRoot.XMLNSC.*[<].ResponseData.Classifiers;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData.Classifiers;
+		
+		CALL CopyClassifiersFromMDO(inRef,outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Ответ в МАБПК Прагма "Запрос на поиск клиента ЮЛ": KZGetMDMLegalInfoByAttrRs -> OrgGetData
+ **/
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'OrgGetData');
+		
+		CREATE FIELD OutputRoot.XMLNSC.*[<].ResponseData.Organizations;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData.Organizations;
+
+		DECLARE outOrg REFERENCE TO outRef;
+		DECLARE index INTEGER 0;
+		FOR inOrgInfo AS inRef.OrgInfo[] DO
+			CREATE LASTCHILD OF outRef AS outOrg NAME 'Organization';
+			SET index = index + 1;
+			CALL transformOrgDataFromESBToNewPragma(inOrgInfo, outOrg, index);
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Ответ в МАБПК Прагма "Запрос на сохранение клиента ЮЛ": KZSendMDMLegalClientDataRs -> OrgSetData
+ **/
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma5
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'OrgSetData');
+		
+		CREATE FIELD OutputRoot.XMLNSC.*[<].ResponseData.Organizations;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData.Organizations;
+
+		DECLARE outOrg REFERENCE TO outRef;
+		DECLARE index INTEGER 0;
+		FOR inOrgInfo AS inRef.OrgInfo[] DO
+			CREATE LASTCHILD OF outRef AS outOrg NAME 'Organization';
+			SET index = index + 1;
+			CALL transformOrgDataFromESBToNewPragma(inOrgInfo, outOrg, index);
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Экспорт карточки клиента ЮЛ во внешние системы кроме ЕПК  : KZExpLegalClientDataRs -> OrganizationExp
+ **/
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_OrgExp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'OrganizationExp');
+		
+		CREATE FIELD OutputRoot.XMLNSC.*[<].ResponseData.Organizations;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData.Organizations;
+		
+		DECLARE outOrg REFERENCE TO outRef;
+		DECLARE index INTEGER 0;
+		FOR inOrg AS inRef.OrgInfo[] DO
+			CREATE LASTCHILD OF outRef AS outOrg NAME 'Organization';
+			SET index = index + 1;
+			CALL transformOrgDataFromESBToNewPragma(inOrg, outOrg, index);
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Экспорт данных о финансовых счетах клиента - ЮЛ  : KZExpFinAccountRs -> AcctUpdateData
+ **/
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_AcctUpdt
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'AcctUpdateData');
+		
+		CREATE FIELD OutputRoot.XMLNSC.*[<].ResponseData.Notifications.Notification;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData.Notifications.Notification;
+		
+		SET outRef.Status	= FIELDVALUE(inRef.Status.*:StatusCode);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Получение контрольного номера перевода Колибри 04.05.2014 u06068
+ */
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_SvcCodeInqRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'SrvBLGetCode');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData;
+		
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorCode 		    = inRef.status.StatusCode;
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc			= SUBSTRING(inRef.status.StatusDesc AFTER 'javax.persistence.PersistenceException: ');
+						
+		IF OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc = '' AND inRef.status.StatusDesc <> '' THEN 
+		  SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc		= inRef.status.StatusDesc;
+		END IF; 
+
+		DECLARE outOrg REFERENCE TO outRef;		
+		DECLARE ferOrg REFERENCE TO outRef;
+			
+		SET ferOrg		=	inRef.FIXferId;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Оформление перевода денег Колибри 04.05.2014 u06068
+ */
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_FIXferAddRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'SrvBLCreateMoneyTransfer');
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData;
+		
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorCode 		    = inRef.status.StatusCode;
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc			= SUBSTRING(inRef.status.StatusDesc AFTER 'javax.persistence.PersistenceException: ');
+		
+		IF OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc = '' AND inRef.status.StatusDesc <> '' THEN 
+		  SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc		= inRef.status.StatusDesc;
+		END IF; 
+		
+		DECLARE outOrg REFERENCE TO outRef;		
+		DECLARE ferOrg REFERENCE TO outRef;
+		
+		SET ferOrg		= inRef.FIXferRec; 
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Оформление выплаты перевода денег Колибри 04.05.2014 u06068
+ */
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_FIXferRcvRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'SrvBLGetMoneyTransfer');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData;
+		
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorCode 		    = inRef.status.StatusCode;
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc			= SUBSTRING(inRef.status.StatusDesc AFTER 'javax.persistence.PersistenceException: ');
+		
+		IF OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc = '' AND inRef.status.StatusDesc <> '' THEN 
+		  SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc		= inRef.status.StatusDesc;
+		END IF; 
+		
+		DECLARE outOrg REFERENCE TO outRef;		
+		DECLARE ferOrg REFERENCE TO outRef;
+		/*
+		Доработка по СЗ u07357 19.10.2015
+		*/
+		SET ferOrg		= inRef.FIXferRec;
+		IF LENGTH(inRef.FIXferRec.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IdType) = 1 THEN
+		SET ferOrg.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IdType = '0' || inRef.FIXferRec.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IdType; 
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Реверсал (отмена оформления перевода) денег Колибри 04.05.2014 u06068
+ */
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_FIXferRevRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'SrvBLReversalMoneyTransfer');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData;
+		
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorCode 		    = inRef.status.StatusCode;
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc			= SUBSTRING(inRef.status.StatusDesc AFTER 'javax.persistence.PersistenceException: ');
+		
+		IF OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc = '' AND inRef.status.StatusDesc <> '' THEN 
+		  SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc		= inRef.status.StatusDesc;
+		END IF; 
+		
+		DECLARE outOrg REFERENCE TO outRef;		
+		DECLARE ferOrg REFERENCE TO outRef;
+		
+		SET ferOrg		= inRef.FIXferRec;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Подтверждение операции с переводом денег Колибри 04.05.2014 u06068
+ */
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_FIXferAdviseRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'SrvBLMoneyTransferAcknowledgment');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData;
+		
+		DECLARE varStatusDesc CHARACTER;
+
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorCode 		    = inRef.status.StatusCode;
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc			= SUBSTRING(inRef.status.StatusDesc AFTER 'javax.persistence.PersistenceException: ');
+		
+		IF OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc = '' AND inRef.status.StatusDesc <> '' THEN 
+		  SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc		= inRef.status.StatusDesc;
+		END IF; 
+		
+		DECLARE outOrg REFERENCE TO outRef;		
+		DECLARE ferOrg REFERENCE TO outRef;
+		
+		SET ferOrg		= inRef.FIXferRec;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Блокировка перевода для модификации денег Колибри u06068  */
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_FIXferModLockRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'SrvBLMoneyTransferBlocking');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData;
+		
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorCode 		    = inRef.status.StatusCode;
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc			= SUBSTRING(inRef.status.StatusDesc AFTER 'javax.persistence.PersistenceException: ');
+		
+		IF OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc = '' AND inRef.status.StatusDesc <> '' THEN 
+		  SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc		= inRef.status.StatusDesc;
+		END IF; 
+
+		DECLARE outOrg REFERENCE TO outRef;		
+		DECLARE ferOrg REFERENCE TO outRef;
+		
+		SET ferOrg = inRef.FIXferRec;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Корректировка перевода Колибри u06068 */
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_FIXferModRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'SrvBLModifyMoneyTransfer');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData;
+		
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorCode 		    = inRef.status.StatusCode;
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc			= SUBSTRING(inRef.status.StatusDesc AFTER 'javax.persistence.PersistenceException: ');
+		
+		IF OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc = '' AND inRef.status.StatusDesc <> '' THEN 
+		  SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc		= inRef.status.StatusDesc;
+		END IF; 
+
+		DECLARE outOrg REFERENCE TO outRef;		
+		DECLARE ferOrg REFERENCE TO outRef;
+
+		SET ferOrg		= inRef.FIXferRec;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Отмена блокировки Колибри u06068 */
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_FIXferLockCanRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'SrvBLCancelMoneyTransferGetting');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData;
+		
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorCode 		    = inRef.status.StatusCode;
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc			= SUBSTRING(inRef.status.StatusDesc AFTER 'javax.persistence.PersistenceException: ');
+
+		IF OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc = '' AND inRef.status.StatusDesc <> '' THEN 
+		  SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc		= inRef.status.StatusDesc;
+		END IF; 
+		
+		DECLARE outOrg REFERENCE TO outRef;		
+		DECLARE ferOrg REFERENCE TO outRef;
+
+		SET ferOrg = inRef.FIXferRec;		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Аннулирование(отмена выплаты) Колибри u06068 */
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_FIXferAdviseCanRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'SrvBLRecoverMoneyTransfer');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData;
+		
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorCode 		    = inRef.status.StatusCode;
+		SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc			= SUBSTRING(inRef.status.StatusDesc AFTER 'javax.persistence.PersistenceException: ');
+
+		IF OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc = '' AND inRef.status.StatusDesc <> '' THEN 
+		  SET OutputRoot.XMLNSC.*[<].ErrorData.ErrorDesc		= inRef.status.StatusDesc;
+		END IF; 
+		
+		DECLARE outOrg REFERENCE TO outRef;		
+		DECLARE ferOrg REFERENCE TO outRef;
+				
+		SET ferOrg		= inRef.FIXferRec;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_CurrencyRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRs(InputRoot, OutputRoot, 'SrvBLRecoverMoneyTransfer');
+		
+		--CREATE FIELD OutputRoot.XMLNSC.*[<].ResponseData.Organizations;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].ResponseData;			
+		
+		SET outRef = inRef; 			
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- Ответ от ГЦВП по физ клиентам 08083
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_KZGetPensionRs
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	 	CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'ExpGetClientPension');
+
+			
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZGetPensionRs;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		
+		DECLARE averageSum INTEGER 0;
+        DECLARE resultAverage CHARACTER '0'; -- инициализаровал как 0, чтобы в случае отсутвия полей не вылетал нул.
+        DECLARE sum CHARACTER;
+        DECLARE enumCount INTEGER CARDINALITY(inRef.*:PensionRecord[]);
+           
+		   
+		    FOR items AS inRef.*:PensionRecord[] DO
+        	
+        	SET sum = ROUND(CAST(items.*:SumMon AS DECIMAL), 0);
+        	SET averageSum = averageSum + CAST(sum AS INTEGER);        	
+        	
+        END FOR;
+         -- Добавил условие на проверку. Т.к. язык не позволяет делить на ноль        
+		IF enumCount <> 0 THEN
+			SET resultAverage = ROUND(CAST((averageSum / enumCount) AS DECIMAL),0);
+		END IF;		
+						
+		
+		SET outRef.ServiceCode 			=	'ExpGetClientPension';
+		SET outRef.RespSrvGetClientPensionInformationType.RequestParams.RequestID			= inRef.RqUID;
+		SET outRef.RespSrvGetClientPensionInformationType.RequestParams.ResponseDate			= CURRENT_DATE;
+		SET outRef.RespSrvGetClientPensionInformationType.RequestParams.ErrorCode			= inRef.*:Status.*:StatusCode;
+		SET outRef.RespSrvGetClientPensionInformationType.RequestParams.ErrorText			= inRef.*:Status.*:StatusDesc;
+		SET outRef.RespSrvGetClientPensionInformationType.RequestParams.PersonParams.IIN			= inRef.*:FirstRecord.*:IIN;	
+		SET outRef.RespSrvGetClientPensionInformationType.RequestParams.PersonParams.LastName			= inRef.*:FirstRecord.*:surName;	
+		SET outRef.RespSrvGetClientPensionInformationType.RequestParams.PersonParams.FirstName			= inRef.*:FirstRecord.*:firstName;	
+		SET outRef.RespSrvGetClientPensionInformationType.RequestParams.PersonParams.MiddleName			= inRef.*:FirstRecord.*:middleName;	
+		SET outRef.RespSrvGetClientPensionInformationType.RequestParams.PersonParams.Birthday			= inRef.*:FirstRecord.*:birthDate;	
+		SET outRef.RespSrvGetClientPensionInformationType.RequestParams.PersonParams.AvgAmount			= resultAverage;
+		
+		DECLARE outRq REFERENCE TO outRef;
+		FOR PensionRecord AS inRef.*:PensionRecord[] DO
+			CREATE LASTCHILD OF outRef.RespSrvGetClientPensionInformationType.RequestParams.PersonParams.PensionDetails AS outRq NAME 'PensionDetail';	
+			SET outRq.PensionDate 			= PensionRecord.*:DatePmt;
+			SET outRq.Name 		= PensionRecord.*:OrgInfo.*:Name;
+			SET outRq.BIN 	= PensionRecord.*:PersonInfo.*:PersonId;
+			SET outRq.Amount 				= PensionRecord.*:SumMon;
+			
+		END FOR;
+																		
+		RETURN TRUE;
+	END;
+	
+END MODULE;
+
+
+--AML ONLINE
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_KZBlackListRs
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	 	CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'amlonline');
+
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope.*[<];
+		SET outRef = inRef;		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+--AML OFFLINE
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_KZOfflineOperationRs
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	 	CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'amloffline');
+
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope.*[<];
+		SET outRef = inRef;	
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+--AML IPDL
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2NewPragma_KZBlackListIPDLRs
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	 	CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'amlipdl');
+
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope.*[<];
+		SET outRef = inRef;			
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+--SMS
+CREATE COMPUTE MODULE ResponseForNewPragma_ConvertMDO2SMS
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	
+	DECLARE inRef REFERENCE TO InputRoot.XMLNSC.[<];
+	DECLARE outRef REFERENCE TO OutputRoot;
+	SET outRef = NULL;
+		
+	--PROPAGATE TO TERMINAL 'Out1';
+	RETURN TRUE;
+	END;
+END MODULE;

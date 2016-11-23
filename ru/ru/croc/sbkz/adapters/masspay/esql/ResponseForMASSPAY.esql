@@ -1,0 +1,127 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.masspay.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils, ru.croc.sbkz.adapters.ipt.esql;
+
+/**
+ * Восстановление MQ-заголовка исходного сообщения
+ **/
+CREATE COMPUTE MODULE ResponseForMASSPAY_AddOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForMASSPAY_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE Operation CHARACTER Environment.UserProperties.OperationName;
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'ACCOUNT_BILLING' THEN
+			SET labelName = 'ACCOUNT_BILLING';
+		WHEN 'PAYMENT_BILLING' THEN
+			SET labelName = 'PAYMENT_BILLING';																						
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE CreateTimeoutResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRef REFERENCE TO InputRoot;
+		
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+		SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier = CAST(Environment.UserProperties.HTTPRequestIdentifier AS BLOB);
+		
+		-- Формирование структуры сообщения-ответа
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body, OutputRoot.XMLNSC);
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response.status		= '0';
+		SET outRef.response.err			= 'Таймаут во время ожидания ответа от обрабатывающей системы';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForMASSPAY_PrepareResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		SET OutputRoot = InputRoot;
+
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+		
+		-- Проставляем HTTP-идентификатор ответа
+		SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier = CAST(Environment.UserProperties.HTTPRequestIdentifier AS BLOB);
+		
+		RETURN TRUE;		
+		
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForMASSPAY_ConvertMDO2MASSPAY
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot); 
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		--CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE); 
+		
+		CREATE FIRSTCHILD OF OutputRoot.XMLNSC TYPE XMLNSC.XmlDeclaration; 
+		SET OutputRoot.XMLNSC.(XMLNSC.XmlDeclaration)*.(XMLNSC.Attribute)Version = '1.1'; 
+		SET OutputRoot.XMLNSC.(XMLNSC.XmlDeclaration)*.(XMLNSC.Attribute)Encoding = 'UTF-8';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'mBilling'; 
+		
+		SET outRoot.(XMLNSC.Attribute)"Version" = '1.1';
+		SET outRoot.STAN = FIELDVALUE(inRoot.(XMLNSC.Attribute)"UID");				
+		SET outRoot.Interface = 'KazSber-KazTelecom';
+		IF COALESCE(inRoot.Result.Status.(XMLNSC.Attribute)"Id",'') = '1' THEN
+			SET outRoot.Response  = 'OK';
+		ELSE
+			SET outRoot.Response  = 'ERROR';	
+		END IF;
+		
+		SET outRoot.AccountInfo.RRN 	 = inRoot.GroupId;
+		SET outRoot.AccountInfo.Amount   = inRoot.Pay.Amount;
+		SET outRoot.AccountInfo.Account  = COALESCE(inRoot.Pay.Target,Environment.UserProperties.Account);
+		SET outRoot.AccountInfo.Currency = inRoot.Pay.Currency;
+		SET outRoot.AccountInfo.Target   = inRoot.Pay.Target;
+		SET outRoot.AccountInfo.RegNum	 = inRoot.GroupId; 
+		SET outRoot.AccountInfo.Info	 = 'ACTIV';
+		
+		RETURN TRUE;
+
+	END;
+END MODULE;

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tns:ControlMessage xmlns:tns="http://www.croc.ru/sbrf/router/config/xml/ControlMessage" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.croc.ru/sbrf/router/config/xml/ControlMessage ControlMessage.xsd ">
+	<tns:RoutingConfig>
+		<tns:Route id="1">
+			<tns:Param name="name1">value1</tns:Param>
+			<tns:Param name="name2">value2</tns:Param>
+		</tns:Route>
+		<tns:Route id="2">
+			<tns:Param name="name1">value1</tns:Param>
+			<tns:Param name="name2">value2</tns:Param>
+		</tns:Route>
+	</tns:RoutingConfig>
+	<tns:Hash>123</tns:Hash>
+</tns:ControlMessage>

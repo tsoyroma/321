@@ -1,0 +1,136 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.ipt.esql
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE RepeatIPT_ConvertUFX2MDO_BillingXTX02
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+			CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+			CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZBillingIPTInfoRq';
+		
+			CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);				
+			DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request.*[<];
+			DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+			DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+			
+			DECLARE oRef REFERENCE TO outRef;
+		
+			CREATE LASTCHILD OF outRef AS oRef NAME 'request';
+			SET oRef = inRef;
+			
+			-- Раньше нужно было удалить реквизит, чтобы не отдавать IPT
+			/*FOR orefBody AS oRef.Body.objects.object[] DO					
+					IF orefBody.(XMLNSC.Attribute)"name" = 'PERSONGETIIN' THEN
+						
+						SET orefBody = NULL;
+					
+					END IF;					
+			END FOR;*/
+			
+			SET Environment.UserProperties.HTTPRequestIdentifier					= inRoot.HTTPRequestIdentifier;
+			SET Environment.UserProperties.OperUID									= inRoot.OperUID;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RepeatIPT_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RepeatIPT_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.UserProperties.OperationName;
+		DECLARE labelName CHARACTER;
+
+		CASE Operation
+		WHEN 'BillingXTX02' THEN 
+			SET labelName = 'BillingXTX02';
+		WHEN 'BillingXTX04' THEN 
+			SET labelName = 'BillingXTX04';
+
+		ELSE
+			-- Неизвестный тип сообщения 	
+			THROW USER EXCEPTION VALUES ('Unknown format XML in RepeatIPT(IPT_RS)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RepeatIPT_FillHeaders 
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+
+		-- дальнейшее взаимодействие происходит по MQ, поэтому убираем заголовок HTTP
+		SET OutputRoot.HTTPInputHeader = null;
+		
+		DECLARE outBody REFERENCE TO OutputRoot.XMLNSC.message;
+		-- сохраним заголовки в переменных среды, 
+		SET Environment.UserProperties.RqUID			= FIELDVALUE(outBody.uid);
+		SET Environment.UserProperties.RqTm				= FIELDVALUE(outBody.datetime);
+		SET Environment.UserProperties.SPName			= 'IPT';
+		SET Environment.UserProperties.OperationName	= FIELDVALUE(outBody.xtype);
+
+		-- сохраним идентификатор запроса для дальнейшего ответа
+		SET Environment.UserProperties.HTTPRequestIdentifier = CAST(InputLocalEnvironment.Destination.HTTP.RequestIdentifier AS CHARACTER);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RepeatIPT_ConvertUFX2MDO_BillingXTX04
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN  
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+			CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+			CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZBillingIPTInfoRq';
+		
+			CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);				
+			DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request.*[<];
+			DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+			DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+			
+			DECLARE oRef REFERENCE TO outRef;
+		
+			CREATE LASTCHILD OF outRef AS oRef NAME 'request';
+			SET oRef = inRef;
+			
+			-- Раньше нужно было удалить реквизит, чтобы не отдавать IPT
+			/*FOR orefBody AS oRef.Body.objects.object[] DO					
+					IF orefBody.(XMLNSC.Attribute)"name" = 'PERSONGETIIN' THEN
+						
+						SET orefBody = NULL;
+					
+					END IF;					
+			END FOR;*/
+			
+			SET Environment.UserProperties.HTTPRequestIdentifier					= inRoot.HTTPRequestIdentifier;
+			SET Environment.UserProperties.OperUID									= inRoot.OperUID;
+			SET Environment.UserProperties.RepeatRq 								= 'ResponseFromBilling';
+			SET Environment.UserProperties.OperationName = 'BillingXTX04';
+		RETURN TRUE;
+	END;
+END MODULE;

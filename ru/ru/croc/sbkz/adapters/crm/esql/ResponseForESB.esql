@@ -1,0 +1,157 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crm.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Установка ответных заголовков а также получение ответного сообщения из агрегации
+CREATE COMPUTE MODULE ResponseForESB_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE OrigMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+		SET Environment.UserProperties = OrigMsg.UserProperties;
+
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+
+		SET OutputRoot.XMLNSC = InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC;
+
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(OrigMsg, OutputLocalEnvironment);
+
+		IF Environment.UserProperties.Operation = '' THEN
+				SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = 'unchanged';
+		END IF;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE ResponseForESB_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER COALESCE(Environment.UserProperties.Operation, FIELDVALUE(OutputRoot.XMLNSC.*[<].*:Envelope.*:Header.*:"operation-name"));
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'SaveCreditDealData' THEN
+			SET labelName = 'Envelope';
+		WHEN 'GetParticipantsOfCreditDeal' THEN
+			SET labelName = 'Envelope';
+		WHEN 'CreateTaskClientService' THEN
+			SET labelName = 'Envelope';
+		WHEN 'UpdateReference' THEN
+			SET labelName = 'Envelope';
+		WHEN 'importRatingRq' THEN 
+			SET labelName = 'Envelope';
+		WHEN 'updateRatingRq' THEN
+			SET labelName = 'Envelope';
+		WHEN 'SrvGetFinReport' THEN
+			SET labelName = 'Envelope';
+		WHEN 'SrvGetExchangeRates' THEN
+			SET labelName = 'Envelope';
+		WHEN 'SrvGetRatingsAndFactors' THEN
+			SET labelName = 'Envelope';
+		WHEN 'SrvUpdateRating' THEN
+			SET labelName = 'Envelope';
+
+		WHEN 'prtspRq' THEN
+			SET labelName = 'Envelope';
+		WHEN 'importFinReportRq' THEN
+			SET labelName = 'Envelope';		
+		WHEN 'getExchangeRatesRq' THEN
+			SET labelName = 'Envelope';		
+		WHEN 'createTaskRq' THEN
+			SET labelName = 'Envelope';
+		WHEN 'updateRefRq' THEN
+			SET labelName = 'Envelope';
+		WHEN 'saveDealRq' THEN
+			SET labelName = 'Envelope';
+			
+		WHEN 'KZExpCurrencyRateRq' THEN
+			SET labelName = 'KZExpCurrencyRateRs';
+		WHEN 'KZExpMDMLegalClientDataRq' THEN
+			SET labelName = 'KZExpMDMLegalClientDataRs';
+		WHEN 'KZExpMDMPrivateClientDataRq' THEN
+			SET labelName = 'KZExpMDMPrivateClientDataRs';
+		WHEN 'KZExpLegalClientDataRq' THEN 
+			SET labelName = 'KZExpLegalClientDataRs';
+		WHEN 'KZExpFinAccountRq' THEN 
+			SET labelName = 'KZExpFinAccountRs';
+		WHEN 'GetLimitRs' THEN
+			SET labelName = 'GetLimitRs';					
+
+		WHEN 'PutLimitMasterDataRq' THEN
+			SET labelName = 'PutLimitMasterDataRq';		
+		WHEN 'Message_DB_StatusRq' THEN
+			SET labelName = 'Message_DB_StatusRq';	
+		WHEN 'Message_DB_UCModKMEKRq' THEN
+			SET labelName = 'Message_DB_UCModKMEKRq';						
+		
+		-- CRM cor
+		ELSE	
+		--WHEN 'PragmaEnvelope' THEN
+			DECLARE Operation2 CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+			CASE Operation2
+			-- OrganisationNotify_Request 		
+			WHEN 'PragmaEnvelope' THEN
+				DECLARE ServiceCode CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode);
+				CASE ServiceCode
+				WHEN  'OrganizationNotify' THEN
+					SET labelName = 'OrganizationNotify';
+				WHEN 'OrganizationGetClient' THEN
+					SET labelName = 'OrganizationGetClient';	
+				ELSE
+				-- Непонятный тэг
+				THROW USER EXCEPTION VALUES ('Unknown message format in ResponseForESB(CRM Corp)', ServiceCode);
+			END CASE;
+			--THROW USER EXCEPTION VALUES ('Unknown message format in ResponseForESB(CRM Corp)', Operation2);	
+			END CASE;		
+		 
+		--ELSE
+			-- Неизвестный тип сообщения
+			--sTHROW USER EXCEPTION VALUES ('Unknown message format in ResponseForESB(CRM)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO_CurrencyRate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- CALL CopyMessageHeaders();
+		-- CALL CopyEntireMessage();
+		RETURN FALSE;
+	END;
+
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO_AddSPName
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		IF EXISTS(OutputRoot.XMLNSC.*[<].Status[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC.*[<].Status NAME 'SPName' VALUE 'CRMc';
+		END IF;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO_AcctUpdt
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillMDOStandartElementsRs(InputRoot, OutputRoot, 'KZExpFinAccountRs');
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+

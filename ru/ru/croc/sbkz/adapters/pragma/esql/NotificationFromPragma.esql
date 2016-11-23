@@ -1,0 +1,248 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pragma.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+/**
+ * Маршрутизация потока по содержимому нотификации
+ **/
+CREATE COMPUTE MODULE NotificationFromPragma_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'GetBackOfficeDateNf' THEN
+			SET labelName = 'GetBackOfficeDateNf';
+		ELSE
+			CASE FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode)
+			WHEN 'SapDocumentExp' THEN
+				SET labelName = 'SapDocumentExp';
+			WHEN 'SapStatusExp' THEN
+				SET labelName = 'SapStatusExp';
+			ELSE				
+				-- Неизвестный тип сообщения
+				THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+			END CASE;
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Нотификация из АБПК Прагма в шину для взаимодействия "Передача информации в Бэк-офис": GetBackOfficeDateNf -> KZGetBackOfficeDateNf
+ **/
+CREATE COMPUTE MODULE NotificationFromPragma_ConvertPragmaNotif2MDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetBackOfficeDateNf';		
+		
+		CALL FillMDOStandartElementsNf(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.GetBackOfficeDateNf;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.KZGetBackOfficeDateNf;
+		
+		SET OutRs.DocNumber 		= InpRs.DocNumber;
+		SET OutRs.DocDate 			= InpRs.DocDate;
+		SET OutRs.ResultCode 		= InpRs.ResultCode;
+		SET OutRs.CardAcctId.CardNum = InpRs.CardNum;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Маршрутизация нотификаций через MQRFH2 заголовок.
+ **/
+CREATE COMPUTE MODULE NotificationFromPragma_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+/**
+ * Задание параметров маршрутизации в заголовке MQRFH2.
+ * Случай для маршрутизации по TargetSPName.
+ **/
+CREATE COMPUTE MODULE NotificationFromPragma_FillMqRfh2usr_SystemId
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= CASE Environment.UserProperties.TargetSPName
+		 	WHEN 'BSS' THEN 'urn:sbkzsystems:bss'
+		 	WHEN 'SAP' THEN 'urn:sbkzsystems:sap'
+		 	WHEN 'CRMc' THEN 'urn:sbkzsystems:crm'
+		 	ELSE NULL 
+	 	END;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Экспорт данных о платежных документах из АБС : SapDocumentExp -> KZExpPayDocRq
+ **/
+CREATE COMPUTE MODULE NotificationFromPragma_ConvertPragma2MDO_SapDocExp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZExpPayDocRq';
+		DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+	
+		SET outRoot.(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+		SET outRoot.(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+		SET outRoot.(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+		
+		SET outRoot.RqUID = InputRoot.XMLNSC.*[<].MessageUID;
+		SET outRoot.RqTm = InputRoot.XMLNSC.*[<].MessageDateTime;
+		SET outRoot.SPName = COALESCE(InputRoot.XMLNSC.*[<].SystemCode, 'ABPK');
+		SET outRoot.TargetSPName = InputRoot.XMLNSC.*[<].DestinationSystem;
+		SET outRoot.BankInfo.banks:RegionId = InputRoot.XMLNSC.*[<].FilialCode;
+
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.[<].RequestData.DocList.Documents;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.[<];
+		
+		DECLARE outPayDoc REFERENCE TO outRef;
+		FOR inDocument AS inRef.Document[] DO
+			CREATE LASTCHILD OF outRef AS outPayDoc NAME 'PayDoc';
+			
+			DECLARE participantEmpty REFERENCE TO inDocument;
+			DECLARE participantRec REFERENCE TO inDocument;
+			DECLARE participantSENDER_BANK REFERENCE TO inDocument;
+			FOR inDocumentParticipant AS inDocument.DocumentParticipants.DocumentParticipant[] DO
+				IF inDocumentParticipant.Role = '' THEN
+					MOVE participantEmpty TO inDocumentParticipant;
+				END IF;
+				IF inDocumentParticipant.Role = 'rec' THEN
+					MOVE participantRec TO inDocumentParticipant;
+				END IF;
+				IF inDocumentParticipant.Role = 'БАНК_ОТПРАВИТЕЛЯ' THEN
+					MOVE participantSENDER_BANK TO inDocumentParticipant;
+				END IF;
+			END FOR;
+			
+			SET outPayDoc.PayerInfo.AcctInfo.AcctId				= participantEmpty.Account;
+			SET outPayDoc.PayerInfo.OrgInfo.orgs:Name			= participantEmpty.Name;
+			SET outPayDoc.PayerInfo.OrgInfo.OrgIdExt.Key		= 'RNN';
+			SET outPayDoc.PayerInfo.OrgInfo.OrgIdExt.Value		= participantEmpty.RNN;
+			SET outPayDoc.PayerInfo.BankInfo.banks:BankId		= participantSENDER_BANK.BIC;
+
+			SET outPayDoc.ReceiverInfo.AcctInfo.AcctId			= participantRec.Account;
+			SET outPayDoc.ReceiverInfo.OrgInfo.orgs:Name		= participantRec.Name;
+			SET outPayDoc.ReceiverInfo.OrgInfo.OrgIdExt.Key		= 'RNN';
+			SET outPayDoc.ReceiverInfo.OrgInfo.OrgIdExt.Value	= participantRec.RNN;
+			SET outPayDoc.ReceiverInfo.BankInfo.banks:BankId	= participantRec.BIC;
+			
+			SET outPayDoc.PayDocInfo.DocNum						= inDocument.Number;
+			SET outPayDoc.PayDocInfo.DocDate					= inDocument.PrimaryCreationDate;
+			SET outPayDoc.PayDocInfo.Assign						= inDocument.Details;
+			SET outPayDoc.PayDocInfo.RefDate					= inDocument.OperationDate;
+			
+			SET outPayDoc.DocOper.DBAcctInfo.AcctId				= inDocument.DocumentOperations.DocumentOperation.AccountDB;
+			SET outPayDoc.DocOper.DBAcctInfo.AcctCur			= inDocument.DocumentOperations.DocumentOperation.CurrencyDB;
+			SET outPayDoc.DocOper.CRAcctInfo.AcctId				= inDocument.DocumentOperations.DocumentOperation.AccountCR;
+			SET outPayDoc.DocOper.CRAcctInfo.AcctCur			= inDocument.DocumentOperations.DocumentOperation.CurrencyCR;
+			SET outPayDoc.DocOper.Amount						= CASE 
+				WHEN inDocument.DocumentOperations.DocumentOperation.Amount <> '' AND
+				CAST(inDocument.DocumentOperations.DocumentOperation.Amount AS DECIMAL) <> 0
+				THEN inDocument.DocumentOperations.DocumentOperation.Amount
+				ELSE inDocument.DocumentOperations.DocumentOperation.AmountNC
+			END;
+			
+		END FOR;
+								
+		SET Environment.UserProperties.TargetSPName		= 'SAP';
+								
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Выгрузка статусов платёжных документов по инициативе АБИС : SapStatusExp -> KZLegalExpPayDocStatusRq
+ **/
+CREATE COMPUTE MODULE NotificationFromPragma_ConvertPragma2MDO_SapStatusExp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZLegalExpPayDocStatusRq';
+		DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+	
+		SET outRoot.(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+		SET outRoot.(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+		SET outRoot.(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+		
+		SET outRoot.RqUID = InputRoot.XMLNSC.*[<].MessageUID;
+		SET outRoot.RqTm = InputRoot.XMLNSC.*[<].MessageDateTime;
+		SET outRoot.SPName = COALESCE(InputRoot.XMLNSC.*[<].SystemCode, 'ABPK');
+		SET outRoot.TargetSPName = InputRoot.XMLNSC.*[<].DestinationSystem;
+		SET outRoot.BankInfo.banks:RegionId = InputRoot.XMLNSC.*[<].FilialCode;
+
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.[<].RequestData.DocList.Documents;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.[<];
+		
+		DECLARE outPayDocStatusInfo REFERENCE TO outRef;
+		FOR inDocument AS inRef.Document[] DO
+			CREATE LASTCHILD OF outRef AS outPayDocStatusInfo NAME 'PayDocStatusInfo';
+			
+			SET outPayDocStatusInfo.Doc.PayDocInfo.DocNum		= inDocument.Number;
+			SET outPayDocStatusInfo.Doc.PayDocInfo.Note			= inDocument.BankMessage;
+			SET outPayDocStatusInfo.Doc.PayDocInfo.DocRef		= inDocument.Id;
+			SET outPayDocStatusInfo.Doc.PayDocInfo.DocType		= inDocument.Type;
+			SET outPayDocStatusInfo.DocStatus					= inDocument.Status;
+					
+		END FOR;
+								
+		SET Environment.UserProperties.TargetSPName		= 'SAP';
+								
+		RETURN TRUE;
+	END;
+END MODULE;

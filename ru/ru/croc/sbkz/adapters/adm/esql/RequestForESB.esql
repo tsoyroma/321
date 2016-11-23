@@ -1,0 +1,137 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.adm.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+/*
+ * Определине сервиса и его дальнейшего маршрута
+ */
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.UserProperties.OperationName;
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'ADM001' THEN
+			SET labelName = 'ADM001';
+		WHEN 'ADM002' THEN
+			SET labelName = 'ADM002';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in ADM(RequestForESB)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Определяем название сервиса и задаем заголовочные параметры
+ */
+CREATE COMPUTE MODULE RequestForESB_FillHeaders
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		DECLARE outBody REFERENCE TO OutputRoot.XMLNSC.message;
+ 
+		SET Environment.UserProperties.RqUID			= FIELDVALUE(outBody.uid);
+		SET Environment.UserProperties.RqTm				= FIELDVALUE(outBody.datetime);
+		SET Environment.UserProperties.SPName			= 'ADM';
+		SET Environment.UserProperties.OperationName	= FIELDVALUE(outBody.xtype);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * u06068 11.08.2014 Технический запрос пополнение  счета
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertADMToMDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZADMTechRequest';		
+
+		CALL FillMDOStandartElementsADMRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		SET OutRq.SenderReference	= FIELDVALUE(InpRq."uid");
+		SET OutRq.EquipNumber     	= FIELDVALUE(InpRq.sender."member-id");
+		SET OutRq.PayerID	        = FIELDVALUE(InpRq.request.client_id);
+
+		SET Environment.UserProperties.MemId = FIELDVALUE(InpRq.sender."member-id");		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+  u00671 12/08/2014 Финансовый запрос на пополнение счета
+*/
+CREATE COMPUTE MODULE RequestForESB_ConvertADMToMDO2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZADMFinRequest';		
+
+		CALL FillMDOStandartElementsADMRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+		SET OutRq.SenderReference	= FIELDVALUE(InpRq."uid");
+		SET OutRq.EquipNumber    	= FIELDVALUE(InpRq.sender."member-id");
+		SET Environment.UserProperties.MemId = FIELDVALUE(InpRq.sender."member-id");		
+		
+		SET OutRq.trx_amount	    = FIELDVALUE(InpRq.request."trx-amount");
+		SET OutRq.client_account	= FIELDVALUE(InpRq.request."client-account");
+		SET OutRq.PayerID	        = FIELDVALUE(InpRq.request.client_id);
+			
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillHeadersS
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		DECLARE outBody REFERENCE TO OutputRoot.XMLNSC.message;
+ 
+		SET Environment.UserProperties.RqUID			= FIELDVALUE(outBody.uid);
+		SET Environment.UserProperties.RqTm				= FIELDVALUE(outBody.datetime);
+		SET Environment.UserProperties.SPName			= 'ADMS';
+		SET Environment.UserProperties.OperationName	= FIELDVALUE(outBody.xtype);
+
+		RETURN TRUE;
+	END;
+END MODULE;

@@ -1,0 +1,492 @@
+BROKER SCHEMA ru.croc.sbrf.common.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+-- Список очередей для рассылки сообщений об обновлении таблицы маршрутизации
+-- Если название менеджера очереди не заполнено, то считаем текущий
+DECLARE ListForUpdateRT EXTERNAL CHARACTER '<List><Item><Q>ESB.RT.CONFIG</Q><QM></QM></Item><Item><Q>BP.GFL.CONFIG</Q><QM></QM></Item><Item><Q>CFG.CONTROL</Q><QM>M99.ESB.DI1</QM></Item></List>';
+
+--ИД раутера для которого считываются параметры маршрутизации
+DECLARE RouterId EXTERNAL CHARACTER 'RouterTest';
+
+--Отладочная переменная - флаг необходимости проверки сообщения на корректность
+DECLARE IgnoreCheck EXTERNAL BOOLEAN true;
+
+--Константы статуса проверки
+DECLARE ROUTE_MSG_SUCCESS CONSTANT CHARACTER 'ok';
+
+--Константа для указания времени жизни архивного сообщения в очереди (в днях)
+DECLARE NUMBER_ARCHIVE_DAY CONSTANT CHARACTER '15';
+
+-- Имя конфигурационной очереди для отправки ТМ
+DECLARE Q_CONFIG CONSTANT CHARACTER 'ROUTER.CONFIG';
+
+-- Имя управляющей удаленной очереди на менеджере адаптеров
+DECLARE QADP_CONTROL CONSTANT CHARACTER 'ROUTER.CONTROL.ADP';
+
+-- Признак, показывает есть ли в ТБ адаптеры с динамической маршрутизацией (в Поволжском только для ИАСК)
+DECLARE DynamicRoutingForAdapters EXTERNAL BOOLEAN FALSE;
+
+-------------------------------
+--
+-- Функция обновления ТМ из нового конфигурационного файла
+--
+-------------------------------
+CREATE COMPUTE MODULE Router_UpdateRoutingTable
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage(); 
+		-- Гарантированно сделаем сообщение персистент
+		SET OutputRoot.MQMD.Persistence = MQPER_PERSISTENT;
+		-- Проверим структуру входящего сообщения
+		IF EXISTS(InputRoot.XMLNSC.tns:ControlMessage.tns:RoutingConfig.tns:Route[]) THEN
+			-- Открываем однопоточный блок, если параллельно несколько потоков будут пытаться обновить конфигурацию ТМ
+			INIT_TM_LOCK: BEGIN ATOMIC
+				CALL InitRoutingTableCache(InputRoot.XMLNSC);
+			END INIT_TM_LOCK;
+		ELSE
+			THROW USER EXCEPTION VALUES('Unknown message to update the routing table.');
+		END IF;	
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+-------------------------------
+--
+-- Основная функция для маршрутизации сообщений
+--
+-------------------------------
+CREATE COMPUTE MODULE Router_Routing
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		CALL CopyEntireMessage();
+		-- 28.07.2011 Проставляем наименование операции + тип операции
+		SET Environment.UserProperties.OperationNameForLog	= InputRoot.MQRFH2.usr.OperationId || COALESCE(InputRoot.MQRFH2.usr.OperationTypeId,'');
+		-- Создаем заранее ветку для DestinationData, которую заполняем далее по ТМ
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = '';
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName = '';		
+
+		-- Если ТМ не заполнена, необходимо ее инициализировать			
+		IF NOT (isRoutingTableFull()) THEN
+			-- Сбрасываем флаг попытки считывания таблицы марщрутизации
+			SET Environment.UserProperties.nCfgRqAttempt = NULL;
+			-- Считаем файл конфигурационный из очереди ROUTER.CONFIG при помощи узла MQGet
+			PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+
+			-- Если файл конфигурации считан, то выполняем инициализацию ТМ
+			IF EXISTS(Environment.Variables.RouterData.tns:ControlMessage.tns:RoutingConfig[]) THEN
+
+				-- Необходимо повторно проверить, что какой-либо поток параллельно уже не выполнил инициализацию
+				-- Открываем однопоточный блок, если параллельно несколько потоков будут пытаться инициализировать конфигурацию ТМ
+				-- Параллельно в таком же блоке может происходить обновление ТМ
+				INIT_TM_LOCK: BEGIN ATOMIC
+					IF not(isRoutingTableFull()) THEN
+						--Буффер для хранения текста ошибки, полученной в ходе проверки сообщения
+						DECLARE error CHARACTER '';
+
+						--Для отладки
+						IF IgnoreCheck THEN
+							--Инициализация таблицы маршрутизации
+							CALL InitRoutingTableCache(Environment.Variables.RouterData);
+						ELSE
+							--Проверка корректности данных
+							IF (ru.croc.sbrf.common.java.esql.isMsgCorrect(Environment.Variables.RouterData, error)) THEN
+								--Инициализация таблицы маршрутизации
+								CALL InitRoutingTableCache(Environment.Variables.RouterData);
+							ELSE
+								SET OutputRoot.MQRFH2 = NULL;
+								SET OutputRoot.MQMD.Format = MQFMT_STRING;
+								
+								SET Environment.Variables.Status.StatusCode = '-101';
+								SET Environment.Variables.Status.StatusDesc = 'Таблица маршрутизации не инициализирована, файл с конфигурацией не прошел проверку корректности';
+				
+								-- Файл конфигурации некорректный, ТМ не инициализирована
+								-- Надо выдать сообщение об ошибке
+								THROW USER EXCEPTION VALUES (Environment.Variables.Status.StatusDesc || ': ' || error);
+							END IF;
+						END IF;
+					END IF;	
+				END INIT_TM_LOCK;
+				
+				CALL RoutingLogic();
+
+			ELSE
+				SET OutputRoot.MQRFH2 = NULL;
+				SET OutputRoot.MQMD.Format = MQFMT_STRING;
+				
+				SET Environment.Variables.Status.StatusCode = '-101';
+				SET Environment.Variables.Status.StatusDesc = 'Таблица маршрутизации не инициализирована, файл с конфигурацией отсутствует';
+
+				-- Файла конфигурации нет, ТМ не инициализирована
+				-- Надо выдать сообщение об ошибке
+				THROW USER EXCEPTION VALUES (Environment.Variables.Status.StatusDesc);
+			END IF;
+		ELSE
+			CALL RoutingLogic();	
+		END IF;	
+
+		RETURN FALSE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+		
+	-------------------------------
+	--
+	-- Общая логика по маршрутизации 
+	-- wmq:/msg/queue/QName@QmgrName
+	--
+	-------------------------------
+	CREATE PROCEDURE RoutingLogic()
+	BEGIN
+
+		CALL SetDestination(InputRoot.MQRFH2.usr,OutputLocalEnvironment.Destination.MQ.DestinationData);
+		SET OutputRoot.MQRFH2 = NULL;
+		SET OutputRoot.MQMD.Format = MQFMT_STRING;
+
+		IF NVL(OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName) = 'NULL' THEN	
+
+			SET Environment.Variables.Status.StatusCode = '-102';
+			SET Environment.Variables.Status.StatusDesc = 'Сообщение с параметрами ' || MakeRoutingList(InputRoot.MQRFH2.usr) || ' не удалось маршрутизировать по имеющейся таблице';
+
+			-- Надо выдать сообщение об ошибке
+			THROW USER EXCEPTION VALUES (Environment.Variables.Status.StatusDesc);
+			
+		ELSE
+			-- Формируем сообщение для логирования
+			SET Environment.Variables.RouterNf.RqUID = InputRoot.XMLNSC.*:*[<].RqUID;
+			SET Environment.Variables.RouterNf.Status.StatusCode = '0';
+			SET Environment.Variables.RouterNf.RoutingParams = MakeRoutingList(InputRoot.MQRFH2.usr);
+			SET Environment.Variables.RouterNf.DestQueue = OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName;
+			SET Environment.Variables.RouterNf.DestQMgr  = OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName;
+
+			PROPAGATE TO TERMINAL 'out';
+		END IF;	
+
+	END;	
+	
+END MODULE;
+
+-------------------------------
+--
+-- Формируем ответное сообщение об ошибке маршрутизации для формата БП
+--
+-------------------------------
+CREATE COMPUTE MODULE Router_ErrorRouting
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 CALL CopyMessageHeaders();
+		 DECLARE rootTag CHARACTER;	
+		 DECLARE replyRootTag CHARACTER;
+		 DECLARE replyOperation CHARACTER;
+
+		 -- Если сообщение от МДМ
+		 IF Environment.UserProperties.Service IS NOT NULL THEN
+		 	 SET rootTag        = FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+			 SET replyRootTag   = REPLACE(Environment.UserProperties.Service,'Rq','Rs');	 
+			 SET replyOperation = REPLACE(Environment.UserProperties.Operation,'Rq','Rs');
+			 SET OutputRoot.XMLNSC.IFX.{replyRootTag}.RqUID  = Environment.UserProperties.RqUID;
+			 SET OutputRoot.XMLNSC.IFX.{replyRootTag}.SPName = Environment.UserProperties.SPName;
+			 SET OutputRoot.XMLNSC.IFX.{replyRootTag}.{replyOperation}.RqUID = Environment.UserProperties.RqUID;
+
+		 ELSE
+		 	 SET rootTag      = FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+			 SET replyRootTag = REPLACE(rootTag,'Rq','Rs');	 
+			 SET OutputRoot.XMLNSC.{replyRootTag}.RqUID  = InputRoot.XMLNSC.{rootTag}.RqUID;
+			 SET OutputRoot.XMLNSC.{replyRootTag}.RqTm   = CURRENT_GMTTIMESTAMP;
+			 SET OutputRoot.XMLNSC.{replyRootTag}.OperUID= InputRoot.XMLNSC.{rootTag}.OperUID;
+		 END IF;
+
+		 -- Если код ошибки не пустой, значит она заполнена ранее ММ	
+		 IF Environment.Variables.Status.StatusCode IS NOT NULL THEN		
+
+			 -- Если не пустой, значит это сообщение от МДМ
+			 IF Environment.UserProperties.Service IS NOT NULL THEN
+			 	SET OutputRoot.XMLNSC.IFX.{replyRootTag}.{replyOperation}.Status = Environment.Variables.Status;
+			 ELSE
+			 	SET OutputRoot.XMLNSC.{replyRootTag}.Status = Environment.Variables.Status;
+			 END IF;	 
+
+		 ELSE
+
+			-- Получение описания ошибки
+			DECLARE sErrDescr CHARACTER;
+			DECLARE sErrNumber CHARACTER;
+			CALL ru.croc.sbrf.mdm.common.GetExcDescription(InputExceptionList, sErrDescr, sErrNumber);
+
+			 -- Если не пустой, значит это сообщение от МДМ
+			 IF Environment.UserProperties.Service IS NOT NULL THEN
+			 	SET OutputRoot.XMLNSC.IFX.{replyRootTag}.{replyOperation}.Status.StatusCode = '-100';
+				SET OutputRoot.XMLNSC.IFX.{replyRootTag}.{replyOperation}.Status.StatusDesc = '[ESB][-100]' || sErrDescr;
+
+			 ELSE
+	 			SET OutputRoot.XMLNSC.{replyRootTag}.Status.StatusCode	= '-100';
+	 			SET OutputRoot.XMLNSC.{replyRootTag}.Status.StatusDesc	= 'Ошибка обработки, операция не может быть выполнена';
+	 			SET OutputRoot.XMLNSC.{replyRootTag}.Status.ServerStatusDesc = '[ESB][-100]' || sErrDescr;
+
+			 END IF;	 
+		 
+		 END IF;	
+
+		-- Могут быть сообщения, которые не подразумевают ответа (нотификации)
+		-- Тогда мы просто логируем сообщение об ошибке
+		-- 13.01.2012 Добавил условие, чтобы сообщения датаграммы, у которых Report = MQRO_EXPIRATION_WITH_FULL_DATA
+		-- при ошибке маршрутизации просто логировались в журнал (у них присутсвует ReplyToQ)
+		IF (NOT(OutputRoot.MQMD.MsgType = MQMT_DATAGRAM and OutputRoot.MQMD.Report = MQRO_EXPIRATION_WITH_FULL_DATA) and OutputRoot.MQMD.ReplyToQ <> '') THEN
+			PROPAGATE;
+		ELSE
+			PROPAGATE TO TERMINAL 'out1';
+		END IF;		
+		RETURN FALSE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+-------------------------------
+--
+-- Перекладываем конфигурационное сообщение в архивную очередь и проставляем время архивирования
+--
+-------------------------------
+CREATE COMPUTE MODULE Router_AddArchiveDt
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		-- Проставим время жизни сообщения
+		SET OutputRoot.MQMD.Expiry = CURRENT_GMTTIMESTAMP + CAST(NUMBER_ARCHIVE_DAY AS INTERVAL DAY);
+		-- Устанавливаю время записи файла в архив
+		CREATE FIRSTCHILD OF OutputRoot.XMLNSC.*:*[<] NAMESPACE tns NAME 'ArchiveDt' VALUE CURRENT_TIMESTAMP;
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+-- Заглушка для MQGet, для возврата в точку вызова
+CREATE COMPUTE MODULE Router_Stub
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- Сбрасываем флаг попытки считывания таблицы марщрутизации
+		SET Environment.UserProperties.nCfgRqAttempt = NULL;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-------------------------------
+--
+-- Отправка сообщения на обновление кеша для модулей (адаптеры, ПМИЛ), 
+-- которые для своей работы используют локальный кеш таблицы маршрутизации
+--
+-------------------------------
+CREATE COMPUTE MODULE Router_SendDropCacheMes
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		IF SetNotifDestinations(OutputLocalEnvironment) THEN
+			-- Сформируем сообщение-нотификацию об обновлении ТМ для модулей ПМИЛ, которые используют ее при своей работе
+			SET OutputRoot.MQMD.MsgType = MQMT_DATAGRAM;
+			SET OutputRoot.XMLNSC.tns:ControlMessage.tns:Acknowledgement.tns:Router		= GetRouterId();
+			SET OutputRoot.XMLNSC.tns:ControlMessage.tns:Acknowledgement.tns:Status		= 'Synchronized successfully';
+			SET OutputRoot.XMLNSC.tns:ControlMessage.tns:Acknowledgement.tns:Message	= ROUTE_MSG_SUCCESS;
+			SET OutputRoot.XMLNSC.tns:ControlMessage.tns:Acknowledgement.tns:SynchDate	= ru.croc.sbrf.bp.common.esql.getLocalTimeStamp();
+		ELSE
+			RETURN FALSE;
+		END IF;
+	END;
+END MODULE;
+
+-------------------------------
+--
+-- Удаление локального кеша таблицы маршрутизации при получении соответствующего нотификационного сообщения,
+-- отправленного модулем маршрутизации
+--
+-------------------------------
+CREATE COMPUTE MODULE Router_DropTMCache
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		IF InputRoot.XMLNSC.tns:ControlMessage.tns:Acknowledgement.tns:Status = 'Synchronized successfully' THEN
+			CALL DropRoutingTable();
+		END IF;
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+-------------------------------
+--
+-- Перенаправление сообщения для журнала 
+--
+-------------------------------
+CREATE COMPUTE MODULE Router_CreateRouterNotificMes
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 CALL CopyMessageHeaders();
+		 SET OutputRoot.XMLNSC.RouterNf = Environment.Variables.RouterNf;
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE Router_SendErrorNotif
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		IF SetNotifDestinations(OutputLocalEnvironment) THEN
+			--Получаем текст исключения
+			DECLARE sErrDescr CHARACTER;
+			DECLARE sErrNumber CHARACTER;
+			CALL ru.croc.sbrf.mdm.common.GetExcDescription(InputExceptionList, sErrDescr, sErrNumber);
+
+			-- Сформируем сообщение-нотификацию об обновлении ТМ для модулей ПМИЛ, которые используют ее при своей работе
+			SET OutputRoot.MQMD.MsgType = MQMT_DATAGRAM;
+			SET OutputRoot.XMLNSC.tns:ControlMessage.tns:Acknowledgement.tns:Router = GetRouterId();
+			SET OutputRoot.XMLNSC.tns:ControlMessage.tns:Acknowledgement.tns:Status = 'Synchronization failed';
+			SET OutputRoot.XMLNSC.tns:ControlMessage.tns:Acknowledgement.tns:Message = sErrDescr || ' : ' || sErrNumber;
+		ELSE
+			RETURN FALSE;
+		END IF;
+	END;
+END MODULE;
+
+
+CREATE FILTER MODULE Router_CheckMsg
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		RETURN IgnoreCheck;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE Router_RouteCfgRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		--Если попытка считывания завершилась неудачно, выходим и фиксируем ошибку маршрутизации
+		IF Environment.UserProperties.nCfgRqAttempt IS NOT NULL THEN
+			PROPAGATE TO TERMINAL 'out1';
+			RETURN FALSE;
+		END IF;
+
+		-- Устанавливаем флаг попытки считывания таблицы марщрутизации
+		SET Environment.UserProperties.nCfgRqAttempt = 1;
+
+		--Формирование запроса
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+
+		-- Создание домена XML
+		CALL CreateXmlHeader(OutputRoot, 'utf-8', true);
+
+		-- Определение namespace
+		DECLARE tns NAMESPACE 'http://www.croc.ru/sbrf/router/config/xml/ControlMessage';
+		-- Наименование раутера
+		SET OutputRoot.XMLNSC.tns:ControlMessage.tns:ConfigRequest.tns:Router = GetRouterId();
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+--Возвращает ИД раутера
+CREATE FUNCTION GetRouterId() RETURNS CHARACTER
+BEGIN
+	return RouterId;
+END;
+
+/**
+ * Преобразование списка адресов получателей уведомлений
+ */
+CREATE FUNCTION SetNotifDestinations(IN envRef REFERENCE) RETURNS BOOLEAN
+BEGIN
+	-- Делаем из строки-хмл строку, а потом парсим ее как настоящий хмл		
+	DECLARE bListQ BLOB CAST(ListForUpdateRT AS BLOB CCSID 1208);
+	CREATE LASTCHILD OF envRef.Variables.Router DOMAIN('XMLNSC') PARSE(bListQ);
+
+	-- Есть ли сервисы, которым необходимо отправить нотификацию об обновлении ТМ
+	DECLARE countItem INTEGER CARDINALITY(envRef.Variables.Router.XMLNSC.List.Item[]);
+
+	-- Если список пустой, то просто выходим 
+	IF countItem = 0 THEN
+		RETURN FALSE;
+	ELSE
+		DECLARE I INTEGER 1;
+
+		-- Сформируем список очередей сервисов, которые должны получать нотификации об обновлении ТМ 
+		FOR curItem AS envRef.Variables.Router.XMLNSC.List.Item[] DO
+			-- Заполняем, только если заполнена очередь, иначе игнорируем
+			DECLARE bQ BOOLEAN FALSE;
+
+			IF curItem.Q IS NOT NULL AND curItem.Q <> '' THEN
+				SET envRef.Destination.MQ.DestinationData[I].queueName = curItem.Q;
+				SET bQ = TRUE;
+			END IF;
+
+			IF curItem.QM IS NOT NULL AND curItem.QM <> '' THEN
+				SET envRef.Destination.MQ.DestinationData[I].queueManagerName = curItem.QM;
+			END IF;
+
+			IF bQ THEN
+				SET I = I + 1;
+			END IF;
+		END FOR;
+
+		-- Если I осталось равным 1, значит в настройках не было указано ниодной очереди
+		RETURN I > 1;
+	END IF;
+END;
+
+/**
+ * Отправка нового конфигурационного файла
+   в очереди на локальном менеджере и на менеджере адаптеров через удаленную очередь
+ */
+CREATE COMPUTE MODULE Router_SetQueues
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = Q_CONFIG;
+		IF DynamicRoutingForAdapters THEN
+			SET OutputLocalEnvironment.Destination.MQ.DestinationData[2].queueName = QADP_CONTROL;
+		END IF;
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

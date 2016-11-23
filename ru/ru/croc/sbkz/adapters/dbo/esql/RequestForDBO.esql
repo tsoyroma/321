@@ -1,0 +1,167 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.dbo.esql
+
+PATH ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE RequestForDBO_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	    DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation 
+		WHEN 'KZLegalExpPayDocStatusRq' THEN
+			SET labelName = 'KZLegalExpPayDocStatusRq';
+		WHEN 'KZExpCurrencyRateRq' THEN
+			SET labelName = 'KZExpCurrencyRateRq';
+		WHEN 'KZLegalExpLoanStatementRq' THEN
+			SET labelName = 'KZLegalExpLoanStatementRq';
+		WHEN 'KZLegalExpAccountStatementRq' THEN
+			SET labelName = 'KZLegalExpAccountStatementRq';	
+		WHEN 'KZDepositUpdateDBORq' THEN
+			SET labelName = 'KZDepositUpdateDBORq';		
+			
+		WHEN 'InternetClientInformationRequest' THEN
+			SET labelName = 'InternetClientInformationRequest';
+		WHEN 'ClientMailRequest' THEN
+			SET labelName = 'ClientMailRequest';
+		WHEN 'InternetClientRequisitionRequest' THEN
+			SET labelName = 'InternetClientRequisitionRequest';
+				
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown message format', Operation);
+		END CASE;	
+		
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ ** Преобразование из формата шины в формат DBO с созданием сообщения в домене XMLNSC.
+ **/
+CREATE COMPUTE MODULE RequestForDBO_ConvertMDO2DBO_CurrencyRate
+CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillBSSStandardElements(InputRoot, OutputRoot, 'CURRENCYRATES', 'CURRENCYRATES');
+		CALL CopyCurrRatesFromMDO(InputRoot.XMLNSC.KZExpCurrencyRateRq,OutputRoot.XMLNSC.*:CURRENCYRATES);		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ ** Квиток 
+ **/
+CREATE COMPUTE MODULE RequestForDBO_ConvertMDO2DBO_DocExp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	    DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalExpPayDocStatusRq;	
+		FOR payDoc AS inRef.PayDocStatusInfo[] DO
+			SET OutputRoot = NULL;
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');			
+			CALL CopyPayDocFromMDO(payDoc,OutputRoot.XMLNSC.*:KVT);	
+			PROPAGATE;
+		END FOR;	
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+/**
+ *	Экспорт выписки по ссудному счету в DBO. u00671 03/02/2014
+ **/
+CREATE COMPUTE MODULE RequestForDBO_ConvertMDO2DBO_LoanExp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalExpLoanStatementRq;	
+		FOR stmt AS inRef.StatementInfo[] DO
+			FOR acct AS stmt.AcctInfo[] DO
+				SET OutputRoot = NULL;
+				CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+				CALL FillBSSStandardElements(InputRoot, OutputRoot, 'DOCLON', 'DOCLON');
+				DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:DOCLON;
+				SET outRef.OPERREF 						= stmt.StatementRef;
+				SET outRef.OPERREF 						= stmt.StatementRef;
+				SET outRef.CODE							= stmt.StatementCode;
+				DECLARE client REFERENCE TO outRef;
+				CREATE LASTCHILD OF outRef AS client NAME 'CLIENTLON';
+					SET client.ACCOUNT 					= acct.AcctId;
+					SET client.CURRCODE 				= acct.AcctCur;
+					SET client.CONTRACTNUM 				= acct.AcctExtAttr.LoanAttr.DocNum;
+					SET client.PRINCIPALDEBET 			= acct.AcctExtAttr.LoanAttr.PDAmount;
+					SET client.AMOUNTINT 				= acct.AcctExtAttr.LoanAttr.IntAmount;
+					SET client.TYPE 					= acct.AcctExtAttr.LoanAttr.LoanType;					
+					SET client.INTRATE 					= acct.AcctExtAttr.LoanAttr.LoanRate;
+					SET client.AMOUNLOAN 				= acct.AcctExtAttr.LoanAttr.LoanAmount;					
+					SET client.MATDATE 					= acct.AcctExtAttr.LoanAttr.FinalDate;
+					SET client.AVAILBAL 				= acct.AcctExtAttr.LoanAttr.AvailAmount;
+					SET client.PAYMENTDATE 				= acct.AcctExtAttr.LoanAttr.PaymentDate;
+					SET client.AMTDELAY 				= acct.AcctExtAttr.LoanAttr.DelayAmount;
+					SET client.TOTALDELAY 				= acct.AcctExtAttr.LoanAttr.DelayDays;
+					SET client.BIN						= acct.AcctExtAttr.LoanAttr.Bin;
+				PROPAGATE;
+			END FOR;
+		END FOR;
+			
+		RETURN FALSE;
+	END;
+END MODULE;
+
+/**
+ * Экспорт выписки по счету ЮЛ. u00671 04/02/2014 
+ **/
+CREATE COMPUTE MODULE RequestForDBO_ConvertMDO2DBO_ExpStatement
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalExpAccountStatementRq;
+		
+		FOR stmt AS inRef.StatementInfo[] DO
+			SET OutputRoot = NULL;
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'Statement', 'STATEMENT');
+			DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:Statement;
+			CALL CopyStatementFromMDO(stmt,outRef,FIELDVALUE(inRef.RqTm));
+			PROPAGATE;
+		END FOR;
+			
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForDBO_ConvertMDO2DBO_KZDepositUpdateDBORq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+			SET OutputRoot = NULL;
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'DEPOSIT', 'DEPOSIT');
+			DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:DEPOSIT;
+			DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZDepositUpdateDBORq;
+			SET outRef.DOCREF = inRef.DOCREF;
+			SET outRef.STATUS = inRef.STATUS;
+			SET outRef.NOTEFROMBANK = inRef.NOTEFROMBANK;
+			SET outRef.CLIENTINFO = inRef.CLIENTINFO;
+			SET outRef.DEPOSITINFO = inRef.DEPOSITINFO;
+			
+		/* 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE outRq REFERENCE TO OutputRoot;
+		DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRq NAME 'DEPOSIT';
+			
+		SET outRq.(XMLNSC.NamespaceDecl)xmlns 		= 'DEPOSIT';
+		SET outRq.(XMLNSC.NamespaceDecl)xmlns:xsi 		= xsi;
+		SET outRq.(XMLNSC.Attribute)ID 					= InputRoot.XMLNSC.*:*[<].RqUID;
+		SET outRq.(XMLNSC.Attribute)DateTime 			= CAST(InputRoot.XMLNSC.*:*[<].RqTm AS DATE FORMAT XSD_DATE_TIME_FORMAT);	
+		*/
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+

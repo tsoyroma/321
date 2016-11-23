@@ -1,0 +1,29 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.gcvp.esql
+
+DECLARE XSD_DATE_TIME_FORMAT CONSTANT CHARACTER 'IU';
+DECLARE XSD_DATE_FORMAT CONSTANT CHARACTER 'yyyy-MM-dd';
+
+DECLARE GCVP_CCSID CONSTANT INTEGER 1174;
+
+/**
+ * Функция, возвращающая текстовое описание статуса по его коду.
+ * Возможно, планируется в будущем вынести описания во внешний файл (или БД).
+ **/
+CREATE FUNCTION GetStatusString(IN statusCode CHARACTER) RETURNS CHARACTER
+BEGIN
+	
+	DECLARE result CHARACTER;
+	
+	SET result = 
+		CASE statusCode
+			WHEN '0' THEN 'Запрос обработан' 
+			WHEN '1' THEN 'ФИО указанное в запросе не соответствует ФИО указанному в ГБД ФЛ'
+			WHEN '2' THEN 'ИИН не найден в ГБД ФЛ' 
+			WHEN '3' THEN 'Общая ошибка'
+
+			ELSE 'Описание статуса не найдено'  
+		END;
+	
+	RETURN result;
+		
+END;

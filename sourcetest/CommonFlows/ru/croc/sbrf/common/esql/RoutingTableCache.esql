@@ -1,0 +1,324 @@
+BROKER SCHEMA ru.croc.sbrf.common.esql
+
+-- Создаем в памяти таблицу маршрутизации (ТМ)
+DECLARE RoutingTableCache SHARED ROW;
+-- Код для ТБ в ЦА (Москва)
+DECLARE TBMoscow EXTERNAL CHARACTER '99';
+-- Пространство имен для сообщений от модуля маршрутизации
+DECLARE tns NAMESPACE 'http://www.croc.ru/sbrf/router/config/xml/ControlMessage';
+
+------------------------------------------------------------
+--
+-- Метод для проверки наполненности ТМ (при старте брокера или при перезапуске флоу она не инициализирована)
+--
+------------------------------------------------------------
+CREATE FUNCTION isRoutingTableFull() RETURNS BOOLEAN
+BEGIN
+	IF RoutingTableCache.valid THEN
+		RETURN TRUE;
+	ELSE
+		RETURN FALSE; 	
+	END	IF;
+END;	
+
+------------------------------------------------------------
+--
+-- Метод для сброса ТМ
+--
+------------------------------------------------------------
+CREATE PROCEDURE DropRoutingTable()
+BEGIN
+	SET RoutingTableCache.valid = FALSE;
+END;	
+
+------------------------------------------------------------
+--
+-- Метод заполнения ТМ из конфигурационного файла (старый)
+--
+------------------------------------------------------------
+CREATE PROCEDURE InitRoutingTableCache1(IN inxml REFERENCE)
+BEGIN
+
+	DECLARE RoutingTree ROW;
+	FOR data AS inxml.RoutingConfig.Data[] DO
+		SET RoutingTree.all.{UPPER(NVL(data.BankId))}.{UPPER(NVL(data.BranchId))}.{UPPER(NVL(data.OperationId))}.{UPPER(NVL(data.OperationTypeId))}.{NVL(data.TypeId)}.{NVL(data.SystemId)}.URI = data.URI;
+	
+	END FOR;
+
+	IF EXISTS(RoutingTree.all[]) THEN
+		SET RoutingTableCache = RoutingTree;
+		SET RoutingTableCache.valid = TRUE;
+		SET RoutingTableCache.updateDt = CURRENT_TIMESTAMP;	 
+	ELSE
+		SET RoutingTableCache.valid = FALSE;
+
+		-- Файла конфигурации нет, ТМ не инициализирована
+		-- Надо выдать сообщение об ошибке
+		THROW USER EXCEPTION VALUES ('-101','Таблица маршрутизации не инициализирована, файл с конфигурацией имеет неправильный формат');
+		
+	END IF;
+			
+END;
+
+------------------------------------------------------------
+--
+-- Метод заполнения ТМ из конфигурационного файла
+-- Ищем в каждом элементе Route интересующие нас поля:
+-- BankId, BranchId, OperationId, OperationTypeId, TypeId, SystemId
+-- и для каждого такого набора значений проставляем менеджер очередей и очередь
+--
+------------------------------------------------------------
+CREATE PROCEDURE InitRoutingTableCache(IN inxml REFERENCE)
+BEGIN
+	-- Длина префикса wmq:/msg/queue/ для mq-endpoint
+	DECLARE iMQUrlPrefix INTEGER 16;
+	
+	DECLARE RoutingTree ROW;
+	-- Признак наличия ошибки в таблице маршрутизации
+	DECLARE isError BOOLEAN FALSE;
+
+	DECLARE queueName CHARACTER '';
+	DECLARE queueManagerName CHARACTER '';
+	
+	FOR data AS inxml.tns:ControlMessage.tns:RoutingConfig.tns:Route[] DO
+		
+		DECLARE bankId,branchId,operationId,operationTypeId,typeId,systemId,uri CHARACTER;
+		
+		DECLARE value CHARACTER; 
+		SET bankId 			= UPPER(NVL(THE(SELECT ITEM p.tns:Value FROM data.tns:Param[] AS p  WHERE p.tns:Name='BankId')));
+		SET branchId 		= UPPER(NVL(THE(SELECT ITEM p.tns:Value FROM data.tns:Param[] AS p  WHERE p.tns:Name='BranchId')));
+		SET operationId 	= UPPER(NVL(THE(SELECT ITEM p.tns:Value FROM data.tns:Param[] AS p  WHERE p.tns:Name='OperationId')));
+		SET operationTypeId = UPPER(NVL(THE(SELECT ITEM p.tns:Value FROM data.tns:Param[] AS p  WHERE p.tns:Name='OperationTypeId')));
+		SET typeId 			= NVL(THE(SELECT ITEM p.tns:Value FROM data.tns:Param[] AS p  WHERE p.tns:Name='TypeId'));
+		SET systemId		= NVL(THE(SELECT ITEM p.tns:Value FROM data.tns:Param[] AS p  WHERE p.tns:Name='SystemId'));
+		SET uri				= TRIM(THE(SELECT ITEM p.tns:Value FROM data.tns:Param[] AS p WHERE p.tns:Name='URI'));
+
+		-- Проверим тип. Для сервисов, предоставляемых через MQ должен быть wmq:/msg/queue/QName@QmgrName
+		IF SUBSTRING(uri FROM 1 FOR 15) = 'wmq:/msg/queue/' THEN 
+
+			SET queueName = '';
+			SET queueManagerName = '';
+
+			-- 24.05.2012 Доработка для возможности указывать маршрут без менеджера очередей (проект ДКО)
+			IF CONTAINS(uri,'@') THEN
+				SET queueName 		 = SUBSTRING(SUBSTRING(uri BEFORE '@') FROM iMQUrlPrefix);
+				SET queueManagerName = SUBSTRING(uri AFTER '@');	
+			ELSE	
+				SET queueName 		 = SUBSTRING(uri FROM iMQUrlPrefix);				
+			END IF;
+				
+			IF NVL(queueName) <> 'NULL' AND NVL(queueManagerName) <> 'NULL' THEN
+				SET RoutingTree.all.{bankId}.{branchId}.{operationId}.{operationTypeId}.{typeId}.{systemId}.queueName = queueName;	
+				SET RoutingTree.all.{bankId}.{branchId}.{operationId}.{operationTypeId}.{typeId}.{systemId}.queueManagerName = queueManagerName;			
+			ELSEIF NVL(queueName) <> 'NULL' THEN
+				SET RoutingTree.all.{bankId}.{branchId}.{operationId}.{operationTypeId}.{typeId}.{systemId}.queueName = queueName;	
+			ELSE
+				SET isError = TRUE;	
+			END IF;
+		-- Для веб-сервисов http(s) 	
+		ELSEIF TRIM(SUBSTRING(uri FROM 1 FOR 4)) = 'http' THEN
+			SET RoutingTree.all.{bankId}.{branchId}.{operationId}.{operationTypeId}.{typeId}.{systemId}.wsUrl = TRIM(uri);
+		-- Может вообще отсутствовать для настроек композитного сервиса
+		ELSEIF uri IS NULL THEN
+			CREATE FIELD RoutingTree.all.{bankId}.{branchId}.{operationId}.{operationTypeId}.{typeId}.{systemId};	
+			CREATE FIELD RoutingTree.all.{bankId}.{branchId}.{operationId}.{operationTypeId}.{typeId}.{systemId};			
+		END IF;
+
+	END FOR;
+
+	IF EXISTS(RoutingTree.all[]) AND NOT(isError) THEN
+		SET RoutingTableCache = RoutingTree;
+		SET RoutingTableCache.valid = TRUE;
+		SET RoutingTableCache.updateDt = CURRENT_TIMESTAMP;	 
+	ELSE
+		-- Если таблица уже существует, то ее не сбрасываем,
+		-- Надо просто выдать сообщение об ошибке
+		IF RoutingTableCache.valid = TRUE THEN
+			THROW USER EXCEPTION VALUES ('-101','Таблица маршрутизации не обновлена, файл с конфигурацией имеет неправильный формат');
+		-- Файла конфигурации нет, ТМ не инициализирована
+		-- Надо выдать сообщение об ошибке		
+		ELSE
+			SET RoutingTableCache.valid = FALSE;
+			THROW USER EXCEPTION VALUES ('-101','Таблица маршрутизации не инициализирована, файл с конфигурацией имеет неправильный формат');
+		END IF;
+		
+	END IF;
+			
+END;
+
+------------------------------------------------------------
+--
+-- Функция поиска места назначения для текущего сообщения 
+-- На вход подается ссылка на заголовок MQRFH2.usr со следующей структурой:
+-- <BankId></BankId>				  -- идентификатор террбанка       - обязательно для заполнения адаптерами
+-- <BranchId></BranchId>			  -- идентификатор отделения банка - обязательное поле
+-- <OperationId></OperationId>		  -- операция      - обязательно для заполнения адаптерами
+-- <OperationTypeId><OperationTypeId> -- тип операции  - обязательно для заполнения адаптерами (например,для операций перевода)
+-- <TypeId></TypeId>	 			  -- идентификатор типа системы или компоненты КСШ						- urn:sbrftypes:esb:adapter:deposit 
+-- <SystemId></SystemId>			  -- идентификатор системы - заполняется всегда в ПМИЛ(кроме CEDBO,GFL) - urn:sbrfsystems:40-iask:1
+-- и ссылка на OutputLocalEnvironment.Destination.MQ.DestinationData
+-- В ответе возвращается наименование менеджера очередей и имя очереди
+--
+------------------------------------------------------------
+CREATE PROCEDURE SetDestination(IN mqhrfh2 REFERENCE, IN destdata REFERENCE)
+BEGIN
+
+	SET destdata.queueName 		  =	 RoutingTableCache.all.{UPPER(NVL(mqhrfh2.BankId))}.{UPPER(NVL(mqhrfh2.BranchId))}.{UPPER(NVL(mqhrfh2.OperationId))}.{UPPER(NVL(mqhrfh2.OperationTypeId))}.{NVL(mqhrfh2.TypeId)}.{NVL(mqhrfh2.SystemId)}.queueName;
+	SET destdata.queueManagerName =	 RoutingTableCache.all.{UPPER(NVL(mqhrfh2.BankId))}.{UPPER(NVL(mqhrfh2.BranchId))}.{UPPER(NVL(mqhrfh2.OperationId))}.{UPPER(NVL(mqhrfh2.OperationTypeId))}.{NVL(mqhrfh2.TypeId)}.{NVL(mqhrfh2.SystemId)}.queueManagerName;	
+		
+END;
+
+------------------------------------------------------------
+--
+-- Функция поиска url веб-сервиса для текущего сообщения
+-- На вход подается ссылка на заголовок MQRFH2.usr со следующей структурой:
+-- <TypeId></TypeId>	 			  -- идентификатор типа системы или компоненты КСШ		 - urn:sbrftypes:system 
+-- <SystemId></SystemId>			  -- идентификатор системы - заполняется в soap-адаптере - urn:sbrfsystems:40-iask:1
+-- и ссылка на OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP
+-- В ответе возвращается url веб-сервиса
+--
+------------------------------------------------------------
+CREATE PROCEDURE SetHttpWSDestination(IN mqhrfh2 REFERENCE, IN destdata REFERENCE)
+BEGIN
+
+	SET destdata.WebServiceURL = RoutingTableCache.all.{UPPER(NVL(mqhrfh2.BankId))}.{UPPER(NVL(mqhrfh2.BranchId))}.{UPPER(NVL(mqhrfh2.OperationId))}.{UPPER(NVL(mqhrfh2.OperationTypeId))}.{NVL(mqhrfh2.TypeId)}.{NVL(mqhrfh2.SystemId)}.wsUrl;
+
+	IF destdata.WebServiceURL IS NULL THEN
+		DECLARE err CHARACTER 'Сообщение с параметрами ' || MakeRoutingList(mqhrfh2) || ' не удалось маршрутизировать по имеющейся таблице';
+		THROW USER EXCEPTION VALUES(err);
+	END IF;		
+END;
+
+------------------------------------------------------------
+--
+-- Процедура для поиска всех систем (адаптеров), в которые необходимо отправить запросы 
+-- Для сервисов, которые выполняют поиск продуктов по всем системам одного типа (композитный сервис)
+--
+------------------------------------------------------------	
+CREATE PROCEDURE FindDestination(IN mqhrfh2 REFERENCE, IN destdata REFERENCE)
+BEGIN
+	-- Устанавливаем ссылку на корень дерева	
+	DECLARE refModel REFERENCE TO RoutingTableCache;
+	-- Пытаемся получить поддерево согласно условим поиска в запросе
+	DECLARE ref REFERENCE TO RoutingTableCache.all.{UPPER(NVL(mqhrfh2.BankId))}.{UPPER(NVL(mqhrfh2.BranchId))}.{UPPER(NVL(mqhrfh2.OperationId))}.{NVL(mqhrfh2.OperationTypeId)}.{NVL(mqhrfh2.TypeId)};
+
+	-- Проверяем, что такое поддерево найдено.
+	-- Если не найдено, то ref будет позиционированна на корень дерева, т.е. равна refModel
+	-- Если не найдено необходимое поддерево для обработки, то выходим из процедуры 
+	IF SAMEFIELD(refModel,ref) THEN
+		RETURN;
+	END IF;
+		
+	DECLARE I INTEGER 1;
+	MOVE ref FIRSTCHILD;
+	WHILE LASTMOVE(ref) DO
+		CREATE LASTCHILD OF destdata NAME 'Adapter';
+		SET destdata.Adapter[I].Name = FIELDNAME(ref); 
+		MOVE ref NEXTSIBLING;
+		SET I = I+1;
+	END WHILE;	
+END;
+
+------------------------------------------------------------
+--
+-- Проверка значения для переданного параметра на существование и на пустое значение  
+-- Если пусто или не существует, то возвращаем NULL
+--
+------------------------------------------------------------
+CREATE FUNCTION NVL(IN val CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF val is NULL or TRIM(val) = '' THEN 
+		RETURN 'NULL';
+	ELSE 
+		RETURN val; 
+	END IF;
+END;	
+
+------------------------------------------------------------
+--
+-- Функция для формирования параметров маршрутизации сообщения, которого не удалось смаршрутизировать
+--
+------------------------------------------------------------
+CREATE FUNCTION MakeRoutingList (IN rfh2usr REFERENCE) RETURNS CHARACTER
+	BEGIN
+		
+		RETURN 		   'BankId: ' || NVL(rfh2usr.BankId)       || ', BranchId: '        || NVL(rfh2usr.BranchId) ||
+			    ', OperationId: ' || NVL(rfh2usr.OperationId)  || ', OperationTypeId: ' || NVL(rfh2usr.OperationTypeId) ||
+			   ',  TypeId: ' 	  || NVL(rfh2usr.TypeId) 	   || ', SystemId: '        || NVL(rfh2usr.SystemId);
+	END;
+
+------------------------------------------------------------
+--	
+-- Процедура для заполнения заголовков в адаптерах к фронтальным системам
+-- В адаптерах заполняется всегда код ТБ (иначе проставляется значение для ТБ ЦА),
+-- идентификатор операции и идентификатор типа операции (для некоторых, например операции перевода)
+--
+------------------------------------------------------------
+CREATE PROCEDURE FillMqRfh2DestData (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	
+	 DECLARE rootTag CHARACTER FIELDNAME(inroot.XMLNSC.*:*[<]);
+	 -- Создаем заголовок и вставляем переменные для маршрутизации
+	 IF NOT EXISTS(outroot.MQRFH2[]) THEN
+		 CREATE PREVIOUSSIBLING OF outroot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 END IF;
+	 -- Если не нашли код ТБ в поле RbTbBrchId (первые 2 символа из 8), то всегда проставляем значения по-умолчанию - код ЦА
+	 SET outroot.MQRFH2.usr.BankId 		   = COALESCE(SUBSTRING(inroot.XMLNSC.{rootTag}.BankInfo.RbTbBrchId FROM 1 FOR 2),TBMoscow);
+	 -- Наименование операции
+	 SET outroot.MQRFH2.usr.OperationId     = rootTag;
+	 -- Может использоваться для операций перевода с общим корневым тегов XferAddRq (сейчас от ЕРИБа таких нет)
+	 SET outroot.MQRFH2.usr.OperationTypeId = COALESCE(inroot.XMLNSC.{rootTag}.OperName,'');
+	
+END;	
+
+------------------------------------------------------------
+--
+-- Формирование заголовков для маршрутизации МДМ-сообщений
+--
+------------------------------------------------------------
+
+CREATE PROCEDURE FillMqRfh2MDMDestData (IN rootTag CHARACTER, IN outroot REFERENCE)
+BEGIN
+
+	 -- Создаем заголовок MQRFH2, если отсутствует и вставляем переменные для маршрутизации	
+
+	 IF NOT EXISTS(outroot.MQRFH2[]) THEN
+		 CREATE PREVIOUSSIBLING OF outroot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 END IF;
+
+	 -- Наименование операции
+	 SET outroot.MQRFH2.usr.OperationId     = rootTag;
+	
+END;
+
+------------------------------------------------------------
+--	
+-- Процедура для заполнения заголовка маршрутизации в адаптерах 
+-- Заполняется код адаптера системы, которой необходимо отправить запрос - SystemId
+-- TypeId - тип адаптера:
+-- 1 - urn:sbrftypes:esb:adapter
+-- 2 - urn:sbrftypes:esb:adapter:legal
+-- 3 - urn:sbrftypes:esb:adapter:mdm
+-- 4 - urn:sbrftypes:esb:adapter:mdmorg
+-- новые варианты
+------------------------------------------------------------
+CREATE PROCEDURE FillMqRfh2DestBySystemIdData (IN systemId CHARACTER, IN outroot REFERENCE, IN TypeId INTEGER)
+BEGIN
+	
+	 -- Создаем заголовок и вставляем переменные для маршрутизации
+	 IF NOT EXISTS(outroot.MQRFH2[]) THEN
+		 CREATE PREVIOUSSIBLING OF outroot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+		 SET outroot.MQMD.Format = MQFMT_RF_HEADER_2;	 
+	 END IF;
+
+	 -- Константа для указания, что ищем адаптер системы
+	 SET outroot.MQRFH2.usr.TypeId    = 
+	 	CASE WHEN TypeId = 1 THEN AdapterTypeId
+	 		 WHEN TypeId = 2 THEN LegalAdapterTypeId
+		 	 WHEN TypeId = 3 THEN MDMAdapterTypeId
+		 	 WHEN TypeId = 4 THEN MDMOrgAdapterTypeId
+	 	END;
+	 -- Идентификатор системы, в адаптер которой необходимо отправить запрос
+	 SET outroot.MQRFH2.usr.SystemId  = systemId;
+	
+END;

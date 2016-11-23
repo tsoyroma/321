@@ -1,0 +1,61 @@
+Summary of selections: WSDL files generation
+
+The selected message set:
+/msg.soap.AML.KZ/msg.soap.AML.KZ
+
+The generated WSDL files will go into:
+/msg.soap.AML.KZ/msg.soap.AML.KZ/ru/sbkz/adapter/aml
+
+The version of WSDL to be generated: 1.1
+The version of SOAP to be generated: 1.1
+
+The selected style for WSDL generation: document
+The WSDL Namespace: http://sbkz.ru/adapter/AML
+
+The following operations will be created:
+getMessage (Request-Response)
+
+The following bindings are selected:
+SOAP over http.
+
+The following WSDL files will be generated:
+/msg.soap.AML.KZ/msg.soap.AML.KZ/ru/sbkz/adapter/aml/msg.soap.AML.KZService.wsdl
+
+
+Generating XML Schema files from Message Definition files
+Generating schema for no XML Wire format
+Generating schema using the strict option
+All complex types and groups with a Content validation of "Open" or "Open defined" will be generated as if they had Content validation "Closed"
+All complex types and groups with a Composition of "Ordered set" or "Unordered set" will be generated with a Composition of "Sequence"
+All complex types and groups with a Composition of "Message" will be generated with a Composition of "Choice"
+
+
+Processing File : "/msg.soap.AML.KZ/msg.soap.AML.KZ/ru/sbkz/adapter/aml/AMLAdapterWS.mxsd"
+
+Saving File : "/msg.soap.AML.KZ/msg.soap.AML.KZ/ru/sbkz/adapter/aml/ru/sbkz/adapter/aml/AMLAdapterWS.xsd" 
+
+Generating XML Schema file \msg.soap.AML.KZ\msg.soap.AML.KZ\ru\sbkz\adapter\aml\AMLAdapterWS.mxsd from Message Definition file \msg.soap.AML.KZ\msg.soap.AML.KZ\ru\sbkz\adapter\aml\ru\sbkz\adapter\aml\AMLAdapterWS.xsd
+Creating new WSDL Service file '\msg.soap.AML.KZ\msg.soap.AML.KZ\ru\sbkz\adapter\aml\AMLAdapterWService.wsdl'
+Setting wsdl definition name for 'AMLAdapterWService.wsdl': AMLAdapterW
+Setting wsdl definition targetNamespace for 'AMLAdapterWService.wsdl': http://sbkz.ru/adapter/AML
+Adding namespace: xmlns for 'AMLAdapterWService.wsdl':sbkz=http://sbkz.ru/adapter/AML
+Adding namespace: xmlns for 'AMLAdapterWService.wsdl':soap=http://schemas.xmlsoap.org/wsdl/soap/
+Adding namespace: xmlns for 'AMLAdapterWService.wsdl':xsd=http://www.w3.org/2001/XMLSchema
+Adding namespace: xmlns for 'AMLAdapterWService.wsdl':wsdl=http://schemas.xmlsoap.org/wsdl/
+Creating new WSDL Interface file '\msg.soap.AML.KZ\msg.soap.AML.KZ\ru\sbkz\adapter\aml\AMLAdapterWService.wsdl'
+Creating portType for WSDL Interface: msg.soap.AML.KZPortType
+Creating portType operation 'getMessage'
+Creating message 'getMessage_in'
+Creating message 'getMessage_out'
+Creating SOAP over HTTP binding 'msg.soap.AML.KZSOAP_HTTP_Binding'
+Creating binding operation 'getMessage' for binding 'msg.soap.AML.KZSOAP_HTTP_Binding'
+Creating SOAP over HTTP service 'AMLAdapterPTService'
+Creating port 'AMLAdapterPTServicePort' for service 'AMLAdapterPTService'
+
+Elapsed time processing this WSDL definition: 0.463 seconds
+Number of warnings for this WSDL definition: 0
+
+
+Number of files processed: 2
+
+

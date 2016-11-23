@@ -1,0 +1,51 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pega.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+/**
+ * Маршрутизация потока в соответствии с операцией АБПК Прагма.
+ **/
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'PutLimitRq' THEN
+			SET labelName = 'PutLimitRq';
+		WHEN 'GetMarkerDebtCapacityRq' THEN
+			SET labelName = 'GetMarkerDebtCapacityRq';
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown format XML in PEGA(RequestForESB)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Задание параметров маршрутизации в заголовке MQRFH2.
+ * Случай для запросов с агрегацией. Связка адаптер - ПМИЛ.
+ **/
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+END MODULE;

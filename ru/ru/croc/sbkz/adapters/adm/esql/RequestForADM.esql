@@ -1,0 +1,80 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.adm.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+/*
+  u00671 12/08/2014 Синхронизация АБИС с сервером интеграции
+*/
+CREATE COMPUTE MODULE FileRequestForBSS_ConvertMDO2ADM3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillADMStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		DECLARE outADM REFERENCE TO outRef;
+		
+	    DECLARE varUID CHARACTER;
+        DECLARE varSPName CHARACTER;
+		SET varSPName = inRef.SPName;
+
+		IF varSPName <> 'ADMS' THEN
+	       SET varUID										= outRef.(XMLNSC.Attribute)"uid";
+	       SET outRef.(XMLNSC.Attribute)"uid"	    		= SUBSTRING(varUID FROM 1 FOR 9);
+		END IF;
+
+		FOR inAcc AS inRef.request[] DO
+		    CREATE LASTCHILD OF outRef AS outADM NAME 'request';
+
+			IF varSPName = 'ADMS' THEN
+		       SET outADM.bin									= inAcc.INN;
+			ELSE
+		       SET outADM.bin									= SUBSTRING(inAcc.INN FROM 1 FOR 9);
+			END IF;
+
+			SET outADM.company_name								= inAcc.ClientName;
+
+			SET outADM.contract_num								= inAcc.LoanNumber;
+			SET outADM.contract_status							= inAcc.contract_status;
+
+			SET outADM.account_num								= inAcc.Number;
+			SET outADM.account_status							= inAcc.account_status;
+
+			SET outADM."client-id"								= inAcc.LoanInfo;
+		END FOR;
+		
+		IF inRef.SPName = 'ADMS' THEN
+		   PROPAGATE TO TERMINAL 'out1';
+		   RETURN FALSE;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForADM_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		 
+		CASE Operation
+		WHEN 'KZADMSyncRequest' THEN
+			SET labelName = 'ADM003';				
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForADM', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

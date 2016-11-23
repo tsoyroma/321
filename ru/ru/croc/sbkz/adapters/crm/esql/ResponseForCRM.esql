@@ -1,0 +1,726 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crm.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+
+-- Восстановление заголовка исходного сообщения
+CREATE COMPUTE MODULE ResponseForCRM_AddOrigHead
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	DECLARE ServiceCode CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<].ServiceCode);
+		
+		IF ServiceCode IN ('PersonGetClient', 'EntityNotify', 'EntitySync') THEN
+			SET OutputRoot = InputRoot;
+		ELSE
+			CALL AddOrigHead(InputRoot, OutputRoot);
+		END IF;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+-- Перенаправление на нужную ветку в соответствие с маршрутизацией
+CREATE COMPUTE MODULE ResponseForCRM_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+/*
+			WHEN 'Envelope' THEN
+			 DECLARE Operation2 CHARACTER FIELDVALUE(InputRoot.XMLNSC.*:Envelope.*:Header.*:"operation-name");
+			 CASE Operation2 
+			 WHEN 'ForceSignal'THEN
+			 	SET labelName = 'ForceSignal';
+			 ELSE
+			-- Неизвестный тип сообщения
+				THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForESB(CRM Corp)', Operation2);
+			END CASE;
+*/
+
+		WHEN 'InternetClientInformationResponse' THEN
+			SET labelName = 'InternetClientInformationResponse';
+		WHEN 'ClientMailResponse' THEN
+			SET labelName = 'ClientMailResponse';
+		WHEN 'InternetClientRequisitionResponse' THEN
+			SET labelName = 'InternetClientRequisitionResponse';
+			
+
+		WHEN 'Envelope' THEN
+			SET labelName = 'Envelope';
+		WHEN 'KZGetInstantLoanDeptRs' THEN
+			SET labelName = 'KZGetInstantLoanDeptRs';
+		WHEN 'KZGetAverageDailyBalanceRs' THEN
+			SET labelName = 'KZGetAverageDailyBalanceRs';
+		WHEN 'KZGetInterestIncomeRs' THEN
+			SET labelName = 'KZGetInterestIncomeRs';
+		WHEN 'KZGetNonInterestIncomeRs' THEN
+			SET labelName = 'KZGetNonInterestIncomeRs';
+		WHEN 'KZGetFinAccountTurnoverRs' THEN
+			SET labelName = 'KZGetFinAccountTurnoverRs';
+		WHEN 'KZGetFinAccountNetTurnoverRs' THEN
+			SET labelName = 'KZGetFinAccountNetTurnoverRs';
+		WHEN 'KZSendSMSRs' THEN
+			SET labelName = 'KZSendSMSRs';	
+		WHEN 'KZGetMDMLegalInfoByAttrRs' THEN
+			SET labelName = 'KZGetMDMLegalInfoByAttrRs';
+		WHEN 'KZSendMDMLegalClientDataRs' THEN
+			SET labelName = 'KZSendMDMLegalClientDataRs';
+		WHEN 'KZSendMDMPrivateClientDataRs' THEN
+			SET labelName = 'KZSendMDMPrivateClientDataRs';
+		WHEN 'KZGetTransactionsInfoRs' THEN
+			SET labelName = 'KZGetTransactionsInfoRs';
+		WHEN 'KZGetLegalProfitabilityRs' THEN
+			SET labelName = 'KZGetLegalProfitabilityRs';
+		WHEN 'KZExpCalculationResponse' THEN
+			SET labelName = 'KZExpCalculationResponse';
+		WHEN 'KZExpFinalizationResponse' THEN
+			SET labelName = 'KZExpFinalizationResponse';
+		WHEN 'KZExpConfirmResponse' THEN
+			SET labelName = 'KZExpConfirmResponse';
+		WHEN 'KZExpCorrectResponse' THEN
+			SET labelName = 'KZExpCorrectResponse';
+		WHEN 'KZExpCalculateResponse' THEN
+			SET labelName = 'KZExpCalculateResponse';
+		WHEN 'KZExpStructResponse' THEN
+			SET labelName = 'KZExpStructResponse';
+
+		WHEN 'GetLimitRs' THEN
+			SET labelName = 'GetLimitRs';
+		WHEN 'PutBusinessPartnerRs' THEN
+			SET labelName = 'PutBusinessPartnerRs';
+		WHEN 'UpdateGSZRs' THEN
+			SET labelName = 'UpdateGSZRs';
+		WHEN 'UpdateProductionDetailsRs' THEN
+			SET labelName = 'UpdateProductionDetailsRs';										
+		WHEN 'CreateLimitRs' THEN
+			SET labelName = 'CreateLimitRs';
+		WHEN 'PutCreditDealRq' THEN
+			SET labelName = 'PutCreditDealRs';			
+		WHEN 'PutCreditDealRs' THEN
+			SET labelName = 'PutCreditDealRs';			
+		WHEN 'SendRateRs' THEN
+			SET labelName = 'SendRateRs';				
+		WHEN 'UpdateLimitRs' THEN
+			SET labelName = 'UpdateLimitRs';	
+		WHEN 'PutRelatedBorrowersGroupStructRs' THEN
+			SET labelName = 'PutRelatedBorrowersGroupStructRs';	
+		WHEN 'CalcMarkerDebtCapacityRs' THEN
+			SET labelName = 'CalcMarkerDebtCapacityRs';
+		WHEN 'PutPositionRs' THEN
+			SET labelName = 'PutPositionRs';
+		WHEN 'UpdateFinTransactionRs' THEN 
+			SET labelName = 'UpdateFinTransactionRs';
+		WHEN 'Message_DB_StatusRq' THEN
+			SET labelName = 'Message_DB_StatusRq';
+		-- 10. Результат модификации клиентской записи :: Результат выполнения операции, УИК MDM клиента
+		WHEN 'CustOrgModRs' THEN
+			SET labelName = 'CustOrgModRs';
+		-- 11. Результат создания/изменения профиля ФЛ, связанного с ЮЛ
+		WHEN 'RequestUpdateRelatedPrivateClientRs' THEN
+			SET labelName = 'RequestUpdateRelatedPrivateClientRs';
+		-- 12. Результат деактивации клиентской записи :: Результат деактивации клиентской записи
+		WHEN 'CustOrgDelRs' THEN
+			SET labelName = 'CustOrgDelRs';
+		
+		--выписка по счету 29.10.15 08083
+		WHEN 'KZLegalGetAccountStatementRs' THEN
+			SET labelName = 'KZLegalGetAccountStatementRs';
+		
+		-- CRM corp	
+		WHEN 'PragmaEnvelope' THEN
+			DECLARE ServiceCode CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode);
+			CASE ServiceCode
+				-- OrganisationGetClient_Request		
+				WHEN 'OrganisationGetClient' THEN
+					SET labelName = 'OrganizationGetClient';
+				-- OrganisationGetClient_Request		
+				/*WHEN 'OrganizationNotify' THEN 
+					SET labelName = 'OrganizationNotify';*/
+				-- OrganisationGetClient_Request		
+				WHEN 'OrgSync_CRM' THEN
+					SET labelName = 'OrgSync_CRM';
+				WHEN 'Report-Rent' THEN
+					SET labelName = 'Report-Rent';	
+			ELSE
+				-- Непонятный тэг
+				THROW USER EXCEPTION VALUES ('Unknown format XML in ResponseForCRM', ServiceCode);
+			END CASE;	
+		
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in ResponseForCRM', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ в CRM корпоративный "Получение значения моментной ссудной задолженности компании за период": KZGetInstantLoanDeptRs -> GetInstantLoanDeptRs
+ **/
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetInstantLoanDeptRs';		
+		
+		CALL FillCRMStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.KZGetInstantLoanDeptRs;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.GetInstantLoanDeptRs;
+		
+		SET OutRs.InstantLoanDept = InpRs.Amount;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ в CRM корпоративный "Получение СДО компании за период": KZGetAverageDailyBalanceRs -> GetAverageDailyBalanceRs
+ **/
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetAverageDailyBalanceRs';		
+		
+		CALL FillCRMStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.KZGetAverageDailyBalanceRs;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.GetAverageDailyBalanceRs;
+		
+		SET OutRs.AverageDailyBalance = InpRs.Amount;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ в CRM корпоративный "Получение суммы процентных доходов от компании за период": KZGetInterestIncomeRs -> GetInterestIncomeRs
+ **/
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetInterestIncomeRs';		
+		
+		CALL FillCRMStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.KZGetInterestIncomeRs;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.GetInterestIncomeRs;
+		
+		SET OutRs.InterestIncome = InpRs.Amount;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ в CRM корпоративный "Получение суммы непроцентных доходов от компании за период": KZGetNonInterestIncomeRs -> GetNonInterestIncomeRs
+ **/
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM5
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetNonInterestIncomeRs';		
+		
+		CALL FillCRMStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.KZGetNonInterestIncomeRs;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.GetNonInterestIncomeRs;
+		
+		SET OutRs.NonInterestIncome = InpRs.Amount;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ в CRM корпоративный "Получение оборотов по счетам компании за период": KZGetFinAccountTurnoverRs -> GetFinAccountTurnoverRs
+ **/
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM6
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetFinAccountTurnoverRs';		
+		
+		CALL FillCRMStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.KZGetFinAccountTurnoverRs;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.GetFinAccountTurnoverRs;
+		
+		SET OutRs.FinAccountTurnover = InpRs.Amount;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ в CRM корпоративный "Получение чистых оборотов по счетам компании за период": KZGetFinAccountNetTurnoverRs -> GetFinAccountNetTurnoverRs
+ **/
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM7
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetFinAccountNetTurnoverRs';		
+		
+		CALL FillCRMStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.KZGetFinAccountNetTurnoverRs;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.GetFinAccountNetTurnoverRs;
+		
+		SET OutRs.FinAccountNetTurnover = InpRs.Amount;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ в CRM корпоративный "Передача SMS на телефон клиента": KZSendSMSRs -> SMSGateRs
+ **/
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM8
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'SMSGateRs';		
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.SMSGateRs;
+		
+		SET OutRs.RqUID = InpRs.RqUID;
+		SET OutRs.RqTm = InpRs.RqTm;
+		SET OutRs.SMSStatus.StatusCode VALUE 	= InpRs.Status.*:StatusCode;
+		SET OutRs.SMSStatus.StatusDesc VALUE	= InpRs.Status.*:StatusDesc;
+		SET OutRs.SMSStatus.SiebelId 	= InpRs.OperUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Транзакции по счёту
+ **/
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM_AcctTrans
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		CALL FillCRMStandartElementsRs2(InputRoot, OutputRoot, 'AccountTransactionsRs');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.AccountTransactionsRs;
+		
+		CREATE LASTCHILD OF outRef NAME 'ListOfTransactions';
+		DECLARE transList REFERENCE TO outRef.ListOfTransactions;
+		DECLARE transOut REFERENCE TO outRef;
+		
+		FOR transIn AS inRef.TransData.AcctTrans.TransactionInfo[] DO
+			CREATE LASTCHILD OF transList AS transOut NAME 'Transaction';
+			SET transOut.Status 				= transIn.Status;
+			SET transOut.ErrorCode 				= '';
+			SET transOut.ErrorText 				= '';
+			SET transOut.TransactionType 		= transIn.Type;
+			SET transOut.Description 			= transIn.Description;
+			SET transOut.TransactionNumber 		= transIn.TransID;
+			SET transOut.Amount 				= transIn.Amt;
+			SET transOut.Balance 				= '';
+			SET transOut.TransactionDate 		= transIn.OperationDate;
+			SET transOut.AccNumber 				= inRef.TransData.AcctTrans.AcctId;
+			SET transOut.Currency 				= transIn.TransCur;
+		END FOR;
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ *  комОтвет в CRM корпоративный "Получение данных о рентабельностипании за период": KZGetLegalProfitabilityRs -> GetProfitability_Output
+ **/
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM_Profit
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'GetProfitability_Output';		
+		
+		SET outRef.Profitability		= inRef.ProfitAmount;
+		SET outRef.Status				= CASE 
+			WHEN inRef.ProfitAmount <> '' THEN '1'
+			WHEN FIELDVALUE(inRef.Status.*:StatusCode) <> '0' THEN '2'
+			ELSE '3'
+		END;
+		SET outRef.ErrorCode			= FIELDVALUE(inRef.Status.*:StatusCode);
+		SET outRef.ErrorText			= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET outRef.RqUID				= inRef.RqUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM_CalculationResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZExpCalculationResponse;
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'calculationResponse';
+				 
+	    SET outRef.ErrorCode    = inRef.ErrorCode;
+	    SET outRef.ErrorMessage = inRef.ErrorMessage;		
+		SET outRef.CRMId     = inRef.CRMId;
+		SET outRef.LGDType	 = inRef.LGDType;
+		SET outRef.LGDDate   = inRef.LGDDate;
+		SET outRef.PD		 = inRef.PD;
+		SET outRef.LGD		 = inRef.LGD;
+		SET outRef.EAD		 = inRef.EAD;
+		SET outRef.Sum		 = inRef.Sum;
+		SET outRef.ELPercent = inRef.ELPercent;
+		SET outRef.EL		 = inRef.EL;
+		SET outRef.TotalValue = inRef.TotalValue;
+		SET outRef.TotalCollValueLGD = inRef.TotalCollValueLGD;
+		SET outRef.TotalCollValueEAD = inRef.TotalCollValueEAD;		
+		
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER CARDINALITY(inRef.ListOfCollateral.*[]);
+		
+		WHILE I <= J DO
+			
+			SET outRef.ListOfCollateral.Collateral[I].CRMId = inRef.ListOfCollateral.Collateral[I].CRMId;
+			SET outRef.ListOfCollateral.Collateral[I].CollType = inRef.ListOfCollateral.Collateral[I].CollType;
+			SET outRef.ListOfCollateral.Collateral[I].ReturnRate = inRef.ListOfCollateral.Collateral[I].ReturnRate;
+			SET outRef.ListOfCollateral.Collateral[I].DiscountRate = inRef.ListOfCollateral.Collateral[I].DiscountRate;
+			SET outRef.ListOfCollateral.Collateral[I].CollValueEAD = inRef.ListOfCollateral.Collateral[I].CollValueEAD;
+			SET outRef.ListOfCollateral.Collateral[I].CollValueLGD = inRef.ListOfCollateral.Collateral[I].CollValueLGD;
+		
+		SET I = I + 1;
+		
+		END WHILE;
+		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM_FinalizationResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZExpFinalizationResponse;
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'finalizationResponse';
+				 
+	    SET outRef.ErrorCode 	= inRef.ErrorCode;		
+		SET outRef.ErrorMessage = inRef.ErrorMessage;
+		SET outRef.CRMId     	= inRef.CRMId;
+		SET outRef.Type	 		= inRef.Type;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM_ConfirmResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZExpConfirmResponse.return;
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'confirmResponse';
+				 
+		DECLARE oRef REFERENCE TO outRef;		 
+				 
+		CREATE LASTCHILD OF outRef AS oRef NAME 'return';		 
+				 
+	    SET oRef.ErrorCode 				= inRef.ErrorCode;		
+		SET oRef.ErrorMessage 			= inRef.ErrorMessage;
+		SET oRef.DefaultProbability    	= inRef.DefaultProbability;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM_CorrectResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZExpCorrectResponse.return;
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'correctResponse';
+				 
+		DECLARE oRef REFERENCE TO outRef;		 
+				 
+		CREATE LASTCHILD OF outRef AS oRef NAME 'return';		 
+				 
+	    SET oRef.ErrorCode 				= inRef.ErrorCode;		
+		SET oRef.ErrorMessage 			= inRef.ErrorMessage;
+				
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM_CalculateResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZExpCalculateResponse.return;
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'calculateResponse';
+				 
+		DECLARE oRef REFERENCE TO outRef;		 
+				 
+		CREATE LASTCHILD OF outRef AS oRef NAME 'return';		 
+				 
+	    SET oRef.ErrorCode 				= inRef.ErrorCode;		
+		SET oRef.ErrorMessage 			= inRef.ErrorMessage;
+		 
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER CARDINALITY(inRef.ListOfResultRating.*[]);
+									
+		WHILE I <= J DO
+		
+			SET oRef.ListOfResultRating.*[I] = inRef.ListOfResultRating.*[I]; 
+		
+			SET I = I + 1;
+		
+		END WHILE;	 							
+		
+		DECLARE K INTEGER 1;
+		DECLARE L INTEGER CARDINALITY(inRef.ListOfCalculatedFactor.*[]);
+				 					
+		WHILE K <= L DO
+		
+			SET oRef.ListOfCalculatedFactor.*[K] = inRef.ListOfCalculatedFactor.*[K]; 
+			
+			SET K = K + 1;
+			
+		END WHILE;
+		
+		DECLARE E INTEGER 1;
+		DECLARE R INTEGER CARDINALITY(inRef.ListOfAddParameter.*[]);
+				 					
+		WHILE E <= R DO
+		
+			SET oRef.ListOfAddParameter.*[E] = inRef.ListOfAddParameter.*[E]; 
+			
+			SET E = E + 1;
+			
+		END WHILE;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCRM_ConvertMDO2CRM_StructResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZExpStructResponse;
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'StructResponse';
+				 					 
+	    SET outRef.ErrorCode 				= inRef.ErrorCode;		
+		SET outRef.ErrorMessage 			= inRef.ErrorMessage;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/* !!! убрать если не поможет !!! */
+CREATE COMPUTE MODULE ResponseForCRM_CorrelId_SAPLM
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+			
+		-- Восстанавливаем идентификатор ответного сообщения 
+		SET OutputRoot.MQMD.CorrelId	= CAST(InputRoot.XMLNSC.*[<].mqgid AS BLOB);--Environment.UserProperties.MsgId2;--CAST(Environment.UserProperties.MsgId AS BLOB);
+		--SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+		SET  OutputRoot.XMLNSC.*[<].mqgid = null;
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;
+		SET OutputRoot.MQMD.Encoding 	 = 546;
+		SET OutputRoot.MQRFH2 = null;
+		/*
+		SET OutputRoot.MQMD.Format 		     = 'MQSTR';
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;
+		SET OutputRoot.MQMD.Encoding 	 = 546;	
+		*/
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCRM_ConvertFromDBO
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- CALL CopyMessageHeaders();
+		-- CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+--29.10.15 08083 выписка по счету
+CREATE COMPUTE MODULE ConvertMDO2BSS_Statement
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillBSSStandardElements(InputRoot, OutputRoot, 'Statement', 'STATEMENT');
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalGetAccountStatementRs;
+		DECLARE stmt REFERENCE TO inRef.StatementInfo;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:Statement;
+		CALL CopyStatementFromMDO(stmt,outRef,FIELDVALUE(inRef.RqTm));		 
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCRM_DateMapping
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET OutputRoot = InputRoot; 
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		FOR outDate AS outRef.LimData[] DO
+			IF outDate.LimitHead.LimitValidTo = '9998-12-31' or outDate.LimitHead.LimitValidTo = '9999-12-31' or outDate.LimitHead.LimitValidTo = '0000-01-01' or outDate.LimitHead.LimitValidTo = '0001-01-01' THEN
+			SET outDate.LimitHead.LimitValidTo = '';
+			END IF;
+			IF outDate.LimitHead.LimitValidFrom = '9998-12-31' or outDate.LimitHead.LimitValidFrom = '9999-12-31' or outDate.LimitHead.LimitValidFrom = '0000-01-01' or outDate.LimitHead.LimitValidFrom = '0001-01-01' THEN
+			SET outDate.LimitHead.LimitValidFrom = '';
+			END IF;
+			IF outDate.LimitUtlSum.DateValue = '9998-12-31' or outDate.LimitUtlSum.DateValue = '9999-12-31' or outDate.LimitUtlSum.DateValue = '0000-01-01' or outDate.LimitUtlSum.DateValue = '0001-01-01' THEN
+			SET outDate.LimitUtlSum.DateValue = '';
+			END IF;
+				FOR outPos AS outDate.LimitPos[] DO
+					IF outPos.PosValidTo = '9998-12-31' or outPos.PosValidTo = '9999-12-31' or outPos.PosValidTo = '0000-01-01' or outPos.PosValidTo = '0001-01-01' THEN
+					SET outPos.PosValidTo = '';
+					END IF;
+					IF outPos.PosValidFrom = '9998-12-31' or outPos.PosValidFrom = '9999-12-31' or outPos.PosValidFrom = '0000-01-01' or outPos.PosValidFrom = '0001-01-01' THEN
+					SET outPos.PosValidFrom = '';
+					END IF;
+				END FOR;
+				FOR outSum AS outDate.LimitUtlSngl[] DO
+					IF outSum.UtilValidFrom = '9998-12-31' or outSum.UtilValidFrom = '9999-12-31' or outSum.UtilValidFrom = '0000-01-01' or outSum.UtilValidFrom = '0001-01-01' THEN
+					SET outSum.UtilValidFrom = '';
+					END IF;
+					IF outSum.UtilValidTo = '9998-12-31' or outSum.UtilValidTo = '9999-12-31' or outSum.UtilValidTo = '0000-01-01' or outSum.UtilValidTo = '0001-01-01' THEN
+					SET outSum.UtilValidTo = '';
+					END IF;
+				END FOR;
+		END FOR;
+		/*
+		FOR indate AS inRef.LimData[] DO
+			IF indate.LimitHead.LimitValidTo = '9998-12-31' or indate.LimitHead.LimitValidTo = '9999-12-31' THEN
+			SET outRef.LimitHead.LimitValidTo = '4712-12-31';
+			END IF;
+			IF indate.LimitPos.PosValidTo = '9998-12-31' or indate.LimitPos.PosValidTo = '9999-12-31' THEN
+			SET outRef.LimitPos.PosValidTo = '4712-12-31';
+			END IF;			
+		END FOR;*/
+		RETURN TRUE;
+	END;
+END MODULE;

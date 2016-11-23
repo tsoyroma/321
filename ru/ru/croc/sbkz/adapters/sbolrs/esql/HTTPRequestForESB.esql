@@ -1,0 +1,3118 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sbolrs.esql
+
+PATH ru.croc.sbkz.utils;
+
+/**
+ * Установка переменных окружения для логгирования
+ * и маршрутизации ответа.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_SetEnvironment
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		--DECLARE inputXml CHARACTER FIELDVALUE(InputRoot.XMLNSC.*:xmlMsgRequest.*:request);
+		--DECLARE inputBlob BLOB;
+		DECLARE inRef REFERENCE TO InputRoot;
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE env REFERENCE TO Environment;
+		
+		DECLARE doIfx REFERENCE TO OutputRoot;
+		
+		--CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CALL CopyWholeMessage(InputRoot,OutputRoot);
+		-- дальнейшее взаимодействие происходит по MQ, поэтому убираем заголовок HTTP
+		SET OutputRoot.HTTPInputHeader = null;	
+		
+		--SET inputBlob = CAST(inputXml AS BLOB CCSID 1208);
+		
+		-- преобразуем пришедшее сообщение в виде xml
+		--CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') PARSE (inputBlob CCSID 1208);			
+		
+		-- сохраним идентификатор запроса для дальнейшего ответа
+		SET Environment.UserProperties.ReplyIdentifier	= InputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier;
+		
+		SET Environment.UserProperties.RqUID			= InputRoot.XMLNSC.*[<].*[<].*:RqUID;
+		SET Environment.UserProperties.SPName			= InputRoot.XMLNSC.*[<].*[<].*:SPName;
+		--SET Environment.UserProperties.RqTm				= InputRoot.XMLNSC.*[<].*[<].RqTm;
+		SET Environment.UserProperties.Operation		= FIELDNAME(InputRoot.XMLNSC.*[<].*[<]);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Сформировать сообщение об ошибке.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_ComposeErrorMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		CALL FillStandardUFXFieldsResp2(InputRoot.XMLNSC, OutputRoot.XMLNSC, Environment.UserProperties, 'Error', 'WAY4Appl');
+		
+		SET outRoot.MsgData.Information.Status.RespClass = 'Error';
+		SET outRoot.MsgData.Information.Status.RespCode = CASE  
+				WHEN Environment.UserProperties.Error.Code IS NOT NULL THEN  Environment.UserProperties.Error.Code
+				ELSE CommonSBOLErrorCode
+				END;
+		SET outRoot.MsgData.Information.Status.RespText = CASE  
+				WHEN Environment.UserProperties.Error.Desc IS NOT NULL THEN  Environment.UserProperties.Error.Desc
+				ELSE CommonSBOLErrorDesc
+				END;
+		
+		SET outRoot.(XMLNSC.Attribute)resp_code 		= outRoot.MsgData.Information.Status.RespCode;
+		SET outRoot.(XMLNSC.Attribute)resp_text 		= outRoot.MsgData.Information.Status.RespText;
+		
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Маршрутизирует поток в соответствие с
+ * обрабатываемой операцией.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<].*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'BankAcctInqRq' THEN
+			SET labelName = 'BankAcctInqRq';
+		WHEN 'DepAcctStmtInqRq' THEN
+			SET labelName = 'DepAcctStmtInqRq'; 			
+		WHEN 'XferAddRq' THEN
+			DECLARE opername CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].*[<].*:OperName);
+			CASE opername 
+			WHEN 'TCC' THEN 
+				SET labelName = 'XferAddRq_TCC';	 			
+			WHEN 'TDD' THEN
+				SET labelName = 'XferAddRq'; -- ??? _TDD  
+			WHEN 'TCD' THEN
+				SET labelName = 'XferAddRq_TCD';
+			WHEN 'TDC' THEN
+				SET labelName = 'XferAddRq_TDC';	
+			ELSE
+				SET labelName = 'XferAddRq';
+			END CASE;		
+		WHEN 'LoanInqRq' THEN
+			SET labelName = 'LoanInqRq';			
+		WHEN 'LoanInfoRq' THEN
+			SET labelName = 'LoanInfoRq'; 			
+		WHEN 'LoanPaymentRq' THEN
+			SET labelName = 'LoanPaymentRq';
+		WHEN 'CCAcctFullStmtInqRq' THEN
+			SET labelName = 'CCAcctFullStmtInqRq';	 			
+		WHEN 'CardBlockRq' THEN
+			SET labelName = 'CardBlockRq'; 								
+		WHEN 'CardAcctDInqRq' THEN
+			SET labelName = 'CardAcctDInqRq';
+		WHEN 'CCAcctExtStmtInqRq' THEN
+			SET labelName = 'CCAcctExtStmtInqRq';
+		WHEN 'AcctInfoRq' THEN
+			SET labelName = 'AcctInfoRq';
+		WHEN 'BillingPayPrepRq' THEN
+			SET labelName = 'BillingPayPrepRq';
+		WHEN 'BillingPayExecRq' THEN
+			SET labelName = 'BillingPayExecRq'; 	
+		WHEN 'GetPhoneCardsFromWay4Rq' THEN
+			SET labelName =  'GetPhoneCardsFromWay4Rq';		
+		WHEN 'CardAddSMSRq' THEN 
+			SET labelName = 'CardAddSMSRq';
+		WHEN 'CardOffSMSRq' THEN
+			SET labelName = 'CardOffSMSRq';
+		WHEN 'CardLimListRq' THEN
+			SET labelName = 'CardLimListRq'; 	 			
+		WHEN 'CardChangeSMSRq' THEN
+			SET labelName = 'CardChangeSMSRq';
+		WHEN 'CardLimEnableRq' THEN
+			SET labelName = 'CardLimEnableRq';
+		WHEN 'CardLimDisableRq' THEN
+			SET labelName = 'CardLimDisableRq';		 
+		WHEN 'CardLimEditRq' THEN
+			SET labelName = 'CardLimEditRq';	
+		WHEN 'CardOffSMSRq' THEN
+			SET labelName = 'CardOffSMSRq';
+		WHEN 'CreditGraphRq' THEN
+			SET labelName = 'CreditGraphRq';
+		WHEN 'CardUnblockRq' THEN
+			SET labelName = 'CardUnblockRq'; 
+		WHEN 'AutoSubscriptionModRq' THEN 
+			SET labelName = 'AutoSubscriptionModRq';
+		WHEN 'GetAutoSubscriptionListRq' THEN
+			SET labelName = 'GetAutoSubscriptionListRq';
+		WHEN 'GetAutoPaymentListRq' THEN
+			SET labelName = 'GetAutoPaymentListRq';		
+		WHEN 'AutoSubscriptionStatusModRq' THEN
+			SET labelName = 'AutoSubscriptionStatusModRq';
+		WHEN 'GetAutoPaymentDetailInfoRq' THEN
+			SET labelName = 'GetAutoPaymentDetailInfoRq';
+		WHEN 'GetAutoSubscriptionDetailInfoRq' THEN
+			SET labelName = 'GetAutoSubscriptionDetailInfoRq';
+		WHEN 'CardEnrollmentRq' THEN
+			SET labelName = 'CardEnrollmentRq';
+		WHEN 'DepChkAddRq' THEN
+			SET labelName = 'DepChkAddRq';
+		WHEN 'NewDepAddFillRq' THEN
+			SET labelName = 'NewDepAddFillRq';
+		WHEN 'CardListPhoneRq' THEN
+			SET labelName = 'CardListPhoneRq';	 						 			
+		ELSE
+			-- Неизвестный тип сообщения 	
+			THROW USER EXCEPTION VALUES ('Unknown format XML in HTTPRequestForESB(SBOL_RS)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Отображение набора параметров из сообщения
+ * в формате UFX в название операции на шине.
+ **/
+CREATE FUNCTION ResolveSbolOperation(
+		IN inRoot REFERENCE
+	) RETURNS CHARACTER BEGIN
+	
+	DECLARE stmtTypeEx CHARACTER NULL;
+	FOR inParm AS inRoot.MsgData.Doc.ResultDtls.Parm[] DO
+		IF inParm.ParmCode = 'StmtTypeEx' THEN
+			SET stmtTypeEx = inParm.Value;
+		END IF;
+	END FOR;
+	
+	IF inRoot.(XMLNSC.Attribute)msg_type = 'Information'
+			AND inRoot.MsgData.Information.ObjectType = 'Contract' 
+			AND inRoot.MsgData.Information.ActionType = 'Inquiry' 
+			AND inRoot.MsgData.Information.ResultDtls.Filter.Type = 'Contract' 
+			AND inRoot.MsgData.Information.ResultDtls.Filter.Code = 'CONTRACT_LIST' THEN
+		RETURN 'KZGetPrivateClientAccountList';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' 
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode = '01000S'
+			AND COALESCE(stmtTypeEx, '') NOT IN ('Normal', 'Credit') THEN
+		RETURN 'KZGetPrivateClientAccountStatement';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'CustomerProfile'
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Profile'
+			AND inRoot.MsgData.CustomerProfile.ObjectType = 'HandBook'
+			AND inRoot.MsgData.CustomerProfile.ActionType = 'Inquiry'
+			AND inRoot.MsgData.CustomerProfile.ResultDtls.Filter.Type = 'HandBook'
+			AND inRoot.MsgData.CustomerProfile.ResultDtls.Filter.Code = 'PERIOD_FOR_CREDIT'
+			AND inRoot.MsgData.CustomerProfile.ObjectFor.HandBookIDT.Code = 'PERIOD_FOR_ACCOUNT' THEN
+		RETURN 'KZGetPrivateClientCreditPeriods';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'CustomerProfile'
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Profile'
+			AND inRoot.MsgData.CustomerProfile.ObjectType = 'HandBook'
+			AND inRoot.MsgData.CustomerProfile.ActionType = 'Inquiry'
+			AND inRoot.MsgData.CustomerProfile.ResultDtls.Filter.Type = 'HandBook'
+			AND inRoot.MsgData.CustomerProfile.ResultDtls.Filter.Code = 'FILTER_BY_CURR' THEN
+		RETURN 'KZGetCrossCurrRate';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' 
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.(XMLNSC.Attribute)direction = 'Rq'
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode IN ('01000P_AUTH', '01000F_AUTH')  THEN
+		RETURN 'KZPrivateMoneyTransfer';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' 
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.(XMLNSC.Attribute)direction = 'Rq'
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode IN ('04200P_AUTH', '04200F_AUTH')  THEN
+		RETURN 'KZPrivateMoneyTransferCan';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' /* TODO: fix these conditions */
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.(XMLNSC.Attribute)direction = 'Rq'
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode IN ('01000P_AUTH', '01000F_AUTH')  THEN
+		RETURN 'KZPrivateFreeReqPayment';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' 
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.(XMLNSC.Attribute)direction = 'Rq'
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode = '04200*_AUTH'  THEN
+		RETURN 'KZPrivateFreeReqPaymentCan';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc'
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc'
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode = '01000S'
+			AND stmtTypeEx = 'Normal' THEN
+		RETURN 'KZGetTransactionsInfo';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' 
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode = '01000S'
+			AND stmtTypeEx = 'Credit' THEN
+		RETURN 'KZGetPrivateClientPaySchedule';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' 
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.(XMLNSC.Attribute)direction = 'Rq'
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode = 'AddServReq'  THEN
+		RETURN 'KZMngSMSInfoService';
+	ELSE
+		RETURN NULL;
+	END IF;
+	
+END;
+
+/*
+ * Формирования сообщения для QPragma Получение информации по продуктам BankAcctInqRq -> KZGetPrivateClientAccountListRq 
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_AccountList
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:BankAcctInqRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountListRq';
+				
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		-- TODO: check SPName assignment!
+		SET outRoot.RqUID  = inRoot.*:RqUID;
+		SET outRoot.SPName = inRoot.*:SPName;
+		SET outRoot.RegNumber = inRoot.*:OperUID;
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'IIN';
+		SET curElm.Value = inRoot.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdNum;
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'CUSTCODE';
+		SET curElm.Value = inRoot.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdType;
+		
+		SET outRoot.ServiceAttr.AttrId = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = '00';
+		/*
+		FOR parm AS inRoot.MsgData.Information.ResultDtls.Filter.ParmsInfo.Parm[] DO
+			IF parm.ParmCode = 'ACC_TYPE' THEN
+				DECLARE paramValue CHARACTER FIELDVALUE(parm.Value); 
+				WHILE CONTAINS(paramValue,',') DO
+					DECLARE oneParam CHARACTER SUBSTRING(paramValue BEFORE ',');
+					SET paramValue = SUBSTRING(paramValue AFTER ',');
+					CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE oneParam;	
+				END WHILE;
+				CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE paramValue;				
+			END IF;
+		END FOR;
+		*/
+		
+		CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_ACCOUNT';
+		CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_DEPOSIT';
+		CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_CREDIT';
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * формирования сообщения в WAY4 Получение информации по карточным счетам BankAcctInqRq -> KZGetPrivateClientAccountListWAY4Rq
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_Convert2WAY4_AccountList
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:BankAcctInqRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountListWAY4Rq';
+				
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		-- TODO: check SPName assignment!
+		SET outRoot.RqUID  = inRoot.*:RqUID; 
+		SET outRoot.SPName = inRoot.*:SPName;		
+		SET outRoot.RegNumber = inRoot.*:OperUID;
+		
+		SET outRoot.IIN = inRoot.*:CustInfo.*:CustId;
+		
+		SET outRoot.CUSTCODE = inRoot.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdType;
+		
+		SET outRoot.ServiceAttr.AttrId = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = '00';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Заполнение полей заголовка MQRFH2 для
+ * дальнейшей маршрутизации.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Заполнение полей заголовка MQRFH2 для
+ * дальнейшей маршрутизации.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_FillMqRfh2usr_WAY4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Сервис используется дополнительно для получения информации по счетам, информация по клиенту BankAcctInqRq -> KZGetPersonInfoByIDRq
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_PersonGetClient
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 	
+		 	CALL CopyMessageHeaders(InputRoot,OutputRoot);
+			DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:BankAcctInqRq;
+		 	
+		    CALL FillMDOStandardElementsRq(inRef, OutputRoot, 'KZGetPersonInfoByIDRq');
+			DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:*[<];
+			
+			--SET outRef.BankInfo.banks:RegionId	=  '09';	
+			SET outRef.SPName	=	'SBOL';
+			
+			CREATE FIELD outRef.PersonInfo;
+			DECLARE idExt REFERENCE TO outRef;
+			DECLARE idMABPK CHARACTER inRef.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdNum;
+			DECLARE idIIN CHARACTER FIELDVALUE(inRef.*:CLIENTID);
+			/*
+			IF idIIN IS NOT NULL THEN
+				CREATE LASTCHILD OF outRef.PersonInfo AS idExt NAME 'PersonIdExt';
+				SET idExt.Key 			= 'IIN';
+				SET idExt.Value			= inRef.CLIENTID;
+			END IF;
+			*/
+			IF idMABPK IS NOT NULL THEN
+				CREATE LASTCHILD OF outRef.PersonInfo AS idExt NAME 'PersonIdExt';
+				SET idExt.Key 			= 'IIN';
+				SET idExt.Value			= inRef.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdNum;
+			END IF;
+			SET outRef.PersonInfoOnly 	= '1';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос)
+ **/
+CREATE PROCEDURE FillMDOStandardElementsRq (IN inRef REFERENCE, IN outRef REFERENCE, IN msgType CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF outRef DOMAIN('XMLNSC') NAME 'XMLNSC';
+	DECLARE outBody REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef.XMLNSC AS outBody NAME msgType;
+	SET outBody.RqUID		= FIELDVALUE(inRef.*:RqUID);
+	SET outBody.RqTm		= FIELDVALUE(inRef.*:RqTm);	
+	SET outBody.OperUID		= '';
+	SET outBody.SPName		= '';
+	SET outBody.BankInfo	= '';
+END;
+
+/**
+ * Заполнение полей заголовка MQRFH2 для
+ * дальнейшей маршрутизации.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_FillMqRfh2usr_PersonGetClient
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+ * Получения выписки по вкладу/счету DepAcctStmtInqRq -> KZGetTransactionsInfoRq
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_DepAcctStmt
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:*[<].*:DepAcctStmtInqRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetTransactionsInfoRq';
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID = inRoot.*:OperUID;
+		
+		DECLARE dateFrom CHARACTER NULL;
+		DECLARE dateTo CHARACTER NULL;
+		
+		/*FOR inParm AS inRoot.MsgData.Doc.ResultDtls.Parm[] DO
+			IF inParm.ParmCode = 'DateFrom' THEN
+				SET dateFrom = inParm.Value;
+			END IF;
+			IF inParm.ParmCode = 'DateTo' THEN
+				SET dateTo = inParm.Value;
+			END IF;
+		END FOR;*/
+
+		SET outRoot.AcctInfo.AcctId				= inRoot.*:DepAcctRec.*:DepAcctId.*:AcctId;
+		SET outRoot.StartDate					= inRoot.*:DateFrom;
+		SET outRoot.EndDate						= inRoot.*:DateTo;
+		SET outRoot.IsExtStatement				= 'Y';
+		
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		--SET Environment.UserProperties.MsgData = inRoot;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Заполнение полей заголовка MQRFH2 для
+ * дальнейшей маршрутизации.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_FillMqRfh2usr_DepAcctStmt
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *	Проведение платежа XferAddRq -> KZPrivateMoneyTransferRq
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_XferAddRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:XferAddRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZPrivateMoneyTransferRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperRRN = inRoot.*:OperRRN;
+		
+		SET outRoot.BankInfo.banks:RegionId	=	inRoot.*:BankInfo.*:RbTbBrchId;
+		
+		SET outRoot.(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+		--SET outRoot.TransactionType = inRoot.MsgData.Doc.TransType.TransCode.MsgCode;
+		 
+		DECLARE attr REFERENCE TO outRoot;
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+		SET attr.AttrId 		= 'VERS';
+		SET attr.AttrValue 		= inRoot.(XMLNSC.Attribute)version;
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+		SET attr.AttrId 		= 'TAPP';
+		SET attr.AttrValue		= inRoot.*:Target.(XMLNSC.Attribute)app;
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+		SET attr.AttrId 		= 'TROLE';
+		SET attr.AttrValue 		= inRoot.*:Target.(XMLNSC.Attribute)role;
+		FOR parm AS inRoot.*:MsgData.*:Doc.*:DocRefSet.*:Parm[] DO
+			IF parm.*:ParmCode IN ('RRN', 'SRN', 'STAN', 'CPID') THEN
+				CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+				SET attr.AttrId			= parm.*:ParmCode;
+				SET attr.AttrValue 		= parm.*:Value;
+			END IF;
+		END FOR;
+		
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+		
+		SET attr.AttrId		= 'SRN';
+		SET attr.AttrValue  = inRoot.*:OperUID;
+		
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+		
+		SET attr.AttrId		= 'RRN';
+		SET attr.AttrValue  = COALESCE(inRoot.*:OperRRN,inRoot.*:OperUID);
+		
+		DECLARE xInfo REFERENCE TO outRoot;
+		CREATE LASTCHILD OF outRoot AS xInfo NAME 'XferInfo';
+		DECLARE acct REFERENCE TO outRoot;
+		CREATE LASTCHILD OF xInfo AS acct NAME 'AcctFrom';
+		--SET acct.AcctId = inRoot.MsgData.Doc.Originator.ContractNumber;
+		SET acct.AcctId	=	inRoot.*:XferInfo.*:DepAcctIdFrom.*:AcctId;
+		
+		DECLARE extId REFERENCE TO outRoot;
+		CREATE LASTCHILD OF acct AS extId NAME 'ExtAcctId';
+		SET extId.Key 					= 'RBSN';
+		SET extId.Value 				= inRoot.*:MsgData.*:Doc.*:Originator.*:RBSNumber;		
+		CREATE LASTCHILD OF acct AS extId NAME 'ExtAcctId';
+		SET extId.Key 					= 'MID';
+		
+		IF EXISTS(inRoot.*:XferInfo.*:WithdrawalType[]) AND inRoot.*:XferInfo.*:WithdrawalType = 'true' THEN
+			SET extId.Value 				= 'W4D';		
+		ELSE
+			SET extId.Value 				= inRoot.*:OperName;	
+		END IF;
+		
+		SET acct.ClientInfo.PersonInfo.inds:PersonName.inds:LastName		= inRoot.*:MsgData.*:Doc.*:Originator.*:Client.*:ClientInfo.*:LastName;
+		SET acct.ClientInfo.PersonInfo.PersonIdExt.Key 						= 'TAXID';
+		SET acct.ClientInfo.PersonInfo.PersonIdExt.Value 					= inRoot.*:MsgData.*:Doc.*:Originator.*:Client.*:ClientInfo.*:TaxpayerIdentifier;		
+		
+		CREATE LASTCHILD OF xInfo AS acct NAME 'AcctTo';		
+		SET acct.AcctId 													= inRoot.*:XferInfo.*:DepAcctIdTo.*:AcctId;
+		SET acct.ClientInfo.PersonInfo.inds:PersonName.inds:LastName		= inRoot.*:MsgData.*:Doc.*:Destination.*:Client.*:ClientInfo.*:LastName;
+		SET acct.ClientInfo.PersonInfo.PersonIdExt.Key 						= 'TAXID';
+		SET acct.ClientInfo.PersonInfo.PersonIdExt.Value 					= inRoot.*:MsgData.*:Doc.*:Destination.*:Client.*:ClientInfo.*:TaxpayerIdentifier;		
+		CREATE LASTCHILD OF acct AS extId NAME 'ExtAcctId';
+		SET extId.Key 					= 'RBSN';
+		SET extId.Value 				= inRoot.*:MsgData.*:Doc.*:Destination.*:RBSNumber;		
+		CREATE LASTCHILD OF acct AS extId NAME 'ExtAcctId';
+		SET extId.Key 					= 'MID';
+		SET extId.Value 				= inRoot.*:OperName;	
+		
+		SET xInfo.TransPurpose			= inRoot.*:XferInfo.*:Purpose;
+		SET xInfo.TransDt				= inRoot.*:MsgData.*:Doc.*:Transaction.*:PhaseDate;
+						
+		SET xInfo.Amount				= inRoot.*:XferInfo.*:CurAmt;
+		SET xInfo.AmtCur				= inRoot.*:XferInfo.*:AcctCur;
+		
+		IF EXISTS(inRoot.*:XferInfo.*:WithdrawalType[]) AND inRoot.*:XferInfo.*:WithdrawalType <> '' THEN
+			SET Environment.UserProperties.WithdrawalType = 'true';
+		ELSE
+			SET Environment.UserProperties.WithdrawalType = 'false';	
+		END IF;	 
+		
+		IF EXISTS(inRoot.*:XferInfo.*:ApprovalType[]) THEN
+			SET Environment.UserProperties.ApprovalType = 'false';
+		ELSE
+			SET Environment.UserProperties.ApprovalType = 'true';	
+		END IF;
+		
+		
+		IF LOWER(inRoot.*:XferInfo.*:SrcLayoutInfo.*:IsCalcOperation) = 'false' THEN
+		
+			IF LOWER(inRoot.*:XferInfo.*:ApprovalType) = 'true' THEN
+				SET xInfo.Status = '√';
+			ELSE
+				SET xInfo.Status = 'А';
+			END IF;			
+			
+			SET xInfo.Id = inRoot.*:XferInfo.*:SrcLayoutInfo.*:WriteDownOperation.*:OperationName; 
+			SET xInfo.DocumentType = '0';
+			SET xInfo.CreateMode = 'N';
+			SET xInfo.BriefAnswer = 'N';
+			
+		END IF;
+		
+		
+		SET Environment.UserProperties.Amount = inRoot.*:XferInfo.*:CurAmt;
+				
+		DECLARE amt REFERENCE TO outRoot;
+		CREATE LASTCHILD OF xInfo AS amt NAME 'TransAddAmt';
+		SET amt.AmtType					= inRoot.*:MsgData.*:Doc.*:Transaction.*:Extra.*:Type;
+		SET amt.Amount					= inRoot.*:MsgData.*:Doc.*:Transaction.*:Extra.*:Amount;
+		SET amt.AmtCurr					= inRoot.*:MsgData.*:Doc.*:Transaction.*:Extra.*:Currency;
+		SET amt.AddInfo					= inRoot.*:MsgData.*:Doc.*:Transaction.*:Extra.*:Details;
+		
+		DECLARE bInfo REFERENCE TO outRoot;
+		CREATE LASTCHILD OF xInfo AS bInfo NAME 'BillingInfo';
+		SET bInfo.TransDt				= inRoot.*:MsgData.*:Doc.*:Billing.*:PhaseDate;
+		SET bInfo.Amount				= inRoot.*:MsgData.*:Doc.*:Billing.*:Amount;
+		SET bInfo.AmtCurr				= inRoot.*:MsgData.*:Doc.*:Billing.*:Currency;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_FillMqRfh2usr_LoanInqRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_LoanInqRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:LoanInqRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetCalcLoanDeptRq';
+
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		--SET outRoot.SPName	=	inRoot.SPName;
+		SET outRoot.SPName	=	'SBOLRS';
+
+		SET outRoot.CalcDate				= inRoot.*:LoanAcctId.*:DateCalc;
+		SET outRoot.LoanId			   	    = inRoot.*:LoanAcctId.*:AgreemtNum;
+		
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.OperUID    = inRoot.*:OperUID;
+		SET Environment.UserProperties.AcctCur    = inRoot.*:LoanAcctId.*:AcctCur;
+		SET Environment.UserProperties.EffDt      = inRoot.*:LoanAcctId.*:DateCalc;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_LoanPaymentRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:LoanPaymentRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientPayScheduleRq';
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+
+		SET outRoot.AcctInfo.AcctId					= inRoot.*:LoanAcctId.*:AcctId;
+		SET outRoot.AcctInfo.BankInfo.banks:BankId	= 'ABS'; -- inRoot.*:BankInfo.*:BranchId;
+
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.OperUID    = inRoot.*:OperUID;
+		SET Environment.UserProperties.AcctId     = inRoot.*:LoanAcctId.*:AcctId;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_Convert_LoanAcctGetList
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:LoanInfoRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountListRq';
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		--SET outRoot.SPName	=	inRoot.SPName;
+		SET outRoot.SPName	=	'SBOLRS';
+
+		SET outRoot.RegNumber = inRoot.*:RqUID;
+		
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'IIN';
+		SET curElm.Value = inRoot.*:IdNum;
+		--SET curElm.Value = inRoot.*:LoanAcctId.*:AcctId;
+		
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'CUSTCODE';
+		SET curElm.Value = 'ClientId';
+		
+		SET outRoot.ServiceAttr.AttrId    = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = '2.0';
+
+		CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_CREDIT';
+		
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.AcctId     = inRoot.*:LoanAcctId.*:AcctId;
+		SET Environment.UserProperties.OperUID    = inRoot.*:OperUID;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_Convert_PersonGetClient
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:LoanInfoRq;
+		 	
+	    CALL FillMDOStandardElementsRq(inRef, OutputRoot, 'KZGetPersonInfoByIDRq');
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:*[<];
+			
+		SET outRef.RqUID	=	inRef.*:RqUID;
+		SET outRef.RqTm 	=	inRef.*:RqTm;
+		SET outRef.OperUID	=	inRef.*:OperUID;
+		--SET outRef.SPName	=	inRef.SPName;
+		SET outRef.SPName	=	'SBOLRS';
+			
+		CREATE FIELD outRef.PersonInfo;
+		DECLARE idExt REFERENCE TO outRef;
+
+		CREATE LASTCHILD OF outRef.PersonInfo AS idExt NAME 'PersonIdExt';
+		SET idExt.Key 			= 'IIN';
+		SET idExt.Value			= inRef.*:IdNum;
+
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.IdNum      = inRef.*:IdNum;
+		SET Environment.UserProperties.OperUID    = inRef.*:OperUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardBlockRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardBlockRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWAYCardBlockRq';
+
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		--SET outRoot.SPName	=	inRoot.SPName;
+		SET outRoot.SPName	=	'SBOLRS';
+
+		SET outRoot.RegNumber		      		    = inRoot.*:OperUID;
+		SET outRoot.ClientNumber		      		= inRoot.*:CustId.*:CustPermId;
+		SET outRoot.ContractNumber			   	    = inRoot.*:CardAcctId.*:CardNum;
+		SET outRoot.StatusComment			   	    = inRoot.*:BlockReason;
+		SET outRoot.StatusCode			   	        = inRoot.*:BlockType;
+		
+		DECLARE varASD CHARACTER ' ';
+		DECLARE varTEST INTEGER 0;
+		
+		SET varASD	= '-15';
+		SET varTEST	= CAST(varASD AS INTEGER);
+		SET varTEST	= varTEST + 1;
+		
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.OperUID    = inRoot.*:OperUID;
+		--SET Environment.UserProperties.AcctCur    = inRoot.*:LoanAcctId.*:AcctCur;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardUnblockRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardUnblockRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWAYCardUnblockRq';
+
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		--SET outRoot.SPName	=	inRoot.SPName;
+		SET outRoot.SPName	=	'SBOLRS';
+
+		SET outRoot.RegNumber		      		    = inRoot.*:OperUID;
+		SET outRoot.ClientNumber		      		= inRoot.*:CustId.*:CustPermId;
+		SET outRoot.ContractNumber			   	    = inRoot.*:CardAcctId.*:CardNum;
+		SET outRoot.StatusComment			   	    = inRoot.*:BlockReason;
+		SET outRoot.StatusCode			   	        = inRoot.*:BlockType;
+		
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.OperUID    = inRoot.*:OperUID;
+		SET Environment.UserProperties.AcctCur    = inRoot.*:LoanAcctId.*:AcctCur;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+ *  Интерфейс CRFULL(CCAcctFullStmtInqRq) получение полной выписки по карте -- u06068 04.12.2014 
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CCAcctFullStmtInqRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CCAcctFullStmtInqRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetOrderingByCardRq';
+
+					
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		-- TODO: check SPName assignment!
+		SET outRoot.RqUID  = inRoot.*:RqUID; 
+		SET outRoot.SPName = inRoot.*:SPName;		
+
+		/*DECLARE id CHARACTER;
+		DECLARE days CHARACTER;
+		DECLARE service CHARACTER 'general';
+		
+		SET days = EXTRACT(DAY FROM CURRENT_DATE);
+					  
+		--CALL hash(days,service,id);	 
+		CALL putQueue();	 	
+		CALL getID(id);
+		
+		
+		DECLARE year_number CHARACTER;
+		DECLARE year_day CHARACTER;
+		
+		SET year_number = EXTRACT(DAYOFYEAR FROM CURRENT_DATE); 
+		SET year_day    = EXTRACT(YEAR FROM CURRENT_DATE);
+		
+		DECLARE lone_year CHARACTER SUBSTRING(year_day FROM 4 FOR 1); 	*/
+ 		 
+ 		--CALL generateId(file_id);
+ 		/*IF LENGTH(year_number) <> '3' THEN
+			SET outRoot.RegNumber = lone_year || '0' || year_number || '84' || id;--inRoot.*:OperUID;
+ 		ELSE
+ 			SET outRoot.RegNumber = lone_year || year_number || '84' || id;--inRoot.*:OperUID;
+ 		END IF;	*/
+ 		SET outRoot.RegNumber  = inRoot.*:OperRRN;			
+		SET outRoot.CardNumber = inRoot.*:CardInfo.*:CardAcctId.*:CardAcctIdNum;
+		
+		SET outRoot.FromDate   = inRoot.*:FromDate;
+		SET outRoot.ToDate	   = inRoot.*:ToDate;	
+		--SET outRoot.CUSTCODE = inRoot.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdType;
+		
+		SET Environment.UserProperties.SystemId   = inRoot.*:CardInfo.*:CardAcctId.*:SystemId;
+		SET Environment.UserProperties.CardNumber = inRoot.*:CardInfo.*:CardAcctId.*:CardAcctIdNum;
+		SET Environment.UserProperties.OperUID	  = inRoot.*:OperUID;
+		
+		SET outRoot.ServiceAttr.AttrId = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = '00';		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Интерфейс CRDWI(CardAcctDInqRq) получение детальной информации о карте -- u06068 06.12.2014 
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardAcctDInqRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardAcctDInqRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetFullInformationCardRq';
+					
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		-- TODO: check SPName assignment!
+		SET outRoot.RqUID  = inRoot.*:RqUID; 
+		SET outRoot.SPName = inRoot.*:SPName;		
+		
+		SET outRoot.RegNumber      = inRoot.*:OperUID;--lone_year || year_number || '84' || '000001';	
+		SET outRoot.ContractNumber = inRoot.*:CardInfo.*:CardAcctId.*:CardNum;
+			
+		SET Environment.UserProperties.SystemId   = inRoot.*:CardInfo.*:CardAcctId.*:SystemId;
+		SET Environment.UserProperties.CardNumber = inRoot.*:CardInfo.*:CardAcctId.*:CardNum;
+		SET Environment.UserProperties.OperUID	  = inRoot.*:OperUID;
+		
+		SET outRoot.ServiceAttr.AttrId = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = '00';
+		
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Интерфейс CREXT(CCAcctExtStmtInqRq) получение расширенной выписки по карте	 -- u06068 06.12.2014 
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CCAcctExtStmtInqRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CCAcctExtStmtInqRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetFullExtCardRq';
+							
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		-- TODO: check SPName assignment!
+		SET outRoot.RqUID  = inRoot.*:RqUID; 
+		SET outRoot.SPName = inRoot.*:SPName;		
+				
+		/*DECLARE year_number CHARACTER;
+		DECLARE year_day CHARACTER;
+		
+		DECLARE id CHARACTER;
+		DECLARE days CHARACTER;
+		DECLARE service CHARACTER 'general';
+		
+		SET days = EXTRACT(DAY FROM CURRENT_DATE);
+					  
+		--CALL hash(days,service,id);	
+		CALL putQueue();	 	
+		CALL getID(id);
+		
+		SET year_number = EXTRACT(DAYOFYEAR FROM CURRENT_DATE); 
+		SET year_day    = EXTRACT(YEAR FROM CURRENT_DATE);
+		
+		DECLARE lone_year CHARACTER SUBSTRING(year_day FROM 4 FOR 1); 
+		
+		IF LENGTH(year_number) <> '3' THEN
+			SET outRoot.RegNumber = lone_year || '0' || year_number || '84' || id;--inRoot.*:OperUID;
+		ELSE
+			SET outRoot.RegNumber = lone_year || year_number || '84' || id;--inRoot.*:OperUID;
+		END IF;	*/	
+		
+		SET outRoot.RegNumber  = inRoot.*:OperRRN;	
+			
+		SET outRoot.CardNumber = inRoot.*:CardInfo.*:CardAcctId.*:CardNum;
+		
+		SET outRoot.OpCount = inRoot.*:OpCount;
+		--SET outRoot.CUSTCODE = inRoot.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdType;
+		
+		SET Environment.UserProperties.SystemId   = inRoot.*:CardInfo.*:CardAcctId.*:SystemId;
+		SET Environment.UserProperties.CardNumber = inRoot.*:CardInfo.*:CardAcctId.*:CardNum;
+		SET Environment.UserProperties.OperUID	  = inRoot.*:OperUID;
+		
+		SET outRoot.ServiceAttr.AttrId = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = '00';	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * 	Интерфейс ACC_DI получения детальной информации по вкладу AcctInqRq -> PersonGetClient u06068 07.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_PersonGetClientAcctInqRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+			DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<].*[<];
+		 	
+		    CALL FillMDOStandardElementsRq(inRef, OutputRoot, 'KZGetPersonInfoByIDRq');
+			DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:*[<];
+			
+			--SET outRef.BankInfo.banks:RegionId	=  '09';	
+			SET outRef.SPName	=	'SBOL';
+			
+			CREATE FIELD outRef.PersonInfo;
+			DECLARE idExt REFERENCE TO outRef;
+			DECLARE idMABPK CHARACTER inRef.*:IdNum;
+			DECLARE idIIN CHARACTER FIELDVALUE(inRef.*:CLIENTID);
+			/*
+			IF idIIN IS NOT NULL THEN
+				CREATE LASTCHILD OF outRef.PersonInfo AS idExt NAME 'PersonIdExt';
+				SET idExt.Key 			= 'IIN';
+				SET idExt.Value			= inRef.CLIENTID;
+			END IF;
+			*/
+			IF idMABPK IS NOT NULL THEN
+				CREATE LASTCHILD OF outRef.PersonInfo AS idExt NAME 'PersonIdExt';
+				SET idExt.Key 			= 'IIN';
+				SET idExt.Value			= inRef.*:IdNum;
+			END IF;
+			SET outRef.PersonInfoOnly 	= '1';
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_FillMqRfh2usr_AcctInfoRq1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * 	Интерфейс ACC_DI получения детальной информации по вкладу AcctInqRq -> DepositeAcctGetList u06068 07.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_DepositeAcctGetList
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		  
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<].*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountListRq';
+				
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		-- TODO: check SPName assignment!
+		SET outRoot.RqUID  = inRoot.*:RqUID;
+		SET outRoot.SPName = inRoot.*:SPName;
+		SET outRoot.RegNumber = inRoot.*:OperUID;
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'IIN';
+		SET curElm.Value = inRoot.*:IdNum;
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'CUSTCODE';
+		SET curElm.Value = inRoot.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdType;
+		
+		SET outRoot.ServiceAttr.AttrId = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = '00';
+		/*
+		FOR parm AS inRoot.MsgData.Information.ResultDtls.Filter.ParmsInfo.Parm[] DO
+			IF parm.ParmCode = 'ACC_TYPE' THEN
+				DECLARE paramValue CHARACTER FIELDVALUE(parm.Value); 
+				WHILE CONTAINS(paramValue,',') DO
+					DECLARE oneParam CHARACTER SUBSTRING(paramValue BEFORE ',');
+					SET paramValue = SUBSTRING(paramValue AFTER ',');
+					CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE oneParam;	
+				END WHILE;
+				CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE paramValue;				
+			END IF;
+		END FOR;
+		*/
+		
+		CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_ACCOUNT';
+		CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_DEPOSIT';
+		--CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_CREDIT';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_FillMqRfh2usr_AcctInfoRq2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * 	Интерфейс TCC переводы с карты на карту XferAddRq -> WAY u06068 11.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_XferAddRq_TCC
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:XferAddRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWayUfxP2PRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID = inRoot.*:OperUID;
+		 
+		/*DECLARE id CHARACTER;
+		DECLARE days CHARACTER;
+		DECLARE service CHARACTER 'general';
+		
+		SET days = EXTRACT(DAY FROM CURRENT_DATE);
+					  
+		--CALL hash(days,service,id);	
+		CALL putQueue();	 	
+		CALL getID(id);
+		
+		DECLARE year_number CHARACTER;
+		DECLARE year_day CHARACTER;
+		
+		SET year_number = EXTRACT(DAYOFYEAR FROM CURRENT_DATE); 
+		SET year_day    = EXTRACT(YEAR FROM CURRENT_DATE);
+		
+		DECLARE lone_year CHARACTER SUBSTRING(year_day FROM 4 FOR 1); */	
+ 		 
+ 		--CALL generateId(file_id);
+ 		
+ 		SET outRoot.XferMethod					= inRoot.*:XferInfo.*:XferMethod;	
+ 		
+ 		/*IF LENGTH(year_number) <> '3' THEN  
+			 SET outRoot.RegNumber 					= 'SBOLRS' || '_' || lone_year || '0' || year_number || '84' || id;--inRoot.*:OperUID;
+ 		ELSE
+ 			 SET outRoot.RegNumber 					= 'SBOLRS' || '_' || lone_year || year_number || '84' || id;--inRoot.*:OperUID;
+ 		END IF;	*/
+		
+		SET outRoot.RegNumber					= inRoot.*:OperRRN; 
+		
+		SET outRoot.OperName					= inRoot.*:OperName;
+		SET outRoot.ContractNumber  			= inRoot.*:XferInfo.*:CardAcctIdFrom.*:CardNum;
+		SET outRoot.DestinationContractNumber	= inRoot.*:XferInfo.*:CardAcctIdTo.*:CardNum;
+		SET outRoot.Amount						= inRoot.*:XferInfo.*:CurAmt;
+		SET outRoot.Currency					= inRoot.*:XferInfo.*:AcctCur;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *	Интерфейс TBP_PR подготовки билингового платежа к отправке u06068 14.12.2014 FROM SBOL_RS -> A_SBOL_RS
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_BillingPayPrepRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:BillingPayPrepRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZBillingPayPrepRq';
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		DECLARE recipient REFERENCE TO outRoot; 
+		
+		CREATE LASTCHILD OF outRoot AS recipient NAME 'RecipientRec';
+		
+		DECLARE bill CHARACTER;
+		
+		SET bill = SUBSTRING(inRoot.*:RecipientRec.*:CodeRecipientBS FROM 1 FOR 1);
+		
+		DECLARE fio_req CHARACTER;
+		
+		FOR req AS inRoot.*:RecipientRec.*:Requisites.*:Requisite[] DO
+
+				IF req.*:NameBS = 'FIO' THEN		
+					SET fio_req = req.*:EnteredData.*:DataItem;
+				ELSE
+					SET fio_req = '0';	
+				END IF;
+		
+		END FOR;
+		
+		IF bill = 'U' AND fio_req = '0' THEN
+					
+			SET OutputRoot = InputRoot;
+			PROPAGATE TO TERMINAL 'out1';
+			RETURN FALSE;
+			
+		END IF;			  
+		
+		SET recipient.CodeRecipientBS	=	inRoot.*:RecipientRec.*:CodeRecipientBS;
+		SET recipient.Name				=	inRoot.*:RecipientRec.*:Name;
+		SET recipient.TaxId				=	inRoot.*:RecipientRec.*:TaxId;
+		SET recipient.BIC				=	inRoot.*:RecipientRec.*:BIC;
+		SET recipient.AcctId			=	inRoot.*:RecipientRec.*:AcctId;
+		
+		SET outRoot.IsAutoPayment = inRoot.*:IsAutoPayment;
+		
+		DECLARE requisites REFERENCE TO recipient;	 
+		DECLARE requisite REFERENCE TO recipient;
+		
+		CREATE LASTCHILD OF recipient AS requisites NAME 'Requisites';
+		
+		FOR req AS inRoot.*:RecipientRec.*:Requisites.*:Requisite[] DO
+		
+		CREATE LASTCHILD OF requisites AS requisite NAME 'Requisite';
+		
+			SET requisite.NameVisible			=	req.*:NameVisible;
+			SET requisite.NameBS				=	req.*:NameBS;
+			SET requisite.Type					=	req.*:Type;
+			
+			IF NOT EXISTS(req.*:EnteredData.*:DataItem[]) THEN 
+				SET requisite.EnteredData.DataItem  =	req.*:DefaultValue;
+			ELSE
+				SET requisite.EnteredData.DataItem  =	req.*:EnteredData.*:DataItem;
+			END IF;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс TBP_PAY проводки билингового платежа u06068 16.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_BillingPayExecRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:BillingPayExecRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		--CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetBillingPayRq';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetBillingStatRq';
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		SET outRoot.SBOLTm	=	inRoot.*:SBOLTm;
+		
+		SET outRoot.ContractNumber	=	inRoot.*:CardAcctId.*:CardNum;
+		
+		
+		DECLARE recipient REFERENCE TO outRoot; 
+		
+		CREATE LASTCHILD OF outRoot AS recipient NAME 'RecipientRec';
+		
+		
+		SET recipient.CodeRecipientBS	=	inRoot.*:RecipientRec.*:CodeRecipientBS;
+		SET recipient.Name				=	inRoot.*:RecipientRec.*:Name;
+		SET recipient.TaxId				=	inRoot.*:RecipientRec.*:TaxId;
+		SET recipient.BIC				=	inRoot.*:RecipientRec.*:BIC;
+		SET recipient.AcctId			=	inRoot.*:RecipientRec.*:AcctId;
+		
+		DECLARE requisites REFERENCE TO recipient;	 
+		DECLARE requisite REFERENCE TO recipient;
+		
+		CREATE LASTCHILD OF recipient AS requisites NAME 'Requisites';
+		
+		FOR req AS inRoot.*:RecipientRec.*:Requisites.*:Requisite[] DO
+		
+		CREATE LASTCHILD OF requisites AS requisite NAME 'Requisite';
+		
+			SET requisite.NameVisible			=	req.*:NameVisible;
+			SET requisite.NameBS				=	req.*:NameBS;
+			SET requisite.Type					=	req.*:Type;
+			
+			SET requisite.DefaultValue			=	req.*:DefaultValue;
+			
+			IF NOT EXISTS(req.*:EnteredData.*:DataItem[]) THEN 
+				SET requisite.EnteredData.DataItem  =	req.*:DefaultValue;
+			ELSE
+				SET requisite.EnteredData.DataItem  =	req.*:EnteredData.*:DataItem;
+			END IF;
+		END FOR;		
+
+		--SET outRoot.MadeOperationId		=	inRoot.*:OperRRN;--inRoot.*:MadeOperationId;--inRoot.*:MadeOperationId;--inRoot.*:OperRRN;--inRoot.*:MadeOperationId;
+		SET outRoot.MadeOperationId		=	'0000'||SUBSTRING(inRoot.*:OperRRN FROM 4);
+		SET outRoot.Commission			=	inRoot.*:Commission;
+		SET outRoot.CommissionCur		=	inRoot.*:CommissionCur;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_XferAddRq_TCD
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:XferAddRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWay4AccDebitAuthRq';		
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;	
+		 
+		/*DECLARE id CHARACTER;
+		DECLARE days CHARACTER;
+		DECLARE service CHARACTER 'general';
+		
+		SET days = EXTRACT(DAY FROM CURRENT_DATE);
+					  
+		--CALL hash(days,service,id);	
+		CALL putQueue();	 	
+		CALL getID(id);
+		
+		DECLARE year_number CHARACTER;
+		DECLARE year_day CHARACTER;
+		
+		SET year_number = EXTRACT(DAYOFYEAR FROM CURRENT_DATE); 
+		SET year_day    = EXTRACT(YEAR FROM CURRENT_DATE);
+		
+		DECLARE lone_year CHARACTER SUBSTRING(year_day FROM 4 FOR 1); */	
+ 		 
+		SET outRoot.OperName					= inRoot.*:OperName;
+		SET outRoot.ContractNumber  			= inRoot.*:XferInfo.*:CardAcctIdFrom.*:CardNum;
+		SET outRoot.Purpouse					= 'Transfer to ABS ' || inRoot.*:XferInfo.*:DepAcctIdTo.*:AcctId || ' (' ||COALESCE(inRoot.*:XferInfo.*:Purpose,' ') || ')';
+		SET outRoot.DestinationContractNumber	= inRoot.*:XferInfo.*:CardAcctIdTo.*:CardNum;
+		SET outRoot.Amount						= inRoot.*:XferInfo.*:CurAmt;
+		SET outRoot.Currency					= inRoot.*:XferInfo.*:AcctCur;
+		/*IF LENGTH(year_number) <> '3' THEN 	
+			SET outRoot.RRN				          	= lone_year || '0' || year_number || '84' || id;
+		ELSE
+			SET outRoot.RRN				          	= lone_year || year_number || '84' || id;	
+		END IF;	*/
+		
+		SET outRoot.RRN	= inRoot.*:OperRRN;
+		
+		SET Environment.UserProperties.OperUID = inRoot.*:OperUID;
+		
+		SET Environment.UserProperties.WAYOperName 		 			= outRoot.OperName;
+		SET Environment.UserProperties.WAYContractNumber 			= outRoot.ContractNumber;
+		SET Environment.UserProperties.WAYDestinationContractNumber = outRoot.DestinationContractNumber;
+		SET Environment.UserProperties.WAYAmount 					= outRoot.Amount;
+		SET Environment.UserProperties.WAYCurrency 					= outRoot.Currency;
+		SET Environment.UserProperties.WAYRRN 						= outRoot.RRN;
+		SET Environment.UserProperties.Purpouse						= outRoot.Purpouse;
+
+		--------------------------------------------------------------------------------------------------
+		
+		SET Environment.UserProperties.RbTbBrchId				   = inRoot.*:BankInfo.*:RbTbBrchId;
+		SET Environment.UserProperties.SenderReference			   = inRoot.*:XferInfo.*:CardAcctIdFrom.*:CardNum;
+		SET Environment.UserProperties.AmountDB			           = inRoot.*:XferInfo.*:CurAmt;
+		SET Environment.UserProperties.Details		 			   = inRoot.*:XferInfo.*:Purpose;
+		SET Environment.UserProperties.Number					   = inRoot.*:OperUID;
+		SET Environment.UserProperties.Name		   				   = inRoot.*:XferInfo.*:CardAcctIdFrom.*:CustInfo.*:PersonInfo.*:PersonName.*:LastName;
+		SET Environment.UserProperties.Account			           = inRoot.*:XferInfo.*:DepAcctIdTo.*:AcctId;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_GetPhoneCardsFromWay4Rq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:GetPhoneCardsFromWay4Rq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPhoneCardsFromWay4Rq';
+
+		SET outRoot.RqUID			= inRoot.*:RqUID;
+		SET outRoot.RqTm			= inRoot.*:RqTm;
+		SET outRoot.OperUID			= inRoot.*:OperUID;
+		SET outRoot.SPName			= 'BP_ERIB';
+		SET outRoot.CustPermId		= inRoot.*:CustId.*:CustPermId;
+		SET outRoot.RbTbBrchId		= inRoot.*:BankInfo.*:RbTbBrchId;
+		
+		SET Environment.UserProperties.OperUID    = inRoot.*:OperUID;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_DetectOperation1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<].*[<]);
+		DECLARE labelName CHARACTER;
+
+		---DECLARE varWAY4 CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<].*[<].WAY4);
+
+		DECLARE varYWAY4 CHARACTER;
+		DECLARE inXferAddRs REFERENCE TO InputRoot.XMLNSC.*:DoIFXRs.*:XferAddRs;
+		SET varYWAY4 = inXferAddRs.*:WAY4;
+		
+		CASE Operation
+		WHEN 'XferAddRs' THEN
+		    SET labelName = 'XferAddRq_QP';
+
+		    IF varYWAY4 = '1' THEN 
+		       SET labelName = 'XferAddRq_WAY1';
+		    END IF; 
+		ELSE
+			-- Неизвестный тип сообщения 	
+			THROW USER EXCEPTION VALUES ('777-Unknown format XML in HTTPRequestForESB(SBOL_RS)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_XferAddRq_QP
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRs.*:XferAddRs;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountListRq';
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	'AAA'; --inRoot.*:OperUID;
+		SET outRoot.SPName	=	'SBOLRS';
+
+		SET outRoot.RegNumber = inRoot.*:RqUID;
+		
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'IIN';
+		SET curElm.Value = '777'; ---inRoot.*:IdNum;
+		
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'CUSTCODE';
+		SET curElm.Value = 'ClientId';
+		
+		SET outRoot.ServiceAttr.AttrId    = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = '2.0';
+
+		CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_CREDIT';
+		
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.ReplyIdentifier	= inRoot.*:SOAPReplyIdentifier;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_XferAddRq_WAY2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRs.*:XferAddRs;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWay4AccDebitAuthRq';		
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		 
+		DECLARE id CHARACTER;
+		DECLARE days CHARACTER;
+		DECLARE service CHARACTER 'xferAddtcd-777';
+		
+		SET days = EXTRACT(DAY FROM CURRENT_DATE);
+					  
+		CALL hash(days,service,id);	
+		
+		DECLARE year_number CHARACTER;
+		DECLARE year_day CHARACTER;
+		
+		SET year_number = EXTRACT(DAYOFYEAR FROM CURRENT_DATE); 
+		SET year_day    = EXTRACT(YEAR FROM CURRENT_DATE);
+		
+		DECLARE lone_year CHARACTER SUBSTRING(year_day FROM 4 FOR 1); 	
+ 		 
+		--SET outRoot.RegNumber 					= 'SBOLRS' || '_' || lone_year || year_number || '84' || id;--inRoot.*:OperUID;
+		SET outRoot.OperName					= inRoot.*:OperName;
+		SET outRoot.ContractNumber  			= inRoot.*:XferInfo.*:CardAcctIdFrom.*:CardNum;
+		SET outRoot.DestinationContractNumber	= inRoot.*:XferInfo.*:CardAcctIdTo.*:CardNum;
+		SET outRoot.Amount						= inRoot.*:XferInfo.*:CurAmt;
+		SET outRoot.Currency					= inRoot.*:XferInfo.*:AcctCur;	
+--		SET outRoot.RRN				          	= inRoot.*:XferInfo.*:CardAcctIdFrom.*:CustInfo.*:CustId;	
+		SET outRoot.RRN				          	= 'SBOLRS' || '_' || lone_year || year_number || '84' || id;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс TDC перевод денежных c текущего счета\депозита на свою карту (карт-счет) между счетами одного клиента u06068 20.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_XferAddRq_TDC
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:XferAddRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		IF EXISTS(inRoot.*:XferInfo.*:WithdrawalType[]) AND LOWER(inRoot.*:XferInfo.*:WithdrawalType) = 'false' THEN		
+			CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWayToQPragmaTDCRq';	
+		ELSE
+			
+			IF EXISTS(inRoot.*:XferInfo.*:SrcLayoutInfo.*:IsCalcOperation[]) AND LOWER(inRoot.*:XferInfo.*:SrcLayoutInfo.*:IsCalcOperation) = 'true' THEN
+			
+				CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZQPragmaPrepRq';	
+				
+			ELSE
+				
+				IF LOWER(inRoot.*:XferInfo.*:ApprovalType) = 'false' THEN
+				
+					CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZQPragmaPrepRq';
+				
+				ELSE
+					
+					CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWayToQPragmaTDCRq';	
+			
+				END IF;
+			END IF;	
+				
+		END IF;
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName; 
+		SET Environment.UserProperties.OperRRN  = inRoot.*:OperRRN;
+		 
+		/*DECLARE id CHARACTER;
+		DECLARE days CHARACTER;
+		DECLARE service CHARACTER 'general';
+		
+		SET days = EXTRACT(DAY FROM CURRENT_DATE);
+					  
+		--CALL hash(days,service,id);	
+		CALL putQueue();	 	
+		CALL getID(id);*/
+		
+		/*DECLARE year_number CHARACTER;
+		DECLARE year_day CHARACTER;
+		
+		SET year_number = EXTRACT(DAYOFYEAR FROM CURRENT_DATE); 
+		SET year_day    = EXTRACT(YEAR FROM CURRENT_DATE);
+		
+		DECLARE lone_year CHARACTER SUBSTRING(year_day FROM 4 FOR 1);*/ 	
+ 		 
+ 		--CALL generateId(file_id);
+ 		
+ 		--SET outRoot.XferMethod					= inRoot.*:XferInfo.*:XferMethod;	
+ 		/*IF LENGTH(year_number) <> '3' THEN
+			SET outRoot.RegNumber 					= lone_year || '0' || year_number || '84' || id;
+ 		ELSE
+ 			SET outRoot.RegNumber 					= lone_year || year_number || '84' || id;
+ 		END IF;	*/
+ 		
+ 		
+ 		
+ 		SET outRoot.RegNumber					= inRoot.*:OperRRN;	
+ 			
+		SET outRoot.OperName					= inRoot.*:OperName;
+		SET outRoot.ContractNumber  			= inRoot.*:XferInfo.*:CardAcctIdTo.*:CardNum;
+		SET outRoot.DepAcctIdFrom.AcctId		= inRoot.*:XferInfo.*:DepAcctIdFrom.*:AcctId;
+		-- Добавил логику оригинал в коментах
+		
+		/*
+		IF EXISTS(inRoot.*:XferInfo.*:WithdrawalType[]) AND LOWER(inRoot.*:XferInfo.*:WithdrawalType) = 'false' THEN 		
+			SET outRoot.Purpose						= 'Transfer from ABS ' || inRoot.*:XferInfo.*:DepAcctIdFrom.*:AcctId || ' (' ||COALESCE(inRoot.*:XferInfo.*:Purpose,' ') || ')';
+		ELSE
+			SET outRoot.Purpose						= 'Withdrawal from Deposit ' || inRoot.*:XferInfo.*:DepAcctIdFrom.*:AcctId || ' (' ||COALESCE(inRoot.*:XferInfo.*:Purpose,' ') || ')';
+			*/
+		IF EXISTS(inRoot.*:XferInfo.*:WithdrawalType[]) AND LOWER(inRoot.*:XferInfo.*:WithdrawalType) = 'false' THEN 		
+			SET outRoot.Purpose						= 'Transfer from ABS ' || inRoot.*:XferInfo.*:DepAcctIdFrom.*:AcctId || ' (' ||COALESCE(inRoot.*:XferInfo.*:Purpose,' ') || ')';
+			SET outRoot.Template = 'W4C';	
+		ELSEIF EXISTS(inRoot.*:XferInfo.*:WithdrawalType[]) AND LOWER(inRoot.*:XferInfo.*:WithdrawalType) = 'true' THEN 
+			SET outRoot.Purpose						= 'Withdrawal from Deposit ' || inRoot.*:XferInfo.*:DepAcctIdFrom.*:AcctId || ' (' ||COALESCE(inRoot.*:XferInfo.*:Purpose,' ') || ')';
+			SET Environment.UserProperties.WithdrawalType = 'true';	
+			SET outRoot.Template = 'W4D';		
+		-- Изменил логику 6.10.2015 u07357 оригинал в коментах
+			IF EXISTS(inRoot.*:XferInfo.*:SrcLayoutInfo.*:IsCalcOperation[]) AND LOWER(inRoot.*:XferInfo.*:SrcLayoutInfo.*:IsCalcOperation) = 'false' THEN
+					IF EXISTS(inRoot.*:XferInfo.*:ApprovalType[]) AND LOWER(inRoot.*:XferInfo.*:ApprovalType) = 'true' THEN
+					SET outRoot.Status = '√';
+					SET outRoot.CreateMode = 'N';
+					SET outRoot.BriefAnswer = 'N';
+					SET outRoot.DocumentType = '0';
+					
+					ELSEIF EXISTS(inRoot.*:XferInfo.*:ApprovalType[]) AND LOWER(inRoot.*:XferInfo.*:ApprovalType) = 'false' THEN
+					SET outRoot.Status = 'А';
+					SET outRoot.CreateMode = 'N';
+					SET outRoot.BriefAnswer = 'N';
+					SET outRoot.DocumentType = '0';
+					END IF;
+					SET outRoot.Id = inRoot.*:XferInfo.*:SrcLayoutInfo.*:WriteDownOperation.*:OperationName;
+				--ELSEIF EXISTS(inRoot.*:XferInfo.*:SrcLayoutInfo.*:IsCalcOperation[]) AND LOWER(inRoot.*:XferInfo.*:SrcLayoutInfo.*:IsCalcOperation) = 'true' THEN
+					--SET outRoot.Status = 'А';
+				END IF;
+		/*
+			IF EXISTS(inRoot.*:XferInfo.*:SrcLayoutInfo.*:IsCalcOperation[]) AND LOWER(inRoot.*:XferInfo.*:SrcLayoutInfo.*:IsCalcOperation) = 'false' THEN
+				SET outRoot.Status = '√';
+				SET outRoot.Id = inRoot.*:XferInfo.*:SrcLayoutInfo.*:WriteDownOperation.*:OperationName;
+			ELSEIF EXISTS(inRoot.*:XferInfo.*:SrcLayoutInfo.*:IsCalcOperation[]) AND LOWER(inRoot.*:XferInfo.*:SrcLayoutInfo.*:IsCalcOperation) = 'true' THEN
+				SET outRoot.Status = 'А';
+			END IF;
+		*/
+		ELSE
+			SET outRoot.Purpose						= 'Transfer from ABS ' || inRoot.*:XferInfo.*:DepAcctIdFrom.*:AcctId || ' (' ||COALESCE(inRoot.*:XferInfo.*:Purpose,' ') || ')';
+		END IF;		
+				
+		SET outRoot.Amount						= inRoot.*:XferInfo.*:CurAmt;
+		SET outRoot.Currency					= inRoot.*:XferInfo.*:AcctCur;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardAddSMSRq
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardAddSMSRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZCardAddSMSRq';
+ 
+		SET outRoot.RqUID							= inRoot.*:RqUID;
+		SET outRoot.RqTm							= inRoot.*:RqTm;
+		SET outRoot.OperUID							= inRoot.*:OperUID;
+		SET outRoot.SPName							= 'BP_ERIB';
+		SET outRoot.RegNumber		      		    = inRoot.*:OperUID;
+		SET outRoot.ClientNumber		      		= inRoot.*:CustId.*:CustPermId;
+		SET outRoot.BankInfo.RbTbBrchId				= inRoot.*:BankInfo.*:RbTbBrchId;
+		SET outRoot.CardAcctId.SystemId				= inRoot.*:CardAcctId.*:SystemId;
+		SET outRoot.CardAcctId.CardNum				= inRoot.*:CardAcctId.*:CardNum;
+		SET outRoot.CardAcctId.AddrSMS				= inRoot.*:CardAcctId.*:AddrSMS;
+		SET outRoot.CardAcctId.BankInfo.RbTbBrchId	= inRoot.*:CardAcctId.*:BankInfo.*:RbTbBrchId;
+
+		SET Environment.UserProperties.OperUID    	= inRoot.*:OperUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardChangeSMSRq
+   	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardChangeSMSRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZCardChangeSMSRq';
+ 		
+		SET outRoot.RqUID							= inRoot.*:RqUID;
+		SET outRoot.RqTm							= inRoot.*:RqTm;
+		SET outRoot.OperUID							= inRoot.*:OperUID;
+		SET outRoot.SPName							= 'BP_ERIB';
+		SET outRoot.BankInfo.RbTbBrchId				= inRoot.*:BankInfo.*:RbTbBrchId;
+		SET outRoot.CustId.CustPermId				= inRoot.*:CustId.*:CustPermId;
+		SET outRoot.CardAcctId.SystemId				= inRoot.*:CardAcctId.*:SystemId;
+		SET outRoot.CardAcctId.CardNum				= inRoot.*:CardAcctId.*:CardNum;
+		SET outRoot.CardAcctId.AddrSMS				= inRoot.*:CardAcctId.*:AddrSMS;
+		SET outRoot.CardAcctId.BankInfo.RbTbBrchId	= inRoot.*:CardAcctId.*:BankInfo.*:RbTbBrchId;
+		SET outRoot.AddrSMSChk						= inRoot.*:AddrSMSChk;
+		SET outRoot.PhoneIdentity					= inRoot.*:PhoneIdentity;
+
+		SET Environment.UserProperties.OperUID    	= inRoot.*:OperUID;
+		SET Environment.UserProperties.RqUID		= outRoot.RqUID;		
+		SET Environment.UserProperties.RbTbBrchId 	= outRoot.BankInfo.RbTbBrchId;
+		SET Environment.UserProperties.CustPermId 	= outRoot.CustId.CustPermId;
+		SET Environment.UserProperties.SystemId		= outRoot.CardAcctId.SystemId;
+		SET Environment.UserProperties.CardNum		= outRoot.CardAcctId.CardNum;
+		SET Environment.UserProperties.AddrSMS		= outRoot.CardAcctId.AddrSMS;
+		SET Environment.UserProperties.AddrSMSChk	= outRoot.AddrSMSChk;
+		SET Environment.UserProperties.RegNumber	= outRoot.OperUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+ * Интерфейс CRLIMLIST отображение списка лимитов u06068 24.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardLimListRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardLimListRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWayCardLimListRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName; 
+				
+		SET outRoot.ContractNumber  			= inRoot.*:CardAcctId.*:CardNum;
+				
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс CRLIMENABLE включение лимита u06068 25.12.2014 
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardLimEnableRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardLimEnableRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWayCardLimEnableRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName; 
+		
+		IF EXISTS(inRoot.*:CustId.*:CustPermId[]) AND inRoot.*:CustId.*:CustPermId <> '' THEN
+			SET outRoot.ClientNumber				= inRoot.*:CustId.*:CustPermId;	
+		ELSE
+			SET outRoot.ClientNumber				= '<<<NONE>>>';
+		END IF;
+				
+		SET outRoot.ContractNumber  			= inRoot.*:CardAcctId.*:CardNum;
+		SET outRoot.LimitCode					= inRoot.*:CardLimList.*:LimItem.*:LimCode;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс CRLIMDISABLE отключение лимита u06068 25.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardLimDisableRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardLimDisableRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';  
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWayCardLimDisableRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName; 
+		
+		IF EXISTS(inRoot.*:CustId.*:CustPermId[]) AND inRoot.*:CustId.*:CustPermId <> '' THEN
+			SET outRoot.ClientNumber				= inRoot.*:CustId.*:CustPermId;	
+		ELSE
+			SET outRoot.ClientNumber				= '<<<NONE>>>';
+		END IF;
+				
+		SET outRoot.ContractNumber  			= inRoot.*:CardAcctId.*:CardNum;
+		SET outRoot.LimitCode					= inRoot.*:CardLimList.*:LimItem.*:LimCode;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardLimEditRq
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN	 	 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardLimEditRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWayCardLimEditRq';		
+					
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName; 
+		
+		SET outRoot.BankInfo.RbTbBrchId				= inRoot.*:BankInfo.*:RbTbBrchId;
+		SET outRoot.CardAcctId.SystemId				= inRoot.*:CardAcctId.*:SystemId;
+		SET outRoot.CardAcctId.CardNum				= inRoot.*:CardAcctId.*:CardNum;
+		SET outRoot.CardAcctId.BankInfo.RbBrchId	= inRoot.*:CardAcctId.*:BankInfo.*:RbBrchId;
+		SET outRoot.CardLimList.LimItem.LimId		= inRoot.*:CardLimList.*:LimItem.*:LimId;
+		SET outRoot.CardLimList.LimItem.LimCode		= inRoot.*:CardLimList.*:LimItem.*:LimCode;
+		SET outRoot.CardLimList.LimItem.LimVal		= inRoot.*:CardLimList.*:LimItem.*:LimVal;
+		SET outRoot.CardLimList.LimItem.LimValCurr	= inRoot.*:CardLimList.*:LimItem.*:LimValCurr;
+		SET outRoot.CardLimList.LimItem.LimPrevDate	= inRoot.*:CardLimList.*:LimItem.*:LimPrevDate;
+		SET outRoot.CardLimList.LimItem.LimLastDate	= inRoot.*:CardLimList.*:LimItem.*:LimLastDate;
+		IF EXISTS(inRoot.*:CustId.*:CustPermId[]) AND inRoot.*:CustId.*:CustPermId <> '' THEN
+			SET outRoot.ClientNumber				= inRoot.*:CustId.*:CustPermId;	
+		ELSE
+			SET outRoot.ClientNumber				= '<<<NONE>>>';
+		END IF;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardOffSMSRq
+   	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardOffSMSRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZCardOffSMSRq';
+ 
+		SET outRoot.RqUID							= inRoot.*:RqUID;
+		SET outRoot.RqTm							= inRoot.*:RqTm;
+		SET outRoot.OperUID							= inRoot.*:OperUID;
+		SET outRoot.SPName							= 'BP_ERIB';
+		SET outRoot.BankInfo.RbBrchId				= inRoot.*:BankInfo.*:RbBrchId;
+		SET outRoot.CustId.CustPermId				= inRoot.*:CustId.*:CustPermId;
+		SET outRoot.CardAcctId.SystemId				= inRoot.*:CardAcctId.*:SystemId;
+		SET outRoot.CardAcctId.CardNum				= inRoot.*:CardAcctId.*:CardNum;
+		SET outRoot.CardAcctId.BankInfo.RbBrchId	= inRoot.*:CardAcctId.*:BankInfo.*:RbBrchId;
+		SET outRoot.CardAcctId.AddrSMSChk						= inRoot.*:CardAcctId.*:AddrSMSChk;
+	
+		SET Environment.UserProperties.OperUID    	= inRoot.*:OperUID;
+		SET Environment.UserProperties.RqUID		= outRoot.RqUID;		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CreditGraphRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CreditGraphRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientPayScheduleRq';
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+
+		SET outRoot.AcctInfo.AcctId					= inRoot.*:LoanRec.*:LoanInfo.*:LoanAcctId.*:AcctId;
+
+		SET outRoot.AcctInfo.BankInfo.banks:BankId	= 'ABS'; -- inRoot.*:BankInfo.*:BranchId;
+		SET outRoot.CustId									= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:CustId;
+		SET outRoot.PersonInfo.Birthday						= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:Birthday;
+		SET outRoot.PersonInfo.BirthPlace					= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:BirthPlace;
+		SET outRoot.PersonInfo.TaxId						= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:TaxId;
+		SET outRoot.PersonInfo.Citizenship					= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:Citizenship;
+		SET outRoot.PersonInfo.PersonName.LastName			= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:PersonName.*:LastName;
+		SET outRoot.PersonInfo.PersonName.FirstName			= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:PersonName.*:FirstName;
+		SET outRoot.PersonInfo.PersonName.MiddleName		= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:PersonName.*:MiddleName;
+		SET outRoot.PersonInfo.IdentityCard.IdSeries		= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdSeries;
+		SET outRoot.PersonInfo.IdentityCard.IdNum			= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdNum;
+		SET outRoot.PersonInfo.IdentityCard.IssuedBy		= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IssuedBy;
+		SET outRoot.PersonInfo.IdentityCard.IssuedCode		= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IssuedCode;
+		SET outRoot.PersonInfo.IdentityCard.IssueDt			= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IssueDt;	
+		SET outRoot.PersonInfo.IdentityCard.ExpDt			= inRoot.*:LoanRec.*:LoanInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:ExpDt;
+		
+		SET outRoot.BankInfo.AgencyId						= inRoot.*:LoanRec.*:BankInfo.*:AgencyId;
+		SET outRoot.BankInfo.RegionId						= inRoot.*:LoanRec.*:BankInfo.*:RegionId;
+		SET outRoot.BankInfo.RbBrchId						= inRoot.*:LoanRec.*:BankInfo.*:RbBrchId;
+		
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.OperUID    = inRoot.*:OperUID;
+		SET Environment.UserProperties.AcctId     = inRoot.*:LoanAcctId.*:AcctId;
+		
+		--SET Environment.UserProperties.Original	  = InputRoot.XMLNSC.*:DoIFXRq.*:CreditGraphRq.*:LoanRec;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_AutoSubscriptionModRq
+   	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:AutoSubscriptionModRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZAutoSubscriptionModRq';
+
+		SET outRoot.RqUID = inRoot.*:RqUID;
+		SET outRoot.RqTm = inRoot.*:RqTm;
+		SET outRoot.OperUID = inRoot.*:RqUID;
+		SET outRoot.SPName = 'BP_ERIB';
+		 
+		SET outRoot.AutoPayments.AutoPayment.AutopayId 							= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionId.*:AutopayId;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.RequestId 				= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:RequestId;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.AutopayName 			= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:AutopayName;		
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.ExeEventCode 			= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:ExeEventCode;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.SummaKindCode 			= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:SummaKindCode;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.StartDate 				= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:StartDate;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.UpdateDate 			= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:UpdateDate;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.MaxSumWritePerMonth 	= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:MaxSumWritePerMonth;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.IrreducibleAmt 		= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:IrreducibleAmt;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.CurAmt 				= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:CurAmt;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.NextPayDate			= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:NextPayDate;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.ChannelType 			= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:ChannelType;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.SPNum 					= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:SPNum;		
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.BranchId 				= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:BankInfo.*:BranchId;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.AgencyId 				= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:BankInfo.*:AgencyId;
+		SET outRoot.AutoPayments.AutoPayment.AutoPayInfo.RegionId 				= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:BankInfo.*:RegionId;
+		
+		/*SET outRoot.AutoPayments.AutoPayment.Billing.Recipient.Requisites.TaxId			= inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:RecipientRec.*:TaxId;
+		SET outRoot.AutoPayments.AutoPayment.Billing.Recipient.Requisites.CorrAccount	= inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:RecipientRec.*:CorrAccount;
+		SET outRoot.AutoPayments.AutoPayment.Billing.Recipient.Requisites.BIC			= inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:RecipientRec.*:BIC;
+		SET outRoot.AutoPayments.AutoPayment.Billing.Recipient.Requisites.AcctId		= inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:RecipientRec.*:AcctId;*/
+		/*
+		SET outRoot.AutoPayments.AutoPayment.Billing.Source		= '65756876';
+		SET outRoot.AutoPayments.AutoPayment.Billing.Clazz		= ;
+		
+		SET outRoot.AutoPayments.AutoPayment.Billing.Body;
+		*/
+		
+		DECLARE recipient REFERENCE TO outRoot; 
+		
+		CREATE LASTCHILD OF outRoot AS recipient NAME 'RecipientRec';
+		
+		
+		SET recipient.CodeRecipientBS	=	inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:RecipientRec.*:CodeRecipientBS;
+		SET recipient.Name				=	inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:RecipientRec.*:Name;
+		SET recipient.TaxId				=	inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:RecipientRec.*:TaxId;
+		SET recipient.BIC				=	inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:RecipientRec.*:BIC;
+		SET recipient.AcctId			=	inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:RecipientRec.*:AcctId;
+		
+		SET outRoot.IsAutoPayment = inRoot.*:IsAutoPayment;
+		
+		DECLARE requisites REFERENCE TO recipient;	 
+		DECLARE requisite REFERENCE TO recipient;
+		
+		CREATE LASTCHILD OF recipient AS requisites NAME 'Requisites';
+		
+		FOR req AS inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:RecipientRec.*:Requisites.*:Requisite[] DO
+		
+		CREATE LASTCHILD OF requisites AS requisite NAME 'Requisite';
+		
+			SET requisite.NameVisible			=	req.*:NameVisible;
+			SET requisite.NameBS				=	req.*:NameBS;
+			SET requisite.Type					=	req.*:Type;
+			
+			IF NOT EXISTS(req.*:EnteredData.*:DataItem[]) THEN 
+				SET requisite.EnteredData.DataItem  =	req.*:DefaultValue;
+			ELSE
+				SET requisite.EnteredData.DataItem  =	req.*:EnteredData.*:DataItem;
+			END IF;
+		END FOR;		
+		
+		
+		-----------------------------------
+		SET outRoot.CardAcctId.CardNum 	= inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:BankAcctRec.*:CardAcctId.*:CardNum;
+		SET outRoot.CardAcctId.CardType = inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:BankAcctRec.*:CardAcctId.*:CardType;
+		SET outRoot.CardAcctId.EndDt 	= inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:BankAcctRec.*:CardAcctId.*:EndDt;
+		
+		SET outRoot.CardAcctId.CustId = inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:BankAcctRec.*:CardAcctId.*:CustInfo.*:CustId;
+		
+		SET outRoot.CardAcctId.CustId 		= inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:BankAcctRec.*:CardAcctId.*:CustInfo.*:CustId;
+		SET outRoot.CardAcctId.LastName 	= inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:BankAcctRec.*:CardAcctId.*:CustInfo.*:PersonInfo.*:PersonName.*:LastName;
+		SET outRoot.CardAcctId.FirstName 	= inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:BankAcctRec.*:CardAcctId.*:CustInfo.*:PersonInfo.*:PersonName.*:FirstName;
+		
+		SET outRoot.CardAcctId.AddrType = inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:BankAcctRec.*:CardAcctId.*:CustInfo.*:PersonInfo.*:ContactInfo.*:PostAddr.*:AddrType;
+		SET outRoot.CardAcctId.Addr3 	= inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:BankAcctRec.*:CardAcctId.*:CustInfo.*:PersonInfo.*:ContactInfo.*:PostAddr.*:Addr3;
+		SET outRoot.CardAcctId.RbBrchId = inRoot.*:AutoSubscriptionRec.*:AutoPaymentTemplate.*:BankAcctRec.*:CardAcctId.*:BankInfo.*:RbBrchId;
+				
+		SET outRoot.Execute				= inRoot.*:Execute;
+		SET outRoot.NeedConfirmation	= inRoot.*:NeedConfirmation;
+				
+		SET Environment.UserProperties.OperUID    	= inRoot.*:OperUID;
+		SET Environment.UserProperties.RqUID		= inRoot.*:RqUID;		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+/*
+ * Интерфейс GASL получения списка подписок по платежным инструментам u06068 13.01.2015	
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_GetAutoSubscriptionListRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:GetAutoSubscriptionListRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZIntegraAutoSubscriptionRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID		=	inRoot.*:RqUID;
+		SET outRoot.RqTm		=	inRoot.*:RqTm;
+		SET outRoot.OperUID		=	inRoot.*:OperUID;
+		SET outRoot.SPName		=	inRoot.*:SPName;
+		
+		DECLARE bankAcctRec REFERENCE TO outRoot;
+		
+		FOR bank AS inRoot.*:BankAcctRec[] DO
+		
+		CREATE LASTCHILD OF outRoot AS bankAcctRec NAME 'BankAcctRec';
+		
+		SET bankAcctRec.SystemId 	=	bank.*:CardAcctId.*:SystemId;
+		SET bankAcctRec.CardNum		=	bank.*:CardAcctId.*:CardNum;
+		SET bankAcctRec.AcctId		=	bank.*:CardAcctId.*:AcctId;
+		SET bankAcctRec.CardType	=	bank.*:CardAcctId.*:CardType;
+		SET bankAcctRec.EndDt		=	bank.*:CardAcctId.*:EndDt;
+		SET bankAcctRec.CustId		=	bank.*:CardAcctId.*:CustInfo.*:CustId;
+		SET bankAcctRec.RbBrchId	=	bank.*:CardAcctId.*:BankInfo.*:RbBrchId;
+		
+		END FOR;
+		
+		SET outRoot.AutopayStatus = inRoot.*:AutopayStatusList.*:AutopayStatus;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *	Интерфейс GAPL получения списка платежей по подписке u06068 15.01.2015
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_GetAutoPaymentListRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:GetAutoPaymentListRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZIntegraAutoPaymentListRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID		=	inRoot.*:RqUID;
+		SET outRoot.RqTm		=	inRoot.*:RqTm;
+		SET outRoot.OperUID		=	inRoot.*:OperUID;
+		SET outRoot.SPName		=	inRoot.*:SPName;
+		
+		SET outRoot.SystemId 			=	inRoot.*:AutoSubscriptionId.*:SystemId;
+		SET outRoot.AutopayId			=	inRoot.*:AutoSubscriptionId.*:AutopayId;
+		
+		DECLARE paymentStatus REFERENCE TO outRoot; 
+		
+		FOR items AS inRoot.*:PaymentStatusList.*:PaymentStatus[] DO
+			CREATE LASTCHILD OF outRoot AS paymentStatus NAME 'PaymentStatus'; 
+			SET paymentStatus	=	FIELDVALUE(items);
+		END FOR;		
+		
+		SET outRoot.StartDtTm			=	inRoot.*:SelRangeDtTm.*:StartDtTm;
+		SET outRoot.EndDtTm				=	inRoot.*:SelRangeDtTm.*:EndDtTm;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_Convert_CreditGetPayment
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:LoanPaymentRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientPayScheduleRq';
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+
+		SET outRoot.AcctInfo.AcctId					= inRoot.*:LoanAcctId.*:AcctId;
+		SET outRoot.AcctInfo.BankInfo.banks:BankId	= 'ABS'; -- inRoot.*:BankInfo.*:BranchId;
+
+		-- сохраним исходные данные запроса для использования при формировании ответа
+--		SET Environment.UserProperties.OperUID    = inRoot.*:OperUID;
+--		SET Environment.UserProperties.AcctId     = inRoot.*:LoanAcctId.*:AcctId;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_Convert_LoanCalcDebtRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:LoanPaymentRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetCalcLoanDeptRq';
+
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+--		SET outRoot.SPName	=	inRoot.SPName;
+		SET outRoot.SPName	=	'SBOLRS';
+
+		SET outRoot.CalcDate				= COALESCE(inRoot.*:LoanAcctId.*:DateCalc, CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd') ); 
+		SET outRoot.LoanId			   	    = inRoot.*:LoanAcctId.*:AgreemtNum;
+		
+		-- сохраним исходные данные запроса для использования при формировании ответа
+--		SET Environment.UserProperties.OperUID    = inRoot.*:OperUID;
+--		SET Environment.UserProperties.AcctCur    = inRoot.*:LoanAcctId.*:AcctCur;
+--		SET Environment.UserProperties.EffDt      = inRoot.*:LoanAcctId.*:DateCalc;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_FillMqRfh2usr_LoanPaymentRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_AutoSubscriptionStatusModRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:AutoSubscriptionStatusModRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZAutoSubscriptionStatusModRq';
+		SET outRoot.RqUID 		= inRoot.*:RqUID;
+		SET outRoot.RqTm 		= inRoot.*:RqTm;
+		SET outRoot.SPName 		= 'BP_ERIB';
+		SET outRoot.RbTbBrchId	= inRoot.*:BankInfo.*:RbTbBrchId;
+		SET outRoot.SystemId	= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionId.*:SystemId;
+		SET outRoot.AutopayId 	= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionId.*:AutopayId;
+		SET outRoot.RequestId	= inRoot.*:AutoSubscriptionRec.*:AutoSubscriptionInfo.*:RequestId;
+		SET outRoot.ActionType 	= inRoot.*:ActionType;
+		SET outRoot.NeedConfirmation 	= inRoot.*:NeedConfirmation;
+		SET Environment.UserProperties.OperUID    	= inRoot.*:OperUID;
+		SET Environment.UserProperties.RqUID		= inRoot.*:RqUID;	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *	Интерфейс GAPDI получения детальной информации по платежам -u06068 23.02.2015
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_GetAutoPaymentDetailInfoRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:GetAutoPaymentDetailInfoRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZIntegraAutoPaymentDetailInfoRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID		=	inRoot.*:RqUID;
+		SET outRoot.RqTm		=	inRoot.*:RqTm;
+		SET outRoot.OperUID		=	inRoot.*:OperUID;
+		SET outRoot.SPName		=	inRoot.*:SPName;
+		
+		DECLARE autoSubId REFERENCE TO outRoot;
+		
+		FOR items AS inRoot.*:AutoPaymentId[] DO
+		
+			CREATE LASTCHILD OF outRoot AS autoSubId NAME 'AutoSubscriptionId';
+		
+			--SET autoSubId.SystemId	= items.SystemId;
+			SET autoSubId.PaymentId	= items.*:PaymentId;		
+		
+		END FOR;		
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс GASDI получения детальной информации по подписке u06068 23.02.2015 
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_GetAutoSubscriptionDetailInfoRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:GetAutoSubscriptionDetailInfoRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZIntegraAutoSubscriptionDetailInfoRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID		=	inRoot.*:RqUID;
+		SET outRoot.RqTm		=	inRoot.*:RqTm;
+		SET outRoot.OperUID		=	inRoot.*:OperUID;
+		SET outRoot.SPName		=	inRoot.*:SPName;
+		
+		DECLARE autoSubId REFERENCE TO outRoot;
+		 
+		FOR items AS inRoot.*:AutoSubscriptionId[] DO
+		
+			CREATE LASTCHILD OF outRoot AS autoSubId NAME 'AutoSubscriptionId';
+		
+			SET autoSubId.SystemId	= items.*:SystemId;
+			SET autoSubId.AutopayId	= items.*:AutopayId;		
+		
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_DefineServices
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*[<];
+		
+		DECLARE count_services INTEGER CARDINALITY(inRoot.*:AcctType[]);	
+		
+		CASE count_services
+		WHEN 4 THEN 			
+			PROPAGATE TO TERMINAL 'out';
+		WHEN 3 THEN
+			PROPAGATE TO TERMINAL 'out1';
+		WHEN 2 THEN
+			PROPAGATE TO TERMINAL 'out2';
+		WHEN 1 THEN
+			PROPAGATE TO TERMINAL 'out3';		
+		END CASE;
+		
+		RETURN FALSE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_SpreadService_3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*[<];
+		
+		--DECLARE count_services INTEGER CARDINALITY(inRoot.*:AcctType[]);
+		
+		DECLARE firstService CHARACTER;
+		
+		SET firstService = FIELDVALUE(inRoot.*:AcctType[1]);
+		
+		CASE firstService
+		WHEN 'IMA' THEN 			
+			PROPAGATE TO TERMINAL 'out';
+		WHEN 'Deposit' THEN
+			PROPAGATE TO TERMINAL 'out1';
+		WHEN 'Credit' THEN
+			PROPAGATE TO TERMINAL 'out2';
+		WHEN 'Card' THEN
+			PROPAGATE TO TERMINAL 'out3';	
+		END CASE; 
+		
+		RETURN FALSE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_SpreadService_2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*[<];
+		
+		--DECLARE count_services INTEGER CARDINALITY(inRoot.*:AcctType[]);
+		
+		DECLARE firstService CHARACTER;
+		DECLARE secondService CHARACTER;
+		
+		SET firstService = FIELDVALUE(inRoot.*:AcctType[1]);
+		SET secondService = FIELDVALUE(inRoot.*:AcctType[2]);
+		
+		IF (firstService = 'IMA' AND secondService = 'Deposit') OR (firstService = 'Deposit' AND secondService = 'IMA') THEN
+			PROPAGATE TO TERMINAL 'out1';
+		ELSEIF (firstService = 'IMA' AND secondService = 'Credit') OR (firstService = 'Credit' AND secondService = 'IMA') THEN
+			PROPAGATE TO TERMINAL 'out';
+		ELSEIF (firstService = 'IMA' AND secondService = 'Card') OR (firstService = 'Card' AND secondService = 'IMA') THEN
+			PROPAGATE TO TERMINAL 'out2';
+		ELSEIF (firstService = 'Deposit' AND secondService = 'Credit') OR (firstService = 'Credit' AND secondService = 'Deposit') THEN
+			PROPAGATE TO TERMINAL 'out1';
+		ELSEIF (firstService = 'Deposit' AND secondService = 'Card') OR (firstService = 'Card' AND secondService = 'Deposit') THEN
+			PROPAGATE TO TERMINAL 'out2';
+		ELSEIF (firstService = 'Credit' AND secondService = 'Card') OR (firstService = 'Card' AND secondService = 'Credit') THEN
+			PROPAGATE TO TERMINAL 'out3';			
+		END IF;
+		
+		RETURN FALSE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_SpreadService_1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- CALL CopyMessageHeaders();
+		-- CALL CopyEntireMessage();
+		
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*[<];
+		
+		--DECLARE count_services INTEGER CARDINALITY(inRoot.*:AcctType[]);
+		
+		DECLARE firstService CHARACTER;
+		DECLARE secondService CHARACTER;
+		DECLARE thirdService CHARACTER;
+		
+		SET firstService = FIELDVALUE(inRoot.*:AcctType[1]);
+		SET secondService = FIELDVALUE(inRoot.*:AcctType[2]);
+		SET thirdService = FIELDVALUE(inRoot.*:AcctType[3]);
+		
+		IF (firstService = 'IMA' AND secondService = 'Deposit' AND thirdService = 'Credit') 
+		OR (firstService = 'IMA' AND secondService = 'Credit'  AND thirdService = 'Deposit') 
+		OR (firstService = 'Deposit' AND secondService = 'IMA'  AND thirdService = 'Credit') 
+		OR (firstService = 'Deposit' AND secondService = 'Credit'  AND thirdService = 'IMA') 
+		OR (firstService = 'Credit' AND secondService = 'IMA'  AND thirdService = 'Deposit') 
+		OR (firstService = 'Credit' AND secondService = 'Deposit'  AND thirdService = 'IMA') THEN
+			PROPAGATE TO TERMINAL 'out1';
+		ELSEIF (firstService = 'Deposit' AND secondService = 'Credit' AND thirdService = 'Card')
+		OR (firstService = 'Deposit' AND secondService = 'Card' AND thirdService = 'Credit')
+		OR (firstService = 'Deposit' AND secondService = 'Card' AND thirdService = 'IMA') 
+		OR (firstService = 'Credit' AND secondService = 'Deposit' AND thirdService = 'Card') 
+		OR (firstService = 'Credit' AND secondService = 'Card' AND thirdService = 'Deposit') 
+		OR (firstService = 'Card' AND secondService = 'Deposit' AND thirdService = 'Credit') 
+		OR (firstService = 'Card' AND secondService = 'Credit' AND thirdService = 'Deposit') THEN
+			PROPAGATE TO TERMINAL 'out';
+		ELSEIF (firstService = 'IMA' AND secondService = 'Credit' AND thirdService = 'Card')
+		OR (firstService = 'IMA' AND secondService = 'Card' AND thirdService = 'Credit') 
+		OR (firstService = 'Credit' AND secondService = 'Card' AND thirdService = 'IMA') 
+		OR (firstService = 'Credit' AND secondService = 'IMA' AND thirdService = 'Card') 
+		OR (firstService = 'Card' AND secondService = 'IMA' AND thirdService = 'Credit') 
+		OR (firstService = 'Card' AND secondService = 'Credit' AND thirdService = 'IMA') THEN
+			PROPAGATE TO TERMINAL 'out';		
+		END IF;
+		
+		RETURN FALSE;
+
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_LoanAcctOnly
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:BankAcctInqRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountListRq';
+				
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		-- TODO: check SPName assignment!
+		SET outRoot.RqUID  = inRoot.*:RqUID;
+		SET outRoot.SPName = inRoot.*:SPName;
+		SET outRoot.RegNumber = inRoot.*:OperUID;
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'IIN';
+		SET curElm.Value = inRoot.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdNum;
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'CUSTCODE';
+		SET curElm.Value = inRoot.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdType;
+		
+		SET outRoot.ServiceAttr.AttrId = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = '00';
+		/*
+		FOR parm AS inRoot.MsgData.Information.ResultDtls.Filter.ParmsInfo.Parm[] DO
+			IF parm.ParmCode = 'ACC_TYPE' THEN
+				DECLARE paramValue CHARACTER FIELDVALUE(parm.Value); 
+				WHILE CONTAINS(paramValue,',') DO
+					DECLARE oneParam CHARACTER SUBSTRING(paramValue BEFORE ',');
+					SET paramValue = SUBSTRING(paramValue AFTER ',');
+					CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE oneParam;	
+				END WHILE;
+				CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE paramValue;				
+			END IF;
+		END FOR;
+		*/
+		CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_CREDIT';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_AcctGetOnly
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:BankAcctInqRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountListRq';
+				
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		-- TODO: check SPName assignment!
+		SET outRoot.RqUID  = inRoot.*:RqUID;
+		SET outRoot.SPName = inRoot.*:SPName;
+		SET outRoot.RegNumber = inRoot.*:OperUID;
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'IIN';
+		SET curElm.Value = inRoot.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdNum;
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'CUSTCODE';
+		SET curElm.Value = inRoot.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdType;
+		
+		SET outRoot.ServiceAttr.AttrId = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = '00';
+		/*
+		FOR parm AS inRoot.MsgData.Information.ResultDtls.Filter.ParmsInfo.Parm[] DO
+			IF parm.ParmCode = 'ACC_TYPE' THEN
+				DECLARE paramValue CHARACTER FIELDVALUE(parm.Value); 
+				WHILE CONTAINS(paramValue,',') DO
+					DECLARE oneParam CHARACTER SUBSTRING(paramValue BEFORE ',');
+					SET paramValue = SUBSTRING(paramValue AFTER ',');
+					CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE oneParam;	
+				END WHILE;
+				CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE paramValue;				
+			END IF;
+		END FOR;
+		*/
+		CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_ACCOUNT';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *   Интерфейс CRERNROLL регистрации по номеру карты u06068 -- 03/04/2015 Запрос из SBOLRS -> WAY4 KZWayClientInqRq
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardEnrollmentRq_01
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardEnrollmentRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWayClientInqRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName; 
+				
+		SET outRoot.ContractNumber  			= inRoot.*:CardAcctRec.*:CardAcctId.*:CardNum;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *   Интерфейс CRERNROLL регистрации по номеру карты u06068 -- 03/04/2015 Запрос из SBOLRS -> WAY4 KZWayGetPhoneRq
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardEnrollmentRq_02
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardEnrollmentRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWayGetPhoneRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName; 
+				
+		SET outRoot.ContractNumber  			= inRoot.*:CardAcctRec.*:CardAcctId.*:CardNum;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_RequestFOR_ABS
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+			CALL CopyMessageHeaders(InputRoot,OutputRoot);
+			DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:BillingPayPrepRq;
+		 	
+		    CALL FillMDOStandardElementsRq(inRef, OutputRoot, 'KZGetClientInfoRq');
+			DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:*[<];
+			
+			--SET outRef.BankInfo.banks:RegionId	=  '09';	
+			SET outRef.SPName	=	'SBOL';
+			
+			CREATE FIELD outRef.PersonInfo;
+			DECLARE idExt REFERENCE TO outRef;
+			--DECLARE idMABPK CHARACTER inRef.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdNum;
+			--DECLARE idIIN CHARACTER FIELDVALUE(inRef.*:CLIENTID);
+			/*
+			IF idIIN IS NOT NULL THEN
+				CREATE LASTCHILD OF outRef.PersonInfo AS idExt NAME 'PersonIdExt';
+				SET idExt.Key 			= 'IIN';
+				SET idExt.Value			= inRef.CLIENTID;
+			END IF;
+			*/
+
+			CREATE LASTCHILD OF outRef.PersonInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key 			= 'IIN';
+			
+			FOR attr AS inRef.*:RecipientRec.*:Requisites.*:Requisite[] DO
+				IF attr.*:NameBS = 'Target' THEN
+				 	SET idExt.Value			= attr.*:EnteredData.*:DataItem;
+				END IF;
+			END FOR;				
+
+			SET outRef.PersonInfoOnly 	= '1';	 
+		 
+			SET Environment.UserProperties.Source.MQMD 			= InputRoot.MQMD;
+			SET Environment.UserProperties.Source.MQRFH2 		= InputRoot.MQRFH2;
+			SET Environment.UserProperties.Source.Properties	= InputRoot.Properties;
+			SET Environment.UserProperties.Source.Body 			= CAST(ASBITSTREAM(InputRoot.XMLNSC CCSID 1208) AS CHARACTER CCSID 1208);	
+			
+			/*SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+			SET Environment.UserProperties.OperName = inRoot.*:OperName; */
+					
+			--SET outRoot.ContractNumber  			= inRoot.*:CardAcctRec.*:CardAcctId.*:CardNum;
+			
+			RETURN TRUE;
+	END;
+END MODULE;
+
+/* u06068 Интерфейс DCA. Проверка возможности открытия вклад клиентом.
+
+   Интерфейс отрабатывает непосредственно перед началом процедуры открытия вклада - проверяет возможность открытия вклада клиентом, 
+   а так же возвращает результаты проверок и филиал (подразделение) на котором ведется карточка клиента в АБИС QPragma.
+
+   13.05.2015 17:03
+
+ */
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_DepChkAddRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:DepChkAddRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZDepChkAddRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName; 
+		
+		SET outRoot.RbTbBrchId	= inRoot.*:BankInfo.*:RbTbBrchId;
+		SET outRoot.TaxId		= inRoot.*:CustRec.*:CustInfo.*:PersonInfo.*:TaxId;
+		SET outRoot.Birthday	= inRoot.*:CustRec.*:CustInfo.*:PersonInfo.*:Birthday;
+		
+		SET outRoot.LastName	= inRoot.*:CustRec.*:CustInfo.*:PersonInfo.*:PersonName.*:LastName;
+		SET outRoot.FirstName	= inRoot.*:CustRec.*:CustInfo.*:PersonInfo.*:PersonName.*:FirstName;
+		SET outRoot.MiddleName	= inRoot.*:CustRec.*:CustInfo.*:PersonInfo.*:PersonName.*:MiddleName;
+		
+		SET outRoot.IdType		= inRoot.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdType;
+		SET outRoot.IdSeries	= inRoot.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdSeries;
+		SET outRoot.IdNum		= inRoot.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IdNum;	
+		SET outRoot.IssuedBy	= inRoot.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IssuedBy;
+		SET outRoot.IssuedCode	= inRoot.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IssuedCode;
+		SET outRoot.IssueDt		= inRoot.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:IssueDt;
+		SET outRoot.ExpDt		= inRoot.*:CustRec.*:CustInfo.*:PersonInfo.*:IdentityCard.*:ExpDt;
+				
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Done by Djapenov Aydar
+ 	
+   Интерфейс NDAF. Открытие вклада с переводом на него денежных средств с карты\текущего счета.
+   
+   Интерфейс позволяет осуществить открытие вклада с пополнением в АБИС Qpragma, согласно выбранным и заполненным клиентом параметрам. 
+   Пополнение вклада доступно, как с карты (в любой валюте), так и с текущего счета (при наличии счета в валюте открываемого вклада). 	
+ 
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_NewDepAddFillRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:NewDepAddFillRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZNewDepAddFillRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET outRoot.RbTbBrchId = inRoot.*:BankInfo.*:RbTbBrchId;
+		
+		SET outRoot.AcctType   		 				= inRoot.*:XferInfo.*:AcctType;	
+		
+		SET outRoot.CardAcctIdFrom.SystemId	     	= inRoot.*:XferInfo.*:CardAcctIdFrom.*:SystemId;	
+		SET outRoot.CardAcctIdFrom.CardNum			= inRoot.*:XferInfo.*:CardAcctIdFrom.*:CardNum;	
+		SET outRoot.CardAcctIdFrom.EndDt			= inRoot.*:XferInfo.*:CardAcctIdFrom.*:EndDt;	
+		SET outRoot.CardAcctIdFrom.RbBrchId		 	= inRoot.*:XferInfo.*:CardAcctIdFrom.*:BankInfo.*:RbBrchId;	
+		
+		SET outRoot.OperRRN							= inRoot.*:OperRRN;	
+		
+		SET outRoot.DepAcctIdFrom.SystemId   		= COALESCE(inRoot.*:XferInfo.*:DepAcctIdFrom.*:SystemId,NULL);	
+		SET outRoot.DepAcctIdFrom.AcctId   			= COALESCE(inRoot.*:XferInfo.*:DepAcctIdFrom.*:AcctId,NULL);	
+		SET outRoot.DepAcctIdFrom.RbBrchId   		= COALESCE(inRoot.*:XferInfo.*:DepAcctIdFrom.*:BankInfo.*:RbBrchId,NULL);
+			
+		SET outRoot.DepAcctIdTo.IsInterestToCard	= inRoot.*:XferInfo.*:DepAcctIdTo.*:VariantInterestPayment.*:IsInterestToCard;
+		SET outRoot.DepAcctIdTo.CardNumber			= inRoot.*:XferInfo.*:DepAcctIdTo.*:VariantInterestPayment.*:CardNumber;
+		SET outRoot.DepAcctIdTo.BranchId			= inRoot.*:XferInfo.*:DepAcctIdTo.*:BankInfo.*:BranchId;
+		SET outRoot.DepAcctIdTo.AgencyId			= inRoot.*:XferInfo.*:DepAcctIdTo.*:BankInfo.*:AgencyId;
+		
+		SET outRoot.AgreemtInfo.AgreemtType			= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:AgreemtType;
+		SET outRoot.AgreemtInfo.AcctCode			= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:AcctCode;
+		SET outRoot.AgreemtInfo.CurAmt				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:CurAmt;
+		SET outRoot.AgreemtInfo.AcctCur				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:AcctCur;
+		SET outRoot.AgreemtInfo.AddDt				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:AddDt;
+		SET outRoot.AgreemtInfo.MatDt				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:MatDt;
+		SET outRoot.AgreemtInfo.Term				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:Term;
+		SET outRoot.AgreemtInfo.Rate				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:Rate;
+		SET outRoot.AgreemtInfo.EffRate				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:EffRate;
+		SET outRoot.AgreemtInfo.IrreducibleAmt		= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:IrreducibleAmt;
+		SET outRoot.AgreemtInfo.ProfitPeriod		= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:ProfitPeriod;
+		SET outRoot.AgreemtInfo.TaxId				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:TaxId;
+		SET outRoot.AgreemtInfo.Birthday			= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:Birthday;
+		
+		SET outRoot.AgreemtInfo.PersonName.LastName			= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:PersonName.*:LastName;
+		SET outRoot.AgreemtInfo.PersonName.FirstName		= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:PersonName.*:FirstName;
+		SET outRoot.AgreemtInfo.PersonName.MiddleName		= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:PersonName.*:MiddleName;
+		
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName;
+		SET Environment.UserProperties.OperRRN	= inRoot.*:OperRRN;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Done by Djapenov Aydar u06068 
+   Разделение логики на создание вклада   
+ */
+CREATE COMPUTE MODULE HTTPRequestForESB_CardOrAccount
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:NewDepAddFillRq;
+				
+		--SET outRoot.AcctType   		 				= inRoot.*:XferInfo.*:AcctType;	
+		
+		IF FIELDVALUE(inRoot.*:XferInfo.*:AcctType) = 'Card' THEN
+			
+			SET OutputRoot = InputRoot;
+			PROPAGATE TO TERMINAL 'out1';
+			RETURN FALSE; 
+		
+		ELSE
+			
+			SET OutputRoot = InputRoot;
+			PROPAGATE TO TERMINAL 'out';
+			RETURN FALSE;
+					
+		END IF;
+
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName;
+		
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_NewDepAddFillRq_Card
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:NewDepAddFillRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWayToQPragmaNewDepRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET outRoot.RbTbBrchId = inRoot.*:BankInfo.*:RbTbBrchId;
+		
+		SET outRoot.AcctType   		 				= inRoot.*:XferInfo.*:AcctType;	
+		
+		SET outRoot.CardAcctIdFrom.SystemId	     	= inRoot.*:XferInfo.*:CardAcctIdFrom.*:SystemId;	
+		SET outRoot.CardAcctIdFrom.CardNum			= inRoot.*:XferInfo.*:CardAcctIdFrom.*:CardNum;	
+		SET outRoot.CardAcctIdFrom.EndDt			= inRoot.*:XferInfo.*:CardAcctIdFrom.*:EndDt;	
+		SET outRoot.CardAcctIdFrom.RbBrchId		 	= inRoot.*:XferInfo.*:CardAcctIdFrom.*:BankInfo.*:RbBrchId;	
+		
+		SET outRoot.OperRRN							= inRoot.*:OperRRN;	
+		
+		SET outRoot.DepAcctIdFrom.SystemId   		= COALESCE(inRoot.*:XferInfo.*:DepAcctIdFrom.*:SystemId,NULL);	
+		SET outRoot.DepAcctIdFrom.AcctId   			= COALESCE(inRoot.*:XferInfo.*:DepAcctIdFrom.*:AcctId,NULL);	
+		SET outRoot.DepAcctIdFrom.RbBrchId   		= COALESCE(inRoot.*:XferInfo.*:DepAcctIdFrom.*:BankInfo.*:RbBrchId,NULL);
+			
+		SET outRoot.DepAcctIdTo.IsInterestToCard	= inRoot.*:XferInfo.*:DepAcctIdTo.*:VariantInterestPayment.*:IsInterestToCard;
+		SET outRoot.DepAcctIdTo.CardNumber			= inRoot.*:XferInfo.*:DepAcctIdTo.*:VariantInterestPayment.*:CardNumber;
+		SET outRoot.DepAcctIdTo.BranchId			= inRoot.*:XferInfo.*:DepAcctIdTo.*:BankInfo.*:BranchId;
+		SET outRoot.DepAcctIdTo.AgencyId			= inRoot.*:XferInfo.*:DepAcctIdTo.*:BankInfo.*:AgencyId;
+		
+		SET outRoot.AgreemtInfo.AgreemtType			= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:AgreemtType;
+		SET outRoot.AgreemtInfo.AcctCode			= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:AcctCode;
+		SET outRoot.AgreemtInfo.CurAmt				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:CurAmt;
+		SET outRoot.AgreemtInfo.AcctCur				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:AcctCur;
+		SET outRoot.AgreemtInfo.AddDt				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:AddDt;
+		SET outRoot.AgreemtInfo.MatDt				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:MatDt;
+		SET outRoot.AgreemtInfo.Term				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:Term;
+		SET outRoot.AgreemtInfo.Rate				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:Rate;
+		SET outRoot.AgreemtInfo.EffRate				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:EffRate;
+		SET outRoot.AgreemtInfo.IrreducibleAmt		= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:IrreducibleAmt;
+		SET outRoot.AgreemtInfo.ProfitPeriod		= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:ProfitPeriod;
+		SET outRoot.AgreemtInfo.TaxId				= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:TaxId;
+		SET outRoot.AgreemtInfo.Birthday			= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:Birthday;
+		
+		SET outRoot.AgreemtInfo.PersonName.LastName			= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:PersonName.*:LastName;
+		SET outRoot.AgreemtInfo.PersonName.FirstName		= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:PersonName.*:FirstName;
+		SET outRoot.AgreemtInfo.PersonName.MiddleName		= inRoot.*:XferInfo.*:DepAcctIdTo.*:AgreemtInfo.*:DepInfo.*:CustRec.*:CustInfo.*:PersonInfo.*:PersonName.*:MiddleName;
+		
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName;
+		SET Environment.UserProperties.OperRRN	= inRoot.*:OperRRN;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardListPhoneRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardListPhoneRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZCardListPhoneRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName; 
+		
+		SET outRoot.PhoneNumber	= inRoot.*:CardAcctRec.*:PhoneNumber;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CardEnrollmentRq_03
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRq.*:CardEnrollmentRq;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWayUpdateClientRq';		
+		
+		--CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		
+		SET Environment.UserProperties.OperUID  = inRoot.*:OperUID;
+		SET Environment.UserProperties.OperName = inRoot.*:OperName; 
+				
+		SET outRoot.ContractNumber  			= inRoot.*:CardAcctRec.*:CardAcctId.*:CardNum;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

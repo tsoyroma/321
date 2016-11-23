@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:tns="http://www.croc.ru/sbrf/router/config/xml/ControlMessage" targetNamespace="http://www.croc.ru/sbrf/router/config/xml/ControlMessage" elementFormDefault="qualified">
+	<xsd:element name="ControlMessage">
+		<xsd:complexType>
+			<xsd:sequence>
+				<xsd:choice>
+					<xsd:element ref="tns:ConfigRequest"/>
+					<xsd:element ref="tns:RoutingConfig"/>
+					<xsd:element ref="tns:Acknowledgement"/>
+				</xsd:choice>
+				<xsd:element ref="tns:Hash" minOccurs="0"/>
+			</xsd:sequence>
+		</xsd:complexType>
+	</xsd:element>
+	<xsd:element name="ConfigRequest">
+		<xsd:complexType>
+			<xsd:sequence>
+				<xsd:element ref="tns:Router"/>
+				<xsd:element ref="tns:RequestedBy"/>
+			</xsd:sequence>
+		</xsd:complexType>
+	</xsd:element>
+	<xsd:element name="RoutingConfig">
+		<xsd:complexType>
+			<xsd:sequence>
+				<xsd:element ref="tns:Route" maxOccurs="unbounded"/>
+			</xsd:sequence>
+		</xsd:complexType>
+	</xsd:element>
+	<xsd:element name="Acknowledgement">
+		<xsd:complexType>
+			<xsd:sequence>
+				<xsd:element ref="tns:Router"/>
+				<xsd:element ref="tns:Status"/>
+				<xsd:element ref="tns:Message"/>
+				<xsd:element ref="tns:SynchDate"/>
+			</xsd:sequence>
+		</xsd:complexType>
+	</xsd:element>
+	<xsd:element name="Router" type="xsd:string"/>
+	<xsd:element name="RequestedBy" type="xsd:string"/>
+	<xsd:element name="Status">
+		<xsd:simpleType>
+			<xsd:restriction base="xsd:string">
+				<xsd:enumeration value="Initial"/>
+				<xsd:enumeration value="Config requested"/>
+				<xsd:enumeration value="Message send failed"/>
+				<xsd:enumeration value="Waiting Acknowledgement"/>
+				<xsd:enumeration value="Synchronized successfully"/>
+				<xsd:enumeration value="Synchronization failed"/>
+			</xsd:restriction>
+		</xsd:simpleType>
+	</xsd:element>
+	<xsd:element name="Message" type="xsd:string"/>
+	<xsd:element name="SynchDate" type="xsd:dateTime"/>
+	<xsd:element name="Hash" type="xsd:string"/>
+	<xsd:element name="Route">
+		<xsd:complexType>
+			<xsd:sequence>
+				<xsd:element ref="tns:Param" maxOccurs="unbounded"/>
+			</xsd:sequence>
+			<xsd:attribute name="id" type="xsd:string"/>
+		</xsd:complexType>
+	</xsd:element>
+
+	<xsd:element name="Name" type="xsd:string"/>
+	<xsd:element name="Value" type="xsd:string"/>
+
+	<xsd:element name="Param">
+		<xsd:complexType>
+			<xsd:sequence>
+				<xsd:element ref="tns:Name"/>
+				<xsd:element ref="tns:Value"/>
+			</xsd:sequence>
+		</xsd:complexType>
+	</xsd:element>
+</xsd:schema>

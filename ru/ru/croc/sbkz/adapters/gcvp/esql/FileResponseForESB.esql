@@ -1,0 +1,205 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.gcvp.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+/**
+ * Вызывает внешнюю процедуру PL/SQL, которая возвращает
+ * параметры исходного сообщения, после чего запись удаляется
+ * (в рамках транзакции). Параметры сохраняются в Environment.UserProperties
+ */
+CREATE COMPUTE MODULE FileResponseForESB_RetrieveMessageInfoAndDeleteRecord
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE fileId 		CHARACTER;
+		DECLARE rqUid 			CHARACTER;
+		DECLARE tsmUid			CHARACTER;
+		DECLARE personId 		CHARACTER;
+		DECLARE personIdType 	CHARACTER;
+		DECLARE isNewFormat 	CHARACTER;
+		DECLARE replyQm 		CHARACTER;
+		DECLARE replyQueue 	CHARACTER;
+		
+		SET fileId = RIGHT(InputLocalEnvironment.File.Name, 8);
+		
+		CALL GetRequestInfoAndDeleteRecord(fileId, rqUid, tsmUid, personId, personIdType
+				,isNewFormat, replyQm, replyQueue);
+		
+		SET Environment.UserProperties.RqUID 		= rqUid;
+		SET Environment.UserProperties.TSMUID		= tsmUid;
+		SET Environment.UserProperties.PersonId 	= personId;
+		SET Environment.UserProperties.PersonIdType = personIdType;
+		SET Environment.UserProperties.IsNewFormat 	= isNewFormat;
+		SET Environment.UserProperties.ReplyQM 		= replyQm;
+		SET Environment.UserProperties.ReplyQueue 	= replyQueue;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Разветвляет поток в зависимости от формата ответа
+ */
+CREATE FILTER MODULE FileResponseForESB_IsIINResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		IF Environment.UserProperties.IsNewFormat = '1' THEN
+			RETURN TRUE;
+		ELSE
+			RETURN FALSE;
+		END IF;
+	END;
+
+END MODULE;
+
+/**
+ * Преобразование из ГЦВП в МДО для варианта с СИК-РНН идентификацией
+ */
+CREATE COMPUTE MODULE FileResponseForESB_ConvertGCVP2MDORNN
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetPensionRs';		
+
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.KZGetPensionRs;
+		
+		SET OutRs.RqUID = Environment.UserProperties.RqUID;
+		SET OutRs.RqTm = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT XSD_DATE_TIME_FORMAT);
+		SET OutRs.TSMUID = Environment.UserProperties.TSMUID;
+		SET OutRs.Status.ifxca:StatusCode = InputRoot.MRM.firstLine.status;
+		SET OutRs.Status.ifxca:StatusDesc = GetStatusString(InputRoot.MRM.firstLine.status);
+		SET OutRs.PersonInfo.PersonIdType = Environment.UserProperties.PersonIdType;
+		SET OutRs.PersonInfo.PersonId = Environment.UserProperties.PersonId;
+		SET OutRs.AvgSum = InputRoot.MRM.firstLine.avgOVPSumm;
+		
+		FOR pensData AS InputRoot.MRM.dataLine[] DO
+			CREATE LASTCHILD OF OutRs NAME 'PensionRecord';
+			--SET OutRs.PensionRecord[<].PersonInfo.PersonIdType = '1';
+			--SET OutRs.PensionRecord[<].PersonInfo.PersonId = pensData.senderRNN;
+			
+			IF pensData.senderBIK <> '' THEN
+				SET OutRs.PensionRecord[<].PersonInfo.PersonIdType = '2';
+				SET OutRs.PensionRecord[<].PersonInfo.PersonId = pensData.senderBIK;
+			ELSE
+				SET OutRs.PensionRecord[<].PersonInfo.PersonIdType = '1';
+				SET OutRs.PensionRecord[<].PersonInfo.PersonId = pensData.senderRNN;
+			END IF;
+			
+			SET OutRs.PensionRecord[<].DatePmt           = pensData.incomeDate;
+			SET OutRs.PensionRecord[<].OrgInfo.orgs:Name = pensData.senderName;
+			SET OutRs.PensionRecord[<].SumMon            = pensData.sumMon; -- помесячные пенс.отчисления
+		END FOR;
+		
+		FOR FirstData AS InputRoot.MRM.firstLine[] DO
+			CREATE LASTCHILD OF OutRs NAME 'FirstRecord';
+			
+			SET OutRs.FirstRecord[<].requestNumber     = FirstData.requestNumber;
+			SET OutRs.FirstRecord[<].SIK               = FirstData.SIK;
+			SET OutRs.FirstRecord[<].IIN               = FirstData.IIN;
+			SET OutRs.FirstRecord[<].surName           = FirstData.surName;
+			SET OutRs.FirstRecord[<].firstName         = FirstData.firstName;
+			SET OutRs.FirstRecord[<].middleName        = FirstData.middleName;
+			SET OutRs.FirstRecord[<].birthDate         = FirstData.birthDate;
+			SET OutRs.FirstRecord[<].status            = FirstData.status;
+			SET OutRs.FirstRecord[<].enumNum           = FirstData.enumNum;
+			SET OutRs.FirstRecord[<].avgOVPSumm        = FirstData.avgOVPSumm;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Преобразование из ГЦВП в МДО для варианта идентификации по ИИН
+ */
+CREATE COMPUTE MODULE FileResponseForESB_ConvertGCVP2MDOIIN
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetPensionRs';		
+
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.KZGetPensionRs;
+		
+		SET OutRs.RqUID = Environment.UserProperties.RqUID;
+		SET OutRs.RqTm = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT XSD_DATE_TIME_FORMAT);
+		SET OutRs.TSMUID = Environment.UserProperties.TSMUID;
+		SET OutRs.Status.ifxca:StatusCode = InputRoot.MRM.firstLine.status;
+		SET OutRs.Status.ifxca:StatusDesc = GetStatusString(InputRoot.MRM.firstLine.status);
+		SET OutRs.PersonInfo.PersonIdType = Environment.UserProperties.PersonIdType;
+		SET OutRs.PersonInfo.PersonId = Environment.UserProperties.PersonId;
+		SET OutRs.AvgSum = InputRoot.MRM.firstLine.avgOVPSumm;
+		
+		FOR pensData AS InputRoot.MRM.dataLine[] DO
+			CREATE LASTCHILD OF OutRs NAME 'PensionRecord';
+			IF pensData.senderBIN <> '' THEN
+				SET OutRs.PensionRecord[<].PersonInfo.PersonIdType = '2';
+				SET OutRs.PensionRecord[<].PersonInfo.PersonId = pensData.senderBIN;
+			ELSE
+				SET OutRs.PensionRecord[<].PersonInfo.PersonIdType = '1';
+				SET OutRs.PensionRecord[<].PersonInfo.PersonId = pensData.senderRNN;
+			END IF;
+			
+			SET OutRs.PensionRecord[<].DatePmt           = pensData.incomeDate;
+			SET OutRs.PensionRecord[<].OrgInfo.orgs:Name = pensData.senderName;
+			SET OutRs.PensionRecord[<].SumMon            = pensData.sumMon;
+		END FOR;
+
+		FOR FirstData AS InputRoot.MRM.firstLine[] DO
+			CREATE LASTCHILD OF OutRs NAME 'FirstRecord';
+			
+			SET OutRs.FirstRecord[<].requestNumber     = FirstData.requestNumber;
+			SET OutRs.FirstRecord[<].IIN               = FirstData.IIN;
+			SET OutRs.FirstRecord[<].surName           = FirstData.surName;
+			SET OutRs.FirstRecord[<].firstName         = FirstData.firstName;
+			SET OutRs.FirstRecord[<].middleName        = FirstData.middleName;
+			SET OutRs.FirstRecord[<].birthDate         = FirstData.birthDate;
+			SET OutRs.FirstRecord[<].status            = FirstData.status;
+			SET OutRs.FirstRecord[<].enumNum           = FirstData.enumNum;
+			SET OutRs.FirstRecord[<].avgOVPSumm        = FirstData.avgOVPSumm;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Процедура сохранения параметров сообщения в БД, а
+ * также генерации идентификатора в соответствие с
+ * определенным алгоритмом.
+ * Реализована как внешняя процедура PL/SQL.
+ */
+CREATE PROCEDURE GetRequestInfoAndDeleteRecord(
+		IN file_id 			CHARACTER,
+		OUT rq_uid 			CHARACTER,
+		OUT person_id		CHARACTER,
+		OUT person_id_type 	CHARACTER,
+		OUT tsm_uid			CHARACTER,
+		OUT is_new_format 	CHARACTER,
+		OUT reply_qm 		CHARACTER,
+		OUT reply_queue 	CHARACTER
+	)
+LANGUAGE DATABASE
+EXTERNAL NAME "sbkz.gcvp_adapter_kz.get_req_info_and_del_record";
+
+
+/**
+ * Устанавливает параметры ответной очереди.
+ */
+CREATE COMPUTE MODULE FileResponseForESB_SetMQDestination
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName =
+				Environment.UserProperties.ReplyQueue;
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName =
+				Environment.UserProperties.ReplyQM;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

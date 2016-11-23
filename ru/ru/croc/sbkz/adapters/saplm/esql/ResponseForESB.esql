@@ -1,0 +1,125 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.saplm.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Установка ответных заголовков а также получение ответного сообщения из агрегации
+CREATE COMPUTE MODULE ResponseForESB_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- зафиксируем статус таймаута
+		IF NOT EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST[]) THEN
+		   SET Environment.Timeout = TRUE;
+		END IF;
+		
+		DECLARE OrigMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+		SET Environment.UserProperties = OrigMsg.UserProperties;
+
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+		
+		SET OutputRoot.XMLNSC = InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC;
+		IF NOT EXISTS(OutputRoot.XMLNSC[]) THEN
+		   CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC');
+		END IF;
+
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(OrigMsg, OutputLocalEnvironment);
+
+		IF Environment.UserProperties.Operation = '' THEN
+		   SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = 'unchanged';
+		END IF;
+		
+		-- обработаем статус таймаута
+		IF Environment.Timeout = TRUE THEN 
+          SET OutputRoot.XMLNSC = OrigMsg.Body;			
+	      PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		  RETURN FALSE;
+		END IF;
+	END;
+END MODULE;
+
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE ResponseForESB_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+--		DECLARE Operation CHARACTER FIELDVALUE(InputRoot.XMLNSC.FILE.(XMLNSC.Attribute)TYPE);
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'PutLimitRs' THEN
+			SET labelName = 'PutLimitRs';
+
+		WHEN 'PutBusinessPartnerRq' THEN
+			SET labelName = 'PutBusinessPartnerRs';
+		WHEN 'PutBusinessPartnerRs' THEN
+			SET labelName = 'PutBusinessPartnerRs';
+
+		WHEN 'UpdateGSZRs' THEN
+			SET labelName = 'UpdateGSZRs';
+		WHEN 'UpdateProductDetailsRs' THEN
+			SET labelName = 'UpdateProductDetailsRs';
+
+		WHEN 'PutCreditDealRq' THEN
+			SET labelName = 'PutCreditDealRq';			
+		WHEN 'SendRateRq' THEN
+			SET labelName = 'SendRateRq';
+		WHEN 'GetMarkerDebtCapacityRq' THEN
+			SET labelName = 'GetMarkerDebtCapacityRq';	
+		WHEN 'GetLimitRs' THEN
+			SET labelName = 'GetLimitRs';	
+		WHEN 'CreateLimitRs' THEN
+			SET labelName = 'CreateLimitRs';
+		WHEN 'UpdateLimitRs' THEN
+			SET labelName = 'UpdateLimitRs';
+		WHEN 'PutRelatedBorrowersGroupStructRs' THEN
+			SET labelName = 'PutRelatedBorrowersGroupStructRs';
+		WHEN 'UpdateFinTransactionRs' THEN
+			SET labelName = 'UpdateFinTransactionRs';
+		WHEN 'CalcMarkerDebtCapacityRs' THEN
+			SET labelName = 'CalcMarkerDebtCapacityRs';
+		WHEN 'PutPositionRs' THEN
+			SET labelName = 'PutPositionRs';
+		WHEN 'SendMasterDataNf' THEN
+			SET labelName = 'SendMasterDataNf';
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown format XML in ResponseForESB(SAPLM)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Задание параметров маршрутизации в заголовке MQRFH2.
+ * Случай для запросов с агрегацией. Связка адаптер - ПМИЛ.
+ **/
+CREATE COMPUTE MODULE ResponseForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;								
+		IF InputRoot.XMLNSC.*[<].SystemId = 'urn:sbrfsystems:kz-bpmnkp' THEN
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter:async:response';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:bpmres';
+		ELSE							
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter:async:response';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:crm';
+		END IF;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+

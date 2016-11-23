@@ -1,0 +1,177 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.mdm.esql
+
+PATH ru.croc.sbkz.utils;
+
+-- 4	Сценарии интеграционного взаимодействия для реализации
+-- Таблица 1: Интеграционные взаимодействия
+CREATE COMPUTE MODULE RequestForMDM_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		-- 1. Данные по Единому клиенту :: Сообщение с данными по Единому клиенту,  включая обновление переданных параметров
+		WHEN 'Message_DB_UCModRq' THEN
+			SET labelName = 'Message_DB_UCModRq';
+		-- 2. Подтверждение состава Единого клиента :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_UCAppRq' THEN
+			SET labelName = 'Message_DB_UCAppRq';
+		-- 3. ПереназначениеКМ ЕК :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_UCModKMEKRq' THEN
+			SET labelName = 'Message_DB_UCModKMEKRq';
+		-- 4. Данныепо Мета-группе :: Данные по Мета-группе, включая обновление переданных параметров
+		WHEN 'Message_DB_MGModRq' THEN
+			SET labelName = 'Message_DB_MGModRq';
+		-- 5. Сообщение о переназначении ГКМ :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_MGModGKMRq' THEN
+			SET labelName = 'Message_DB_MGModGKMRq';
+		-- 6. Сообщение о признании связи внутри Мета-группы несущественной/существенной 
+		--     :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_MGAppRq' THEN
+			SET labelName = 'Message_DB_MGAppRq';	
+		-- 7. Сообщение-ответ :: Служебное сообщение
+		WHEN 'Message_DB_StatusRq' THEN
+			SET labelName = 'Message_DB_StatusRq';
+		-- 8. Создание или изменение юр. Лица :: Клиентские данные
+		WHEN 'CustOrgModRq' THEN
+			SET labelName = 'CustOrgModRq';	
+		-- 9. Создание или изменение физ. Лица :: Клиентские данные
+		WHEN 'RequestUpdateRelatedPrivateClientRq' THEN
+			SET labelName = 'RequestUpdateRelatedPrivateClientRq';	
+		ELSE
+			-- Непонятный тэг
+			THROW USER EXCEPTION VALUES ('Unknown message format in RequestForCRM(CRM Corp)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE RequestForMDM_ConvertCustOrgModRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForMDM_ConvertMGModGKMRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForMDM_ConvertRequestUpdateRelatedPrivateClientRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForMDM_ConvertUCModKMEKRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForMDM_ConvertUCModRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

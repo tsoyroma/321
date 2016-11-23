@@ -1,0 +1,50 @@
+BROKER SCHEMA ru.croc.sbrf.common.esql
+PATH ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE RoutingTestResponse_AggrReply
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- Для логирования заполняем идентификатор запроса
+		SET Environment.UserProperties.RqUID = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.RqUID;
+
+		SET OutputRoot.MQMD.CorrelId	= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+
+		SET OutputRoot.XMLNSC.RoutingTestRs = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body.RoutingTestRq;
+		SET OutputRoot.XMLNSC.RoutingTestRs.Status.StatusCode = '0';
+		SET OutputRoot.XMLNSC.RoutingTestRs.TestInfo.AdpOutput.TestOperation.RqTm = InputRoot.ComIbmAggregateReplyBody.REQUEST[1].XMLNSC.RoutingTestRs.TestInfo.AdpOutput.TestOperation.RqTm;
+		SET OutputRoot.XMLNSC.RoutingTestRs.TestInfo.AdpOutput.TestOperation.RsTm = getLocalTimeStamp();
+
+		DECLARE I INTEGER 1;
+
+		FOR currReq AS InputRoot.ComIbmAggregateReplyBody.REQUEST[] DO
+
+			SET OutputRoot.XMLNSC.RoutingTestRs.TestInfo.AdpOutput.TestOperation.AdpInput[I].SystemId = currReq.XMLNSC.RoutingTestRs.TestInfo.AdpOutput.TestOperation.AdpInput.SystemId;
+			SET OutputRoot.XMLNSC.RoutingTestRs.TestInfo.AdpOutput.TestOperation.AdpInput[I].RqTm = currReq.XMLNSC.RoutingTestRs.TestInfo.AdpOutput.TestOperation.AdpInput.RqTm;
+			SET OutputRoot.XMLNSC.RoutingTestRs.TestInfo.AdpOutput.TestOperation.AdpInput[I].RsTm = currReq.XMLNSC.RoutingTestRs.TestInfo.AdpOutput.TestOperation.AdpInput.RsTm;
+			SET OutputRoot.XMLNSC.RoutingTestRs.TestInfo.AdpOutput.TestOperation.AdpInput[I].Server.RsTm = currReq.XMLNSC.RoutingTestRs.TestInfo.AdpOutput.TestOperation.AdpInput.Server.RsTm;
+--						
+			SET I = I + 1;
+		END FOR;
+		-- Передадим еще список всех систем, которые мы пытались опросить
+		SET OutputRoot.XMLNSC.RoutingTestRs.AdapterList = InputRoot.ComIbmAggregateReplyBody.ADPLIST.XMLNSC.RoutingTestRq.AdapterList;
+
+		CALL SetMQReplyDestination(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess, OutputLocalEnvironment);
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

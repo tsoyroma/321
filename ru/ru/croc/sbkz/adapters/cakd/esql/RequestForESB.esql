@@ -1,0 +1,436 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.cakd.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'AML_IN' THEN
+			SET labelName = 'AML';
+		WHEN 'PKB_IN' THEN
+			SET labelName = 'PKB';
+		WHEN 'GCVP_IN' THEN
+			SET labelName = 'GCVP';
+		WHEN 'GetPersonDataByIdRq' THEN
+			SET labelName = 'GetPersonDataByIdRq';
+		WHEN 'UpdatePersonDataToEpkRq' THEN
+			SET labelName = 'UpdatePersonDataToEpkRq';			
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in CAKD(RequestForESB)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE OperationId CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].SystemType);
+		
+		CASE OperationId 
+		WHEN 'AML' THEN		 	 	
+   		   -- Сообщение для системы AML
+		   CALL CopyWholeMessage(InputRoot, OutputRoot);		   
+		 		      	
+		   -- Создаем заголовок и вставляем переменные для маршрутизации
+	 	   IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			   CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+						
+	 	       -- Маршрутизация через SystemId
+	 	       SET OutputRoot.MQRFH2.usr.TypeId	    = 'urn:sbkztypes:esb:adapter';
+	 	       SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:aml'; 
+   		   END IF;
+			
+		   RETURN TRUE;	
+				
+		WHEN 'PKB' THEN
+			SET OutputRoot = InputRoot;
+			
+			-- Создаем заголовок и вставляем переменные для маршрутизации
+		 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+				CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+		 	END IF;
+
+		 	-- Маршрутизация через OperationId в ПМИЛ
+		 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+			SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+			
+			RETURN TRUE;
+			
+		WHEN 'GCVP' THEN
+			
+			 -- Сообщение для системы GCVP
+		   CALL CopyWholeMessage(InputRoot, OutputRoot);		
+
+		   -- Создаем заголовок и вставляем переменные для маршрутизации
+	 	   IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			   CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+
+	 	       -- Маршрутизация через SystemId
+	 	       SET OutputRoot.MQRFH2.usr.TypeId	    = 'urn:sbkztypes:esb:adapter';
+	 	       SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:gcvp'; 
+		   END IF;
+
+		END CASE;			   	
+		
+		RETURN FALSE;
+    END;
+ 
+	CREATE PROCEDURE CopyWholeMessage(IN inRoot REFERENCE, IN outRoot REFERENCE) BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		DECLARE domainName CHARACTER;
+		SET J = CARDINALITY(inRoot.*[]);
+		WHILE I <= J DO
+			SET domainName = FIELDNAME(inRoot.*[I]);
+			IF domainName = 'Properties' THEN
+				SET outRoot.*[I] = inRoot.*[I]; 
+			ELSE
+				CREATE LASTCHILD OF outRoot DOMAIN(domainName) NAME domainName;
+				SET outRoot.*[<] = inRoot.*[I];
+			END IF;
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_Convert2AML
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'AML_IN';
+						 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+		SET outRef.UID			= inRef.*:UID;
+		SET outRef.RequestDate 	= inRef.*:REQUEST_DATE;
+		SET outRef.RequestId	= inRef.*:REQUEST_ID;
+		SET outRef.Fname		= inRef.*:FNAME;
+		SET outRef.Sname		= inRef.*:SNAME;
+		SET outRef.Mname		= inRef.*:MNAME;
+		SET outRef.SPName		= 'CAKD';
+		SET outRef.SystemType	= 'AML';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_SaveOrigMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.Source.MQMD 		= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 	= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 		= InputBody;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_Convert2PKB
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetCreditHistoryRq';		
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.PKB_IN;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetCreditHistoryRq;
+		
+		SET OutRq.RqUID						= InpRq.*[<].*[<].*:UID;
+		SET OutRq.RqTm						= InpRq.*[<].*[<].*:REQUEST_DATE;
+		SET OutRq.BKI 						= InpRq.*[<].*[<].*:SERVICE_CODE;
+		SET OutRq.PersonInfo.PersonIdType 	= InpRq.*[<].*[<].*:PERSON_ID_TYPE;
+		SET OutRq.PersonInfo.PersonId 		= InpRq.*[<].*[<].*:PERSON_ID;
+		
+		SET Environment.UserProperties.TSMUID	= InpRq.TSMUID;
+		
+		RETURN TRUE;
+	END;
+	  
+	CREATE PROCEDURE FillMDOStandartElementsRq (IN inroot REFERENCE, IN outroot REFERENCE)
+	BEGIN
+		SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+		SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+		SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;
+	END;
+	
+END MODULE;
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_pkb
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+			
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+		IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+		END IF;
+		
+		-- Маршрутизация через OperationId в ПМИЛ
+		SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+			
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+			
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_Convert2GCVP
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetPensionRq';		
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GCVP_IN;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetPensionRq;
+		
+		DECLARE NS_MDO_INDS CONSTANT CHARACTER 'http://sberbank.ru/dem/individual/15';
+		DECLARE inds NAMESPACE	NS_MDO_INDS;
+		
+		SET OutRq.RqUID						= InpRq.*[<].*[<].*:UID;
+
+--		SET OutRq.RqTm						= InpRq.*[<].*[<].*:REQUEST_DATE;
+		SET OutRq.RqTm						= convertFromGCVPToCAKDDate777(InpRq.*[<].*[<].*:REQUEST_DATE);
+		
+--		SET OutRq.TSMUID					= InpRq.*[<].*[<].*:SERVICE_CODE;
+		SET OutRq.TSMUID					= 0000000123123123455; -- фиксированное значение
+		
+		SET OutRq.PersonInfo.inds:PersonName.inds:LastName 		= InpRq.*[<].*[<].*:LAST_NAME;
+		SET OutRq.PersonInfo.inds:PersonName.inds:FirstName 	= InpRq.*[<].*[<].*:FIRST_NAME;
+		SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName 	= InpRq.*[<].*[<].*:MIDDLE_NAME;
+		SET OutRq.PersonInfo.inds:BirthDt 	= convertFromCAKDDate(InpRq.*[<].*[<].*:BIRTH_DAY);
+
+--		SET OutRq.PersonInfo.PersonIdType 	= InpRq.*[<].*[<].*:PERSON_ID_TYPE;
+		SET OutRq.PersonInfo.PersonIdType 	= '2'; -- всегда заварачивать по ИИН
+
+		SET OutRq.PersonInfo.PersonId 		= InpRq.*[<].*[<].*:PERSON_ID;
+		SET OutRq.StartDate 				= convertFromCAKDDate(InpRq.*[<].*[<].*:DATE_OF_APP);
+		SET OutRq.EndDate 					= convertFromCAKDDate(InpRq.*[<].*[<].*:DATE_OF_ISSUE);
+		SET OutRq.Type						= 'DD6';
+		
+		SET Environment.UserProperties.PERSON_ID_TYPE  = InpRq.*[<].*[<].*:PERSON_ID_TYPE;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_gcvp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		-- Всегда одна система для запроса -- ГЦВП: urn:sbkzsystems:gcvp
+		SET systemId 	= 'urn:sbkzsystems:gcvpweb';
+		SET adapterType = 'urn:sbkztypes:esb:adapter';
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Константа для указания, что ищем адаптер системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	-- Идентификатор системы, в адаптер которой необходимо отправить запрос
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+ /*
+ 10.03.15 u07357 - сервис GetPersonDataByIdRq --> KZCheckMDMPersonInfoRq
+ */
+CREATE COMPUTE MODULE RequestForESB_Convert2EPK_GetPersonDataByIdRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZCheckMDMPersonInfoRq';	
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.GetPersonDataByIdRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZCheckMDMPersonInfoRq;
+		DECLARE personInfo REFERENCE TO outRef;
+		
+		FOR person AS inRef.Person[] DO
+			CREATE LASTCHILD OF outRef AS personInfo NAME 'PersonInfo';
+			SET personInfo.inds:NameAddrType 		= 'Customer';
+			SET personInfo.PersonIdExt.Key	 		= 'IIN';
+			SET personInfo.PersonIdExt.Value 		= person.IIN;
+		END FOR;
+		
+		SET Environment.UserProperties.TSMUID				= inRef.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+ /*
+ 10.03.15 u07357 
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertCAKD2MDO_UpdatePersonData
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSendMDMPrivateClientDataFromCAKDRq';	
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.UpdatePersonDataToEpkRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZSendMDMPrivateClientDataFromCAKDRq;
+		DECLARE personInfo REFERENCE TO outRef;
+		DECLARE contInfo REFERENCE TO outRef;
+		DECLARE outAddr REFERENCE TO outRef;
+		DECLARE outCont REFERENCE TO outRef;
+		DECLARE idCard REFERENCE TO outRef;
+		DECLARE idExt REFERENCE TO outRef;
+		DECLARE relPerson REFERENCE TO outRef;
+		
+		SET outRef.KodFilial	=	inRef.KodFilial; 
+		SET outRef.Manager		= 	inRef.Manager;
+		SET outRef.KodUdo		=	inRef.KodUdo;
+		
+		FOR person AS inRef.Person[] DO
+			CREATE LASTCHILD OF outRef AS personInfo NAME 'PersonInfo';
+			SET personInfo.inds:NameAddrType 					= 'Customer';
+			SET personInfo.inds:PersonName.inds:LastName		= person.Surname;
+			SET personInfo.inds:PersonName.inds:FirstName 		= person.Name;
+			SET personInfo.inds:PersonName.inds:MiddleName 		= person.FatherName;
+			
+			CREATE LASTCHILD OF personInfo AS contInfo NAMESPACE inds NAME 'ContactInfo';
+			FOR addr AS person.ClientAddr[] DO
+				CREATE LASTCHILD OF contInfo AS outAddr NAMESPACE ifxca NAME 'PostAddr';
+				--SET outAddr.ifxca:Addr1				= addr.Country || ', ' || addr.PostCode || ', ' || addr.Region || ', ' || addr.District || ', ' || addr.City || ', ' || addr.Street || ', ' || addr.House || ', ' || addr.Apartment;
+				SET outAddr.ifxca:AddrType			= recodeAddressTypeFromCAKD(addr.AddrType); 
+				SET outAddr.ifxca:PostalCode		= addr.PostCode;
+				SET outAddr.ifxca:Country			= addr.Country;
+				SET outAddr.ifxca:County			= addr.Region;
+				SET outAddr.ifxca:City				= addr.City;
+				SET outAddr.ifxca:StateProv			= addr.District;
+				SET outAddr.ifxca:Street			= addr.Street;
+				SET outAddr.ifxca:House				= addr.House;
+				SET outAddr.ifxca:Buiding			= addr.Building;
+				SET outAddr.ifxca:Flat				= addr.Apartment;
+				--SET outAddr.ifxca:Addr1				= addr.AddrFull; 				
+			END FOR;
+			
+			SET personInfo.inds:BirthDt 			= person.DateBirth;
+			SET personInfo.inds:Gender 				= recodeGenderFromCAKD(person.Gender);
+			SET personInfo.inds:MaritalStatus 		= recodeMaritalStatusFromCAKD(person.FamilySts);
+			SET personInfo.inds:BirthDt 			= person.DateBirth;
+			
+			CREATE FIELD personInfo.inds:IdentityCards.inds:IdentityCard AS idCard;
+			SET idCard.inds:IdType					= recodeIdTypeFromCAKD(person.DocType);
+			SET idCard.inds:IdNum					= person.DocNum;
+			SET idCard.inds:IssueDt					= person.DocDateIssue;
+			SET idCard.inds:IssuedBy				= person.OrgName;
+			SET idCard.inds:ValidTo					= person.DocDateEnd;
+			
+			SET personInfo.inds:BirthPlace			= person.BirthPlace;
+			SET personInfo.inds:Resident			= person.Resident;
+			SET personInfo.inds:Citizenship			= person.CoutryCitizenship;
+			
+			CREATE LASTCHILD OF personInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key 							= 'IIN';
+			SET idExt.Value 						= person.IIN;
+			CREATE LASTCHILD OF personInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key 							= 'CIF';
+			SET idExt.Value 						= person.IdEPK;
+			CREATE LASTCHILD OF personInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key 							= 'CAKD';
+			SET idExt.Value 						= person.IIN;
+			
+			CREATE FIELD personInfo.Phones;
+			FOR contact AS person.ClientContact[] DO 
+				IF contact.ContactType IN ('1', '2', '3', '4', '5') THEN
+					CREATE LASTCHILD OF personInfo.Phones AS outCont NAME 'Phone';
+					SET outCont.PhoneType			= recodePhoneTypeFromCAKD(contact.ContactType);
+					SET outCont.PhoneNum			= contact.ContactData;
+				END IF;
+			END FOR;
+			
+			CREATE FIELD personInfo.EMails;
+			FOR contact AS person.ClientContact[] DO 
+				IF contact.ContactType IN ('6') THEN
+					CREATE LASTCHILD OF personInfo.EMails AS outCont NAME 'EMail';
+					SET outCont.EMailAddr			= contact.ContactData;
+				END IF;
+			END FOR;
+			
+			CREATE FIELD personInfo.RelPersons;
+			FOR clientTouch AS person.ClientTouch[] DO 
+				CREATE LASTCHILD OF personInfo.RelPersons AS relPerson NAME 'RelPerson';
+				SET relPerson.RelPersonId.Key 		= 'CIF';
+				SET relPerson.RelPersonId.Value		= clientTouch.TouchIdEPK;
+				SET relPerson.RelationshipType		= clientTouch.TouchType;
+			END FOR; 
+			
+			SET personInfo.IsForeignPP 				= recodeForeignIndFromCAKD(person.IPDL);
+			SET personInfo.Segment	 				= recodeSegmentFromCAKD(person.Segment);
+			SET personInfo.ClientJobTitle 			= person.WorkStat;
+			SET personInfo.ClientWorkPlace			= person.WorkPlace;
+			SET personInfo.CustCategory 			= person.Category;
+			
+		END FOR;
+		
+		SET Environment.UserProperties.TSMUID				= inRef.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+ /*
+ 10.03.15 u07357 
+ */
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_epk
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;
+END MODULE;

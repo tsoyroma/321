@@ -1,0 +1,124 @@
+BROKER SCHEMA ru.croc.sbrf.bp.common.esql
+
+----------------------------------
+--
+--	Модуль формирования сообщения о тайм-ауте для логирования
+--
+----------------------------------
+
+CREATE COMPUTE MODULE TimeoutLogger_CreateRigthMess
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		CALL CopyMessageHeaders();
+		
+		-- Создание домена XML
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		-- Получение исходного сообщения
+		DECLARE sEventMsg CHAR '';
+		
+		--Параметры сообщения
+		DECLARE propRef REFERENCE TO InputRoot.MQMD;
+
+		IF NOT EXISTS(InputRoot.MQMD[]) THEN
+			SET propRef = InputRoot.Properties;
+		END IF;
+		
+		DECLARE inCCSID INT propRef.CodedCharSetId;
+		DECLARE inEncoding INT propRef.Encoding;
+		DECLARE msgBitStream BLOB;
+
+		IF EXISTS(InputRoot.BLOB[]) THEN
+			SET msgBitStream = ASBITSTREAM(InputBody, inEncoding, inCCSID);
+			SET sEventMsg    = CAST(msgBitStream AS CHAR CCSID inCCSID);
+		END IF;
+			
+		-- Формирование сообщения для логирования
+		DECLARE tns NAMESPACE 'http://croc.ru/sbrf/bp/EventMsg';
+		
+		SET OutputRoot.XMLNSC.tns:Event.(XML.NamespaceDecl)xmlns:tns = 'http://croc.ru/sbrf/bp/EventMsg'; 
+		DECLARE oEvent REFERENCE TO OutputRoot.XMLNSC.tns:Event;
+		SET oEvent.tns:EventDate     = getLocalTimeStamp();
+		SET oEvent.tns:EventSource 	 = 'ESB';
+		SET oEvent.tns:EventReciever = 'EVENT.LOGGER';
+		SET oEvent.tns:Operation   = 'UNKNOWN';
+		SET oEvent.tns:SourceQueue = InputRoot.MQMD.SourceQueue;
+		SET oEvent.tns:SourceQM    = Environment.UserProperties.QMgr;
+		SET oEvent.tns:TargetQueue = 'UNKNOWN';
+		SET oEvent.tns:TargetQM	   = 'UNKNOWN';
+		SET oEvent.tns:ReplyQueue  = 'UNKNOWN';
+		SET oEvent.tns:ReplyQM	   = 'UNKNOWN';
+		SET oEvent.tns:ProcStatus  = 'TIMEOUT';
+		SET oEvent.tns:ErrorText   = 'На одной из стадий операции произошел таймаут';
+		SET oEvent.tns:EventMsg    = sEventMsg;
+		SET oEvent.tns:RqUID 	   = NVL(InputRoot.MQRFH2.usr.RqUID, 'UNKNOWN');
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+
+END MODULE;
+
+----------------------------------
+--
+--	Модуль формирования сообщения о тайм-ауте для логирования (модифицированный)
+--  05.03.2012
+----------------------------------
+CREATE COMPUTE MODULE TimeoutLoggerMod_CreateRigthMess
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		CALL CopyEntireMessage();
+		
+		-- Сформируем содержимое usr-заголовок
+		DECLARE usrHeader ROW;
+		
+		SET usrHeader.EventDate     = getLocalTimeStamp();
+		SET usrHeader.EventSource 	= 'ESB';
+		SET usrHeader.EventReciever = 'EVENT.LOGGER';
+		SET usrHeader.Operation   	= 'UNKNOWN';
+		SET usrHeader.SourceQueue 	= InputRoot.MQMD.SourceQueue;
+		SET usrHeader.SourceQM    	= Environment.UserProperties.QMgr;
+		SET usrHeader.TargetQueue 	= 'UNKNOWN';
+		SET usrHeader.TargetQM	  	= 'UNKNOWN';
+		SET usrHeader.ReplyQueue  	= 'UNKNOWN';
+		SET usrHeader.ReplyQM	    = 'UNKNOWN';
+		SET usrHeader.ProcStatus  	= 'TIMEOUT';
+		SET usrHeader.ErrorText   	= 'На одной из стадий операции произошел таймаут';
+		SET usrHeader.RqUID 	   	= NVL(InputRoot.MQRFH2.usr.RqUID, 'UNKNOWN');
+
+		-- Создаем заголовок MQRFH2.usr
+		CALL CreateMQRFH2usrHeaderELMess(OutputRoot,usrHeader);			
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+	
+END MODULE;

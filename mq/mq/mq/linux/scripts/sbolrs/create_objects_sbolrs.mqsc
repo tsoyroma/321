@@ -1,0 +1,14 @@
+*создание листенера
+DEFINE LISTENER(LISTENER) TRPTYPE (TCP) PORT(1416)
+
+alter qmgr chlauth(DISABLED)
+alter qmgr force ccsid(1208)
+
+*канал соединение с сервером
+DEFINE CHANNEL(ESB.GW.SVRCONN) +
+CHLTYPE(svrconn) +
+TRPTYPE(tcp) +
+SHARECNV(5) +
+MCAUSER(mqm)
+
+END

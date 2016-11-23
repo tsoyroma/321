@@ -1,0 +1,88 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sbolrs.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE RequestForSBOLRS_ConvertMDO2SBOLRS
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				  
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE oRef REFERENCE TO OutputRoot;
+		
+		DECLARE ERIB CONSTANT CHARACTER 'http://schemas.xmlsoap.org/soap/encoding/';
+		DECLARE erib NAMESPACE ERIB;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS oRef NAME 'DoIFX';	
+		
+		SET oRef.(XMLNSC.NamespaceDecl)xmlns:encodingStyle = erib;
+		
+		DECLARE request REFERENCE TO oRef;
+		
+		CREATE LASTCHILD OF oRef AS request NAME 'req';
+		
+		DECLARE curList REFERENCE TO request;
+		
+		CREATE LASTCHILD OF request AS curList NAME 'CurListInqRq';
+		
+		SET curList.RqUID 	= inRef.RqUID;
+		SET curList.RqTm  	= SUBSTRING(Environment.UserProperties.RqTm FROM 0 FOR 20);
+		SET curList.OperUID = inRef.ID; 	
+		SET curList.BankInfo.RegionId	=	'038';
+		SET curList.OrderId = SUBSTRING(inRef.DateTime FROM 0 FOR 20);
+		SET curList.OrderDt = SUBSTRING(inRef.DateTime FROM 0 FOR 20);
+		
+		DECLARE	curListRec REFERENCE TO curList;
+		
+		CREATE LASTCHILD OF curList AS curListRec NAME 'CurListRec';
+		
+		SET curListRec.EffDt = SUBSTRING(inRef.RqTm FROM 0 FOR 20);
+		
+		DECLARE curListItem REFERENCE TO curListRec;
+		
+		FOR items AS inRef.CurrRateData.CurrRate[] DO
+			
+			CREATE LASTCHILD OF curListRec AS curListItem NAME 'CurListItem';
+			
+			SET curListItem.ProductId = 'accounts';
+			SET curListItem."Pr_code" = items.CurrCode;
+			SET curListItem."Pr_quot" = items.Scale;
+			
+			IF items.RateType = 'discount' THEN
+				SET curListItem."Pr_cb"   = items.RateValue;
+			END IF;
+			
+			IF items.RateType = 'cash' THEN
+				SET curListItem."Pr_buy"   = items.RateBuy;
+			END IF;
+			
+			IF items.RateType = 'cash' THEN
+				SET curListItem."Pr_sale"   = items.RateSell;
+			END IF;
+			
+			IF items.RateType = 'non-cash' THEN
+				SET curListItem."Pr_buy3"   = items.RateBuy;
+			END IF;
+			
+			IF items.RateType = 'non-cash' THEN
+				SET curListItem."Pr_sale3"   = items.RateSell;
+			END IF;
+			
+		END FOR;
+		
+		SET curList.MsText	=	'QPragma'; 
+		
+		DECLARE wholeMsgBlob BLOB ASBITSTREAM(OutputRoot.XMLNSC.*[<].*[<] CCSID 1208);
+		
+		DECLARE wholeMsgChar CHAR CAST(wholeMsgBlob AS CHAR CCSID 1208);
+		
+		SET OutputRoot.XMLNSC.*[<].*[<] = NULL;
+		
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.CDataField)"req" = wholeMsgChar;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

@@ -1,0 +1,821 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.fpsu.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Внешняя переменная для указания URL веб-сервиса
+DECLARE HttpWebServiceUrl_LGD EXTERNAL CHARACTER 'UNKNOWN';
+DECLARE HttpWebServiceUrl_RAT EXTERNAL CHARACTER 'UNKNOWN';
+DECLARE HttpWebServiceUrl_MRK EXTERNAL CHARACTER 'UNKNOWN';
+
+-- Внешняя переменная для указания таймаута веб-сервиса
+DECLARE HttpWebServiceTimeout EXTERNAL CHARACTER 'UNKNOWN';
+
+-- Внешняя переменная для указания имени пользователя
+DECLARE HttpWebServiceUsername EXTERNAL CHARACTER 'UNKNOWN';
+-- Внешняя переменная для указания пароля
+DECLARE HttpWebServicePassword EXTERNAL CHARACTER 'UNKNOWN';
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_DetectRequestOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'calculate' THEN
+			SET labelName = 'calculate';
+		WHEN 'confirm' THEN
+			SET labelName = 'confirm';
+		WHEN 'correct' THEN
+			SET labelName = 'correct';
+		WHEN 'calculationRequest' THEN
+			SET labelName = 'calculationRequest';
+		WHEN 'finalizationRequest' THEN
+			SET labelName = 'finalizationRequest';
+		WHEN 'StructRequest' THEN
+			SET labelName = 'StructRequest';	
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in SOAPRequestForFPSU_DetectRequestOperation', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_DetectResponseOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		DECLARE labelName CHARACTER;
+
+		CASE Operation
+		WHEN 'calculationResponse' THEN
+			SET labelName = 'calculationResponse';
+		WHEN 'finalizationResponse' THEN
+			SET labelName = 'finalizationResponse';
+		WHEN 'confirmResponse' THEN
+			SET labelName = 'confirmResponse';
+		WHEN 'correctResponse' THEN
+			SET labelName = 'correctResponse';
+		WHEN 'calculateResponse' THEN
+			SET labelName = 'calculateResponse';
+		WHEN 'StructResponse' THEN
+			SET labelName = 'StructResponse';				
+		WHEN 'markerResponse' THEN
+			SET labelName = 'markerResponse';				
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in SOAPRequestForFPSU', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+/*
+ * Расчет LGD01 Формирование тело сообщения для WEB-Service
+ */
+CREATE COMPUTE MODULE SOAPRequestForFPSU_Convert2SOAP_CalcRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN				
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.calculationRequest;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE space NAME 'calculationRequest';
+		
+		SET OutputRoot.XMLNSC.space:calculationRequest.(XMLNSC.NamespaceDecl)xmlns = space1;		
+		SET OutputRoot.XMLNSC.space:calculationRequest.(XMLNSC.NamespaceDecl)xmlns:ns2 = space;
+
+		
+		SET outRef.space:ProductType = inRef.ProductType; 
+		SET outRef.space:Product     = inRef.Product;
+		SET outRef.space:AgrNum	     = inRef.AgrNum;
+		SET outRef.space:AgrDate     = inRef.AgrDate;
+		SET outRef.space:LGDType     = inRef.LGDType;	
+		SET outRef.space:CRMId       = inRef.CRMId;
+		SET outRef.space:Debt		 = inRef.Debt;
+		SET outRef.space:Rate        = inRef.Rate;
+		SET outRef.space:LoanMode    = inRef.LoanMode;
+		SET outRef.space:LoanSum	 = inRef.LoanSum;
+		SET outRef.space:AgrEndDate  = inRef.AgrEndDate;
+		SET outRef.space:Rating	   	 = inRef.Rating;
+		SET outRef.space:Limit	     = inRef.Limit;
+		SET outRef.space:Model       = inRef.Model;
+		SET outRef.space:UnutilizedLimit = inRef.UnutilizedLimit;
+		SET outRef.space:AgreementNum    = inRef.AgreementNum;
+		SET outRef.space:Account.space:Name = inRef.Account.Name;
+		SET outRef.space:User.space:FIO = inRef.User.FIO;
+		SET outRef.space:User.space:Position = inRef.User.Position;
+		SET outRef.space:User.space:TDivision = inRef.User.TDivision;
+		SET outRef.space:User.space:FDivision = inRef.User.FDivision;
+		
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER CARDINALITY(inRef.ListOfCollateral.*[]);
+		
+		WHILE I <= J DO
+			DECLARE L INTEGER CARDINALITY(inRef.ListOfCollateral.Collateral[I].*[]);
+			DECLARE K INTEGER 1;
+			/*
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:CRMId = inRef.ListOfCollateral.Collateral[I].CRMId;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:CollType = inRef.ListOfCollateral.Collateral[I].CollType;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:AssessType = inRef.ListOfCollateral.Collateral[I].AssessType;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:AssessSource = inRef.ListOfCollateral.Collateral[I].AssessSource;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:Assessment = inRef.ListOfCollateral.Collateral[I].Assessment;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:BusinessValue = inRef.ListOfCollateral.Collateral[I].BusinessValue;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:ExpertRate    = inRef.ListOfCollateral.Collateral[I].ExpertRate;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:PortfSize	  = inRef.ListOfCollateral.Collateral[I].PortfSize;	
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:AssessmentDate = inRef.ListOfCollateral.Collateral[I].AssessmentDate;	  			
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:PDRate         = inRef.ListOfCollateral.Collateral[I].PDRate; 
+			*/
+			WHILE K <= L DO
+				
+				SET outRef.space:ListOfCollateral.space:Collateral[I].space:*[K] = inRef.ListOfCollateral.Collateral[I].*[K];
+			
+				SET K = K + 1;
+							
+			END WHILE;
+						
+			SET I = I + 1;
+			
+		END WHILE;
+					
+		 
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_LGD;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+		
+		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_ConvertFPSU2MDO_CalculationResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:calculationResponse;
+			
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZExpCalculationResponse AS outRef;
+			 
+		
+		SET outRef.ErrorCode 	= inRef.*:ErrorCode;	
+		SET outRef.ErrorMessage = inRef.*:ErrorMessage;	
+		SET outRef.CRMId     	= inRef.*:CRMId;
+		SET outRef.LGDType	 	= inRef.*:LGDType;
+		SET outRef.LGDDate   	= inRef.*:LGDDate;
+		SET outRef.PD		 	= inRef.*:PD;
+		SET outRef.LGD		 	= inRef.*:LGD;
+		SET outRef.EAD		 	= inRef.*:EAD;
+		SET outRef.Sum		 	= inRef.*:Sum;
+		SET outRef.ELPercent 	= inRef.*:ELPercent;
+		SET outRef.EL		 	= inRef.*:EL;
+		SET outRef.TotalValue 	= inRef.*:TotalValue;
+		SET outRef.TotalCollValueLGD = inRef.*:TotalCollValueLGD;
+		SET outRef.TotalCollValueEAD = inRef.*:TotalCollValueEAD;		
+		
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER CARDINALITY(inRef.*:ListOfCollateral.*:*[]);
+		
+		WHILE I <= J DO
+			SET outRef.ListOfCollateral.Collateral[I].CRMId = inRef.*:ListOfCollateral.*:Collateral[I].*:CRMId;
+			SET outRef.ListOfCollateral.Collateral[I].CollType = inRef.*:ListOfCollateral.*:Collateral[I].*:CollType;
+			SET outRef.ListOfCollateral.Collateral[I].ReturnRate = inRef.*:ListOfCollateral.*:Collateral[I].*:ReturnRate;
+			SET outRef.ListOfCollateral.Collateral[I].DiscountRate = inRef.*:ListOfCollateral.*:Collateral[I].*:DiscountRate;
+			SET outRef.ListOfCollateral.Collateral[I].CollValueEAD = inRef.*:ListOfCollateral.*:Collateral[I].*:CollValueEAD;
+			SET outRef.ListOfCollateral.Collateral[I].CollValueLGD = inRef.*:ListOfCollateral.*:Collateral[I].*:CollValueLGD;
+		
+		SET I = I + 1;
+		
+		END WHILE;
+					
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+	
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		CALL SetMQReplyDestination(Environment.UserProperties.Source, OutputLocalEnvironment);
+		
+		SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_SaveOrigMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.Source.MQMD 			= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 		= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties	= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 			= InputBody;		
+		
+		RETURN TRUE;
+	END;
+	 
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_Convert2SOAP_FinRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.finalizationRequest;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<]; 
+				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE space NAME 'finalizationRequest';
+				
+		SET OutputRoot.XMLNSC.space:finalizationRequest.(XMLNSC.NamespaceDecl)xmlns:ser = space;		
+		SET OutputRoot.XMLNSC.space:finalizationRequest.(XMLNSC.NamespaceDecl)xmlns:xsi = ser1;
+		
+		SET outRef.space:FIO      	= inRef.FIO;
+		SET outRef.space:Position	= inRef."Position";	
+		SET outRef.space:CRMId    	= inRef.CRMId;
+		SET outRef.space:Type     	= inRef.Type;	 
+		 
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_LGD;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_ConvertFPSU2MDO_FinalizationResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:finalizationResponse;
+			
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZExpFinalizationResponse AS outRef;
+	 		
+		SET outRef.ErrorCode        = inRef.*:ErrorCode;		
+		SET outRef.ErrorMessage     = inRef.*:ErrorMessage;
+		SET outRef.CRMId	 		= inRef.*:CRMId;
+		SET outRef.Type		   		= inRef.*:Type;
+									
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_Convert2SOAP_CorrectRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.correct.arg0;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE pd NAME 'correct';
+				
+		SET OutputRoot.XMLNSC.pd:correct.(XMLNSC.NamespaceDecl)xmlns:ser = pd;		
+		SET OutputRoot.XMLNSC.pd:correct.(XMLNSC.NamespaceDecl)xmlns:xsi = ser1;
+		
+		DECLARE oRef REFERENCE TO outRef;
+						
+		CREATE FIELD outRef.pd:arg0 AS oRef;		 
+				
+		SET oRef.pd:RatingId  				= inRef.RatingId;
+		SET oRef.pd:Model    			    = inRef.Model;
+		SET oRef.pd:ModelIntegrationId      = inRef.ModelIntegrationId;
+		SET oRef.pd:CorrectValue			= inRef.CorrectValue;
+		SET oRef.pd:Comments				= inRef.Comments;
+		SET oRef.pd:Status					= inRef.Status;
+		SET oRef.pd:AdjustmentReason		= inRef.AdjustmentReason;
+		
+		DECLARE rRef REFERENCE TO oRef;
+		DECLARE iRef REFERENCE TO inRef.Requestor;
+		
+		--CREATE LASTCHILD OF oRef.pd AS rRef NAME 'Requestor';
+		CREATE FIELD oRef.pd:Requestor AS rRef;
+		
+		SET rRef.pd:Login 					= iRef.Login;	 			   	 
+		SET rRef.pd:LastName				= iRef.LastName; 
+		SET rRef.pd:FirstName				= iRef.FirstName;
+		SET rRef.pd:MiddleName				= iRef.MiddleName; 
+		SET rRef.pd:Division				= iRef.Division; 
+		SET rRef.pd:DivisionCode			= iRef.DivisionCode; 
+		SET rRef.pd:JobTitle				= iRef.JobTitle;
+		SET rRef.pd:Role					= iRef.Role; 
+		 
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_RAT;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_Convert2SOAP_ConfirmRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.confirm.arg0;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+			
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE pd NAME 'confirm';
+				
+		SET OutputRoot.XMLNSC.pd:confirm.(XMLNSC.NamespaceDecl)xmlns:ser = pd;		
+		SET OutputRoot.XMLNSC.pd:confirm.(XMLNSC.NamespaceDecl)xmlns:xsi = ser1;
+		
+		DECLARE oRef REFERENCE TO outRef;
+						
+		CREATE FIELD outRef.pd:arg0 AS oRef;		 
+				
+		SET oRef.pd:RatingValue				= inRef.RatingValue;		
+		SET oRef.pd:RatingId  				= inRef.RatingId;
+		SET oRef.pd:Model    			    = inRef.Model;
+		SET oRef.pd:ModelIntegrationId      = inRef.ModelIntegrationId;
+				
+		DECLARE rRef REFERENCE TO oRef;
+		DECLARE iRef REFERENCE TO inRef.Requestor;
+		
+		--CREATE LASTCHILD OF oRef.pd AS rRef NAME 'Requestor';
+		CREATE FIELD oRef.pd:Requestor AS rRef;
+		
+		SET rRef.pd:Login 					= iRef.Login;	 			   	 
+		SET rRef.pd:LastName				= iRef.LastName; 
+		SET rRef.pd:FirstName				= iRef.FirstName;
+		SET rRef.pd:MiddleName				= iRef.MiddleName; 
+		SET rRef.pd:Division				= iRef.Division; 
+		SET rRef.pd:DivisionCode			= iRef.DivisionCode; 
+		SET rRef.pd:JobTitle				= iRef.JobTitle;
+		SET rRef.pd:Role					= iRef.Role; 
+		 
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_RAT;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_ConvertFPSU2MDO_ConfirmResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:confirmResponse.return;
+			
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZExpConfirmResponse AS outRef;
+		
+		DECLARE oRef REFERENCE TO outRef;
+	 	
+	 	CREATE LASTCHILD OF OutputRoot.XMLNSC.KZExpConfirmResponse AS oRef NAME 'return';
+	 		
+		SET oRef.ErrorCode        		= inRef.ErrorCode;		
+		SET oRef.ErrorMessage     		= inRef.ErrorMessage;
+		SET oRef.DefaultProbability     = inRef.DefaultProbability;
+									
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_ConvertFPSU2MDO_CorrectResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:correctResponse.return;
+			
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZExpCorrectResponse AS outRef;
+		
+		DECLARE oRef REFERENCE TO outRef;
+	 	
+	 	CREATE LASTCHILD OF OutputRoot.XMLNSC.KZExpCorrectResponse AS oRef NAME 'return';
+	 		
+		SET oRef.ErrorCode        		= inRef.ErrorCode;		
+		SET oRef.ErrorMessage     		= inRef.ErrorMessage;
+									
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_Convert2SOAP_CorrectRequestSimple
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.calculate.arg0;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+			
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE pd NAME 'calculate';
+				
+		SET OutputRoot.XMLNSC.pd:calculate.(XMLNSC.NamespaceDecl)xmlns:ser = pd;		
+		SET OutputRoot.XMLNSC.pd:calculate.(XMLNSC.NamespaceDecl)xmlns:xsi = ser1;
+		
+		DECLARE oRef REFERENCE TO outRef;
+						
+		CREATE FIELD outRef.pd:arg0 AS oRef;		 
+				
+		SET oRef.pd:RatingId  				= inRef.RatingId;
+		SET oRef.pd:Model    			    = inRef.Model;
+		SET oRef.pd:ModelIntegrationId      = inRef.ModelIntegrationId;
+		SET oRef.pd:AccountId				= inRef.AccountId;
+		SET oRef.pd:UID						= inRef.UID;
+		SET oRef.pd:Account					= inRef.Account;
+		SET oRef.pd:INN						= inRef.INN;
+		SET oRef.pd:KPP						= inRef.KPP;
+		SET oRef.pd:GSZId					= inRef.GSZId;
+		SET oRef.pd:GSZ						= inRef.GSZ;
+		SET oRef.pd:SubjectId				= inRef.SubjectId;
+		SET oRef.pd:Subject					= inRef.Subject;
+		SET oRef.pd:SubjectOKATO			= inRef.SubjectOKATO;
+		SET oRef.pd:Project					= inRef.Project;
+				
+		DECLARE rRef REFERENCE TO oRef;
+		DECLARE iRef REFERENCE TO inRef.Requestor;
+		
+		--CREATE LASTCHILD OF oRef.pd AS rRef NAME 'Requestor';
+		CREATE FIELD oRef.pd:Requestor AS rRef;
+		
+		SET rRef.pd:Login 					= iRef.Login;	 			   	 
+		SET rRef.pd:LastName				= iRef.LastName; 
+		SET rRef.pd:FirstName				= iRef.FirstName;
+		SET rRef.pd:MiddleName				= iRef.MiddleName; 
+		SET rRef.pd:Division				= iRef.Division; 
+		SET rRef.pd:DivisionCode			= iRef.DivisionCode; 
+		SET rRef.pd:JobTitle				= iRef.JobTitle;
+		SET rRef.pd:Role					= iRef.Role;
+		
+		DECLARE lRef REFERENCE TO oRef;
+		DECLARE ilRef REFERENCE TO inRef.ListOfFixedFactor;
+		
+		CREATE FIELD oRef.pd:ListOfFixedFactor AS lRef;
+		
+		DECLARE I INTEGER 1;
+				
+		DECLARE J INTEGER CARDINALITY(ilRef.*[]);
+		
+		WHILE I <= J DO
+													
+				SET lRef.pd:FixedFactor[I].pd:Factor 				= ilRef.FixedFactor[I].Factor;
+				SET lRef.pd:FixedFactor[I].pd:FactorIntegrationId   = ilRef.FixedFactor[I].FactorIntegrationId;
+				SET lRef.pd:FixedFactor[I].pd:Group 				= ilRef.FixedFactor[I].Group;
+				SET lRef.pd:FixedFactor[I].pd:Value 				= ilRef.FixedFactor[I].Value;
+				SET lRef.pd:FixedFactor[I].pd:ValueIntegrationId 	= ilRef.FixedFactor[I].ValueIntegrationId;
+		
+			SET I = I + 1;
+			
+		END WHILE;
+		
+		DECLARE periodRef REFERENCE TO oRef;
+		DECLARE inPeriodRef REFERENCE TO inRef.ListOfRatingPeriod;
+		
+		CREATE LASTCHILD OF oRef AS periodRef NAMESPACE pd NAME 'ListOfRatingPeriod';
+		
+		DECLARE K INTEGER 1;		
+		DECLARE L INTEGER CARDINALITY(inPeriodRef.*[]);
+		
+		WHILE K <= L DO
+			
+			DECLARE G INTEGER CARDINALITY(inPeriodRef.RatingPeriod[K].ListOfCardinalFactor.*[]);
+			DECLARE C INTEGER 1;
+			
+			SET periodRef.pd:RatingPeriod[K].pd:ReportData 		= inPeriodRef.RatingPeriod[K].ReportData;
+			SET periodRef.pd:RatingPeriod[K].pd:Period     		= inPeriodRef.RatingPeriod[K].Period;
+			SET periodRef.pd:RatingPeriod[K].pd:StartDate		= inPeriodRef.RatingPeriod[K].StartDate;
+			SET periodRef.pd:RatingPeriod[K].pd:PeriodType		= inPeriodRef.RatingPeriod[K].PeriodType;
+			SET periodRef.pd:RatingPeriod[K].pd:Comments		= inPeriodRef.RatingPeriod[K].Comments;
+			
+			WHILE C <= G DO
+				
+				SET periodRef.pd:RatingPeriod[K].pd:ListOfCardinalFactor.pd:CardinalFactor[C].pd:Factor 			  = inPeriodRef.RatingPeriod[K].ListOfCardinalFactor.CardinalFactor[C].Factor;
+				SET periodRef.pd:RatingPeriod[K].pd:ListOfCardinalFactor.pd:CardinalFactor[C].pd:FactorIntegrationId  = inPeriodRef.RatingPeriod[K].ListOfCardinalFactor.CardinalFactor[C].FactorIntegrationId;
+				SET periodRef.pd:RatingPeriod[K].pd:ListOfCardinalFactor.pd:CardinalFactor[C].pd:Group        		  = inPeriodRef.RatingPeriod[K].ListOfCardinalFactor.CardinalFactor[C].Group;
+				SET periodRef.pd:RatingPeriod[K].pd:ListOfCardinalFactor.pd:CardinalFactor[C].pd:NumValue			  = inPeriodRef.RatingPeriod[K].ListOfCardinalFactor.CardinalFactor[C].NumValue;
+			
+				SET C = C + 1;
+			
+			END WHILE;	
+			
+			SET K = K + 1;
+			
+		END WHILE;
+		
+		DECLARE supportRef REFERENCE TO oRef;
+		DECLARE inSupportRef REFERENCE TO inRef.ListOfRatingSupport;
+		
+		CREATE LASTCHILD OF oRef AS supportRef NAMESPACE pd NAME 'ListOfRatingSupport';
+		
+		DECLARE H INTEGER 1;
+		DECLARE O INTEGER CARDINALITY(inSupportRef.*[]);
+		
+		WHILE H <= O DO
+			
+			DECLARE T INTEGER CARDINALITY(inSupportRef.RatingSupport[H].ListOfSupportFactor.*[]);
+			DECLARE P INTEGER 1;
+			
+			SET supportRef.pd:RatingSupport[H].pd:Name 					= inSupportRef.RatingSupport[H].Name;
+			SET supportRef.pd:RatingSupport[H].pd:IntegrationId     	= inSupportRef.RatingSupport[H].IntegrationId;
+			
+			WHILE P <= T DO
+				
+				SET supportRef.pd:RatingSupport[H].pd:ListOfSupportFactor.pd:SupportFactor[P].pd:Factor 			  	= inSupportRef.RatingSupport[H].ListOfSupportFactor.SupportFactor[P].Factor;
+				SET supportRef.pd:RatingSupport[H].pd:ListOfSupportFactor.pd:SupportFactor[P].pd:FactorIntegrationId  	= inSupportRef.RatingSupport[H].ListOfSupportFactor.SupportFactor[P].FactorIntegrationId;
+				SET supportRef.pd:RatingSupport[H].pd:ListOfSupportFactor.pd:SupportFactor[P].pd:Group        			= inSupportRef.RatingSupport[H].ListOfSupportFactor.SupportFactor[P].Group;
+				SET supportRef.pd:RatingSupport[H].pd:ListOfSupportFactor.pd:SupportFactor[P].pd:Value			    	= inSupportRef.RatingSupport[H].ListOfSupportFactor.SupportFactor[P].Value;
+				SET supportRef.pd:RatingSupport[H].pd:ListOfSupportFactor.pd:SupportFactor[P].pd:ValueIntegrationId  	= inSupportRef.RatingSupport[H].ListOfSupportFactor.SupportFactor[P].ValueIntegrationId;
+				
+				SET P = P + 1;
+			
+			END WHILE;	
+			
+			SET H = H + 1;
+					
+		END WHILE;		 
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_RAT;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_ConvertFPSU2MDO_CorrectResponseSimple
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:calculateResponse.return;
+			
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZExpCalculateResponse AS outRef;
+		
+		DECLARE oRef REFERENCE TO outRef;
+	 	
+	 	CREATE LASTCHILD OF OutputRoot.XMLNSC.KZExpCalculateResponse AS oRef NAME 'return';
+	 		
+		SET oRef.ErrorCode        		= inRef.ErrorCode;		
+		SET oRef.ErrorMessage     		= inRef.ErrorMessage;
+		
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER CARDINALITY(inRef.ListOfResultRating.*[]);
+									
+		WHILE I <= J DO
+		
+			SET oRef.ListOfResultRating.*[I] = inRef.ListOfResultRating.*[I]; 
+		
+			SET I = I + 1;
+		
+		END WHILE;	 							
+		
+		DECLARE K INTEGER 1;
+		DECLARE L INTEGER CARDINALITY(inRef.ListOfCalculatedFactor.*[]);
+				 					
+		WHILE K <= L DO
+		
+			SET oRef.ListOfCalculatedFactor.*[K] = inRef.ListOfCalculatedFactor.*[K]; 
+			
+			SET K = K + 1;
+			
+		END WHILE;
+		
+		DECLARE E INTEGER 1;
+		DECLARE R INTEGER CARDINALITY(inRef.ListOfAddParameter.*[]);
+				 					
+		WHILE E <= R DO
+		
+			SET oRef.ListOfAddParameter.*[E] = inRef.ListOfAddParameter.*[E]; 
+			
+			SET E = E + 1;
+			
+		END WHILE;
+										
+									
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_Convert2SOAP_StructRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.StructRequest;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE struct NAME 'StructRequest';
+				
+		SET OutputRoot.XMLNSC.struct:StructRequest.(XMLNSC.NamespaceDecl)xmlns:ser = struct;		
+		SET OutputRoot.XMLNSC.struct:StructRequest.(XMLNSC.NamespaceDecl)xmlns:xsi = ser1;
+		
+		SET outRef.(XMLNSC.Attribute)MessageId = inRef.MessageId;
+		
+		SET outRef.struct:SBRFAMTemplate.(XMLNSC.Attribute)IntegrationType 		= inRef.SBRFAMTemplate.IntegrationType;
+		SET outRef.struct:SBRFAMTemplate.(XMLNSC.Attribute)Model 				= inRef.SBRFAMTemplate.Model;
+		SET outRef.struct:SBRFAMTemplate.(XMLNSC.Attribute)Name 				= inRef.SBRFAMTemplate.Name;
+		SET outRef.struct:SBRFAMTemplate.(XMLNSC.Attribute)ModelIntegrationId   = inRef.SBRFAMTemplate.ModelIntegrationId;
+		SET outRef.struct:SBRFAMTemplate.(XMLNSC.Attribute)TemplateId 			= inRef.SBRFAMTemplate.TemplateId;
+		
+		DECLARE oRef REFERENCE TO outRef.*[<];
+		
+		CREATE LASTCHILD OF oRef NAMESPACE struct NAME 'ListOfSBRFAMComponent';
+		
+		DECLARE sbrRef REFERENCE TO oRef.*[<];
+		
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER CARDINALITY(inRef.SBRFAMTemplate.ListOfSBRFAMComponent.*[]);
+		
+		WHILE I <= J DO
+		
+			CREATE LASTCHILD OF sbrRef NAMESPACE struct NAME 'SBRFAMComponent';
+		
+			SET sbrRef.*[<].(XMLNSC.Attribute)DisplayName  = inRef.SBRFAMTemplate.*[<].*[I].DisplayName;
+			SET sbrRef.*[<].(XMLNSC.Attribute)Name		   = inRef.SBRFAMTemplate.*[<].*[I].Name;
+			SET sbrRef.*[<].(XMLNSC.Attribute)XmlName	   = inRef.SBRFAMTemplate.*[<].*[I].XmlName;
+			SET sbrRef.*[<].(XMLNSC.Attribute)ParentName   = inRef.SBRFAMTemplate.*[<].*[I].ParentName;
+			
+			DECLARE K INTEGER 1;
+			DECLARE L INTEGER CARDINALITY(inRef.SBRFAMTemplate.*[<].*[I].*[<].*[]);
+			
+			CREATE LASTCHILD OF sbrRef.*[I] NAMESPACE struct NAME 'ListOfSBRFAMParameter';
+			DECLARE listRef REFERENCE TO sbrRef.*[I].*[<];
+			
+			WHILE K <= L DO
+				
+				CREATE LASTCHILD OF listRef NAMESPACE struct NAME 'SBRFAMParameter';
+				
+				SET listRef.*[<].(XMLNSC.Attribute)Required     = inRef.SBRFAMTemplate.*[<].*[I].*[<].*[K].Required;
+				SET listRef.*[<].(XMLNSC.Attribute)DisplayName  = inRef.SBRFAMTemplate.*[<].*[I].*[<].*[K].DisplayName;
+				SET listRef.*[<].(XMLNSC.Attribute)Name 		= inRef.SBRFAMTemplate.*[<].*[I].*[<].*[K].Name;
+				SET listRef.*[<].(XMLNSC.Attribute)Type 	    = inRef.SBRFAMTemplate.*[<].*[I].*[<].*[K].Type;
+				SET listRef.*[<].(XMLNSC.Attribute)Length 		= inRef.SBRFAMTemplate.*[<].*[I].*[<].*[K].Length;
+				SET listRef.*[<].(XMLNSC.Attribute)XmlName	 	= inRef.SBRFAMTemplate.*[<].*[I].*[<].*[K].XmlName;
+				
+				SET K = K + 1;
+				
+				
+			END WHILE;	
+				
+			SET I = I + 1;
+			
+		END WHILE;
+		 
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_RAT;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_ConvertFPSU2MDO_StructResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:StructResponse;
+			
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZExpCalculateResponse AS outRef;
+		
+		DECLARE oRef REFERENCE TO outRef;
+		 		
+		SET outRef.ErrorCode        		= inRef.ErrorCode;		
+		SET outRef.ErrorMessage     		= inRef.ErrorMessage;
+										
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+
+
+CREATE COMPUTE MODULE SOAPRequestForFPSU_ConvertFPSU2MDO_markerResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:markerResponse;
+			
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZExpmarkerResponse AS outRef;
+	 		
+		SET outRef.ErrorCode        = inRef.*:ErrorCode;		
+		SET outRef.ErrorMessage     = inRef.*:ErrorMessage;
+		SET outRef.CRMIdOpportunity	= inRef.*:CRMIdOpportunity;
+									
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+

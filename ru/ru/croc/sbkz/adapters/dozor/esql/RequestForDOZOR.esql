@@ -1,0 +1,19 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.dozor.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE RequestForDozor_convert
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE docsexp REFERENCE TO OutputRoot;
+
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS docsexp NAME 'DocsExp';
+		DECLARE inRq REFERENCE TO InputRoot.XMLNSC.KZDocsExpRq;
+		DECLARE outRq REFERENCE TO OutputRoot.XMLNSC.DocsExp;
+		
+		SET outRq = inRq.RequestData.DocsExp;
+		RETURN TRUE;
+	END;
+END MODULE;

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmFilter.msgnode="ComIbmFilter.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow" xmlns:ru_croc_sbkz_mediation_common_flow_OperationEndPointSubflow.msgflow="ru/croc/sbkz/mediation/common/flow/OperationEndPointSubflow.msgflow" xmlns:ru_croc_sbkz_mediation_common_flow_RequestSubflow.msgflow="ru/croc/sbkz/mediation/common/flow/RequestSubflow.msgflow"
+    xmlns:ru_croc_sbkz_mediation_common_flow_ResponseSubflow.msgflow="ru/croc/sbkz/mediation/common/flow/ResponseSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_TimeoutAggrSubflow.msgflow="ru/croc/sbrf/bp/common/flow/TimeoutAggrSubflow.msgflow" xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbkz/mediation/bl/flow/NewBlackListPragmaResponse.msgflow"
+    nsPrefix="ru_croc_sbkz_mediation_bl_flow_NewBlackListPragmaResponse.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.PragmaAggrName" name="PragmaAggrName" lowerBound="1" defaultValueLiteral="NEWBLACKLIST_MEDIATION_PRAGMA">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.AMLAggrName" name="AMLAggrName" lowerBound="1" defaultValueLiteral="BLACKLIST_MEDIATION_AML">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.AMLAggrTimeout" name="AMLAggrTimeout" lowerBound="1" defaultValueLiteral="600">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EInt"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="NewBlackListPragmaResponse" bundleName="ru/croc/sbkz/mediation/bl/flow/NewBlackListPragmaResponse" pluginId="FlowMediationKZ"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/FlowMediationKZ/icons/full/obj16/NewBlackListPragmaResponse.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/FlowMediationKZ/icons/full/obj30/NewBlackListPragmaResponse.gif"/>
+    <composition>
+      <nodes xmi:type="ru_croc_sbkz_mediation_common_flow_ResponseSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_1" location="-35,108" InputQueueName="ESB.MEDIATION.NEWBLACKLIST.PRAGMA.RESPONSE" EventReceiver="NEWBLACKLIST_MEDIATION" ErrHandEventReceiverProp="NEWBLACKLIST_MEDIATION" SourceQueue="ESB.MEDIATION.NEWBLACKLIST.PRAGMA.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="ESB.MEDIATION.NEWBLACKLIST.PRAGMA.RESPONSE"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_TimeoutAggrSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_2" location="199,183" EventSource="ESB" EventReceiver="NEWBLACKLIST_MEDIATION" QueueName="ESB.MEDIATION.NEWBLACKLIST.PRAGMA.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="TimeoutAggrSubflow"/>
+      </nodes>
+      <nodes xmi:type="ComIbmFilter.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_3" location="391,104" filterExpression="esql://routine/ru.croc.sbkz.mediation.bl.esql#NewBlackListPragmaResponse_IsClientInBlackList.Main">
+        <translation xmi:type="utility:ConstantString" string="IsClientInBlackList"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbkz_mediation_common_flow_OperationEndPointSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_4" location="559,187" CurrentEventSource="NEWBLACKLIST_MEDIATION" SourceQueue="ESB.MEDIATION.BLACKLIST.NEWPRAGMA.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="OperationEndPointSubflow"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_5" location="525,49" computeExpression="esql://routine/ru.croc.sbkz.mediation.bl.esql#NewBlackListPragmaResponse_FillMqRfh2usr.Main">
+        <translation xmi:type="utility:ConstantString" string="FillMqRfh2usr"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_6" location="623,50" computeExpression="esql://routine/ru.croc.sbkz.mediation.bl.esql#NewBlackListPragmaResponse_RestoreOrigRequest.Main">
+        <translation xmi:type="utility:ConstantString" string="RestoreOrigRequest"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbkz_mediation_common_flow_RequestSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_7" location="736,51" CorrelationQueueName="ESB.MEDIATION.AML.AGGR.ECHO" CorrelationReplyToQueue="ESB.MEDIATION.BLACKLIST.AML.RESPONSE" ReplyToQueue="ESB.MEDIATION.BLACKLIST.AML.RESPONSE" EventSource="NEWBLACKLIST_MEDIATION" IsCopyCorrelationParams="true">
+        <translation xmi:type="utility:ConstantString" string="RequestForAMLAdapter"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_8" location="418,138" computeExpression="esql://routine/ru.croc.sbkz.mediation.bl.esql#NewBlackListPragmaResponse_CreateResponseWithoutAMLRequest.Main">
+        <translation xmi:type="utility:ConstantString" string="CreateResponseWithoutAMLRequest"/>
+      </nodes>
+      <nodes xmi:type="ComIbmFilter.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_9" location="230,100" filterExpression="esql://routine/ru.croc.sbkz.mediation.bl.esql#NewBlackListPragmaResponse_IsErrorReturned.Main">
+        <translation xmi:type="utility:ConstantString" string="IsErrorReturned"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_10" location="308,146" computeExpression="esql://routine/ru.croc.sbkz.mediation.bl.esql#NewBlackListPragmaResponse_CreateErrorResponse.Main">
+        <translation xmi:type="utility:ConstantString" string="CreateErrorResponse"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.UnkMessage" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.Timeout" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.TimeOutInput"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.false" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_8" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_6" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_8" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.true" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_9" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_8" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_9" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.Out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_10" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_9" sourceTerminalName="OutTerminal.false" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_11" targetNode="FCMComposite_1_10" sourceNode="FCMComposite_1_9" sourceTerminalName="OutTerminal.true" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_12" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_10" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input">
+        <bendPoints>96,36,-167,-5</bendPoints>
+      </connections>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_13" targetNode="FCMComposite_1_10" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.unknown" targetTerminalName="InTerminal.in">
+        <bendPoints>-39,-56,35,-98</bendPoints>
+      </connections>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.Basic" configurable="true" describedAttribute="Property.PragmaAggrName">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.PragmaAggrName" bundleName="ru/croc/sbkz/mediation/bl/flow/NewBlackListPragmaResponse" pluginId="FlowMediationKZ"/>
+        <propertyDescriptor groupName="Group.Basic" configurable="true" describedAttribute="Property.AMLAggrName">
+          <propertyName xmi:type="utility:TranslatableString" key="Property.AMLAggrName" bundleName="ru/croc/sbkz/mediation/bl/flow/NewBlackListPragmaResponse" pluginId="FlowMediationKZ"/>
+          <propertyDescriptor groupName="Group.Basic" describedAttribute="Property.AMLAggrTimeout">
+            <propertyName xmi:type="utility:TranslatableString" key="Property.AMLAggrTimeout" bundleName="ru/croc/sbkz/mediation/bl/flow/NewBlackListPragmaResponse" pluginId="FlowMediationKZ"/>
+          </propertyDescriptor>
+        </propertyDescriptor>
+      </propertyDescriptor>
+    </propertyOrganizer>
+    <attributeLinks promotedAttribute="Property.PragmaAggrName" overriddenNodes="FCMComposite_1_1">
+      <overriddenAttribute href="ru/croc/sbkz/mediation/common/flow/ResponseSubflow.msgflow#Property.aggregateName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.AMLAggrName" overriddenNodes="FCMComposite_1_7">
+      <overriddenAttribute href="ru/croc/sbkz/mediation/common/flow/RequestSubflow.msgflow#//FCMComposite_1/aggregateName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.AMLAggrTimeout" overriddenNodes="FCMComposite_1_7">
+      <overriddenAttribute href="ru/croc/sbkz/mediation/common/flow/RequestSubflow.msgflow#//FCMComposite_1/AggrTimeout"/>
+    </attributeLinks>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

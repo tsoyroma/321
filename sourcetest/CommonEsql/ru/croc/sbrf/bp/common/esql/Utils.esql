@@ -1,0 +1,1432 @@
+BROKER SCHEMA ru.croc.sbrf.bp.common.esql
+
+-- Очередь для тайм-аутов
+DECLARE ESB_TIMEOUT_QUEUE	CONSTANT CHARACTER 'EVENT.TIMEOUT';
+-- Время, через которое сообщения удаляется из очереди (10 мин = 6000мск) 
+DECLARE ESB_EXPIRE_TIMEOUT	CONSTANT INTEGER 6000;
+
+/**
+ *	Копирует XML-дерево из inData в outData, убирая namespace в результирующем дереве
+ */
+CREATE PROCEDURE removeNamespaceInfo (IN inData REFERENCE, INOUT outData REFERENCE) BEGIN
+	DECLARE N INTEGER CARDINALITY(inData.*:*[]);
+	DECLARE I INTEGER 0;
+	DECLARE innerRef REFERENCE TO outData;
+	
+	WHILE I < N DO
+		SET I = I + 1;
+		IF FIELDVALUE(inData.*:*[I]) IS NOT NULL THEN
+			CREATE LASTCHILD OF innerRef
+				TYPE FIELDTYPE(inData.*:*[I])
+				NAME FIELDNAME(inData.*:*[I])
+				VALUE FIELDVALUE(inData.*:*[I]);
+		ELSE
+			CREATE LASTCHILD OF innerRef
+				TYPE FIELDTYPE(inData.*:*[I])
+				NAME FIELDNAME(inData.*:*[I]);
+		END IF;
+					
+		CALL removeNamespaceInfo(inData.*:*[I], innerRef.*[<]);
+		MOVE innerRef TO outData;
+	END WHILE;
+	
+	MOVE outData TO innerRef;
+END;
+
+/**
+ *	Копирует XML-дерево из inData в outData, убирая все namespace и атрибуты в результирующем дереве
+ */
+CREATE PROCEDURE removeAllNamespaceInfo (IN inData REFERENCE, INOUT outData REFERENCE) BEGIN
+	DECLARE N INTEGER CARDINALITY(inData.*:*[]);
+	DECLARE I INTEGER 0;
+	DECLARE innerRef REFERENCE TO outData;
+	
+	WHILE I < N DO
+		SET I = I + 1;
+		
+		DECLARE fieldTp INTEGER FIELDTYPE(inData.*:*[I]);
+		IF fieldTp NOT IN (XMLNSC.NamespaceDecl, XMLNSC.DoubleAttribute, XMLNSC.SingleAttribute)
+		THEN
+			IF FIELDVALUE(inData.*:*[I]) IS NOT NULL THEN
+				CREATE LASTCHILD OF innerRef
+					TYPE FIELDTYPE(inData.*:*[I])
+					NAME FIELDNAME(inData.*:*[I])
+					VALUE FIELDVALUE(inData.*:*[I]);
+			ELSE
+				CREATE LASTCHILD OF innerRef
+					TYPE FIELDTYPE(inData.*:*[I])
+					NAME FIELDNAME(inData.*:*[I]);
+			END IF;
+
+			CALL removeAllNamespaceInfo(inData.*:*[I], innerRef.*[<]);
+			MOVE innerRef TO outData;
+		END IF;
+	END WHILE;
+	
+	MOVE outData TO innerRef;
+END;
+
+/**
+ *	Копирует XML-дерево из inData в outData с проставлением namespace ns у всех элементов,
+ */
+CREATE PROCEDURE setNamespaceInfo (IN inData REFERENCE, INOUT outData REFERENCE, IN ns NAMESPACE) BEGIN
+	DECLARE N INTEGER CARDINALITY(inData.*:*[]);
+	DECLARE I INTEGER 0;
+	DECLARE innerRef REFERENCE TO outData;
+	
+	WHILE I < N DO
+		SET I = I + 1;
+		IF FIELDVALUE(inData.*:*[I]) IS NOT NULL THEN
+			CREATE LASTCHILD OF innerRef
+				TYPE FIELDTYPE(inData.*:*[I])
+				NAMESPACE ns
+				NAME FIELDNAME(inData.*:*[I])
+				VALUE FIELDVALUE(inData.*:*[I]);
+		ELSE
+			CREATE LASTCHILD OF innerRef
+				TYPE FIELDTYPE(inData.*:*[I])
+				NAMESPACE ns
+				NAME FIELDNAME(inData.*:*[I]);
+		END IF;
+					
+		CALL setNamespaceInfo(inData.*:*[I], innerRef.*[<], ns);
+		MOVE innerRef TO outData;
+	END WHILE;
+	
+	MOVE outData TO innerRef;
+END;
+
+/**
+ *	Копирует XML-дерево из inData в outData с проставлением namespace ns у всех элементов, кроме атрибутов -
+ *  здесь namespace не проставляется
+ */
+CREATE PROCEDURE setNamespaceInfoIgnoreAttrs (IN inData REFERENCE, INOUT outData REFERENCE, IN ns NAMESPACE) BEGIN
+	DECLARE N INTEGER CARDINALITY(inData.*:*[]);
+	DECLARE I INTEGER 0;
+	DECLARE innerRef REFERENCE TO outData;
+
+	WHILE I < N DO
+		SET I = I + 1;
+		IF FIELDVALUE(inData.*:*[I]) IS NOT NULL THEN
+			-- Проверки только XMLNSC.Attribute недостаточно
+			IF FIELDTYPE(inData.*:*[I]) = XMLNSC.Attribute
+			OR FIELDTYPE(inData.*:*[I]) = XMLNSC.DoubleAttribute
+			OR FIELDTYPE(inData.*:*[I]) = XMLNSC.SingleAttribute
+			THEN
+				CREATE LASTCHILD OF innerRef
+					TYPE FIELDTYPE(inData.*:*[I])
+					NAME FIELDNAME(inData.*:*[I])
+					VALUE FIELDVALUE(inData.*:*[I]);
+			ELSE
+				CREATE LASTCHILD OF innerRef
+					TYPE FIELDTYPE(inData.*:*[I])
+					NAMESPACE ns
+					NAME FIELDNAME(inData.*:*[I])
+					VALUE FIELDVALUE(inData.*:*[I]);
+			END IF;
+		ELSE
+			CREATE LASTCHILD OF innerRef
+				TYPE FIELDTYPE(inData.*:*[I])
+				NAMESPACE ns
+				NAME FIELDNAME(inData.*:*[I]);
+		END IF;
+
+		CALL setNamespaceInfoIgnoreAttrs(inData.*:*[I], innerRef.*[<], ns);
+		MOVE innerRef TO outData;
+	END WHILE;
+	
+	MOVE outData TO innerRef;
+END;
+
+
+/**
+ *	Очищает у элемента и его поддерева все пространства имен и удаляет все атрибуты
+ *	среди элементов поддерева.
+ */
+CREATE PROCEDURE clearNamespaceRemoveAttributes (IN ref REFERENCE)
+BEGIN
+	IF LASTMOVE(ref) THEN
+		SET ref NAMESPACE = '';
+		DECLARE N INTEGER CARDINALITY(ref.*:*[]);
+		DECLARE I INTEGER N;
+		WHILE I > 0 DO
+			DECLARE reftype INTEGER FIELDTYPE(ref.*:*[I]);
+			IF reftype = XMLNSC.Attribute
+			OR reftype = XMLNSC.DoubleAttribute
+			OR reftype = XMLNSC.SingleAttribute
+			OR reftype = XMLNSC.NamespaceDecl
+			THEN
+				SET ref.*:*[I] = NULL;
+			ELSE
+				CALL clearNamespaceRemoveAttributes(ref.*:*[I]);
+			END IF;
+			SET I = I - 1;
+		END WHILE;
+	END IF;
+END;
+
+
+/**
+ *	Удаляет элемент из дерева сообщения, если у него нет потомков.
+ *	Применима в маппингах сообщений для очистки результирующего дерева от ненужных элементов,
+ *	которые могут нарушать схему.
+ *	Пример:
+ *	SET out.field1.a1 = in.a1
+ *	Если in.a1 пусто, то на выходе имеем ненужный out.field1. Поэтому делаем вызов:
+ *	CALL clearChildless(out.field1);
+ */
+CREATE PROCEDURE clearChildless (IN ref REFERENCE) BEGIN
+	IF NOT EXISTS(ref.*:*[]) THEN
+		SET ref = NULL;
+	END IF;
+END;
+
+/**
+ *	Удаляет элемент из дерева сообщения, если у него менее N потомков.
+ *	Применима в маппингах сообщений для очистки результирующего дерева от ненужных элементов,
+ *	которые могут нарушать схему.
+ *	Пример:
+ *	SET out.field1.a0 = 'CustomConstant'
+ *	SET out.field1.a1 = in.a1
+ *	Если in.a1 пусто, то на выходе имеем ненужный out.field1. Поэтому делаем вызов:
+ *	CALL clearChildless(out.field1, 2);
+ */
+CREATE PROCEDURE clearChildless2 (IN ref REFERENCE, IN N INTEGER) BEGIN
+	IF CARDINALITY(ref.*:*[]) < N THEN
+		SET ref = NULL;
+	END IF;
+END;
+
+/**
+ *	Добавляет описание namespace ns переданному узлу с переданным префиксом
+ *	Перед добавлением проверяет его отсутствие (дабы избежать дублей)
+ *
+ * 	@param rootNode	- узел, которому будет добавлено описание
+ * 	@param ns		- добавляемый namespace
+ * 	@param prefix	- префикс добавляемого namespace
+ */
+CREATE PROCEDURE addNamespaceDescr (INOUT rootNode REFERENCE, IN ns NAMESPACE, IN prefix CHARACTER) BEGIN
+	IF LASTMOVE(rootNode) THEN
+		-- признак присутствия описания
+		DECLARE isExist BOOLEAN false;
+		
+		-- текущий узел
+		DECLARE currentNode REFERENCE TO rootNode;
+		-- перемещаюсь к последнему описанию
+		MOVE currentNode LASTCHILD TYPE XMLNSC.NamespaceDecl;
+		-- по всем описаниям
+		WHILE NOT isExist AND LASTMOVE(currentNode) DO
+			-- если значение совпадает с искомым, то выставлю признак
+			IF ns = FIELDVALUE(currentNode) THEN
+				SET isExist = true;
+			ELSE
+				-- иначе: поднимаюсь к следующему описанию
+				MOVE currentNode PREVIOUSSIBLING TYPE XMLNSC.NamespaceDecl;
+			END IF;
+		END WHILE;
+		
+		-- если нет описания, то добавлю
+		IF NOT isExist THEN
+			SET rootNode.(XMLNSC.NamespaceDecl)xmlns:{prefix} = ns;
+		END IF;
+	END IF;
+END;
+
+/**
+ *	Копирует все описания namespace из узла-источника в результирующий узел
+ *
+ * 	@param inBody	- узел-источник, описания namespace которого будут добавлены
+ * 	@param outBody	- результирующий узел, которому будут добавлены описания namespace
+ */
+CREATE PROCEDURE copyNamespaceDescr (IN inBody REFERENCE, INOUT outBody REFERENCE) BEGIN
+	IF LASTMOVE(inBody) AND LASTMOVE(outBody) THEN
+		-- текущий узел
+		DECLARE currentNode REFERENCE TO inBody.*[<];
+		-- по всем описаниям
+		WHILE LASTMOVE(currentNode) DO
+			MOVE currentNode PREVIOUSSIBLING TYPE XMLNSC.NamespaceDecl;
+			-- если описание есть в источнике, то добавлю в результат
+			IF LASTMOVE(currentNode) THEN
+				CREATE FIRSTCHILD OF outBody FROM currentNode;
+			END IF;
+		END WHILE;
+	END IF;
+END;
+
+
+------------------------------------------
+--
+-- Возвращает ИД сообщения от ЦФТ
+--
+------------------------------------------
+CREATE FUNCTION GetCftId(IN InputRoot REFERENCE) RETURNS CHARACTER
+BEGIN
+	--ИД сообщеняи в ответе от ЦФТ должен возвращаться в MAIN_ID, сначала проверяем его
+	DECLARE RqUID CHARACTER
+		FIELDVALUE(InputRoot.XMLNSC.CIT_REQUEST.SYSTEM.MAIN_ID.(XMLNSC.Attribute)Value);
+
+	--Если аттрибут пустой, проверяем MSG_ID
+	IF RqUID IS NULL OR LENGTH(RqUID) < 1 THEN
+		SET RqUID = FIELDVALUE(InputRoot.XMLNSC.CIT_REQUEST.SYSTEM.MSG_ID.(XMLNSC.Attribute)Value);
+
+		--Если не удалось считать ИД из SYSTEM считываем из DATA
+		IF RqUID IS NULL OR LENGTH(RqUID) < 1 THEN
+			SET RqUID = FIELDVALUE(InputRoot.XMLNSC.CIT_REQUEST.DATA.*:*[>].*:RqUID.(XMLNSC.Attribute)Value);
+
+			IF RqUID IS NULL OR LENGTH(RqUID) < 1 THEN
+				SET RqUID = FIELDVALUE(InputRoot.XMLNSC.CIT_REQUEST.DATA.RqUID.(XMLNSC.Attribute)Value);
+			END IF;
+		END IF;
+	END IF;
+
+	RETURN RqUID;
+END;
+
+
+------------------------------------------
+--
+-- Возвращает дату/время в формате xsd:dateTime
+--
+------------------------------------------
+CREATE FUNCTION getXMLDateTime(IN ts CHARACTER) RETURNS CHARACTER
+BEGIN
+
+	RETURN CAST(CAST(ts AS TIMESTAMP) AS CHARACTER FORMAT 'yyyy-MM-dd''T''HH:mm:ss');
+	
+END;
+
+------------------------------------------
+--
+-- Возвращает дату в формате xsd:Date
+--
+------------------------------------------
+CREATE FUNCTION getXMLDate(IN ts CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CAST(CAST(ts AS TIMESTAMP) AS CHARACTER FORMAT 'yyyy-MM-dd');
+END;
+
+------------------------------------------
+--
+-- Возвращает дату и время типа timestamp с учетом локальной зоны сервера, где работает КСШ 
+--
+------------------------------------------
+CREATE FUNCTION getLocalDateTime() RETURNS TIMESTAMP
+BEGIN
+	-- Определяем временную зону в формате +/-HH:MM
+	-- Удаляем лидирующий +, если есть	
+	DECLARE cESBZone CHARACTER REPLACE(CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'ZZZ'),'+','');
+	-- Возвращаем локальное время с учетом полученной временной зоны
+	RETURN CAST(CURRENT_GMTTIMESTAMP + CAST(cESBZone AS INTERVAL HOUR TO MINUTE) AS TIMESTAMP);
+END;	
+
+------------------------------------------
+--
+-- Функция для возврата времени в строковом виде в формате 'YYYY-DD-MMTHH:mm:ssSSSZZZ
+-- Пример: 2010-08-18T17:05:14.656+04:00
+--
+------------------------------------------
+CREATE FUNCTION getLocalTimeStamp() RETURNS CHARACTER
+BEGIN
+	--Определение часового сдвига
+	DECLARE LocalTZ INTEGER CAST((CAST(LOCAL_TIMEZONE AS INTEGER) / 60) AS INTEGER);
+
+	--Стандартная временная зона
+	IF LocalTZ = 0 THEN
+		-- Определяем локальную временную зону в формате +/-HH:MM
+		-- Удаляем лидирующий +, если есть	
+		DECLARE cESBZone CHARACTER REPLACE(CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'ZZZ'),'+','');
+		-- Возвращаем локальное время, полученное как время по-Гринвичу плюс локальная временная зона
+		DECLARE localTS TIMESTAMP CURRENT_GMTTIMESTAMP + CAST(cESBZone AS INTERVAL HOUR TO MINUTE);
+
+		RETURN CAST(localTS AS CHARACTER FORMAT 'I');
+	ELSE
+		--Форматирование сдвига
+		DECLARE TimeZone CHARACTER;
+
+		IF LocalTZ < 0 THEN
+			SET TimeZone = '-';
+			SET LocalTZ = ABS(LocalTZ);
+		ELSE
+			SET TimeZone = '+';
+		END IF;
+
+		IF LocalTZ < 10 THEN
+			SET TimeZone = TimeZone || '0';
+		END IF;
+
+		SET TimeZone = TimeZone || CAST(LocalTZ AS CHARACTER) || ':00';
+		--Формирование TIMESTAMP с корректной временной зоной
+		RETURN CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd''T''HH:mm:ss.SSS') || TimeZone;
+	END IF;
+END;
+
+------------------------------------------
+--
+-- Функция для возврата timestamp
+--
+------------------------------------------
+CREATE FUNCTION getLocalTS() RETURNS TIMESTAMP
+BEGIN
+	RETURN CAST(getLocalTimeStamp() AS TIMESTAMP FORMAT 'I');
+END;
+
+------------------------------------------
+--
+--	Функция дополняет строку слева до нужной длины указанным символом
+--	Входные параметры:	
+--	str - исходная строка
+--	padChar - символ, которым дополнить
+--	length - длина, до которой дополнить
+--
+------------------------------------------
+CREATE FUNCTION PadLeft(IN str CHARACTER, IN padChar CHARACTER, IN length INTEGER) RETURNS CHARACTER
+BEGIN
+	RETURN RIGHT(REPLICATE(padChar, length) || str, length);
+END;
+
+------------------------------------------
+--
+-- Перекодирует ошибки из представлений систем в представление шины
+-- Входные параметры:
+-- isCode - код системы
+-- isErrorCode - код ошибки из системы
+-- Выходные параметры:
+-- errorCode - код ошибки в представлении шины
+-- errorMsg - сообщение об ошибке
+--
+------------------------------------------
+CREATE PROCEDURE DecodeError(IN isCode CHARACTER, IN isErrorCode CHARACTER, OUT errorCode CHARACTER, OUT errorMsg CHARACTER)
+BEGIN
+	-- переменная для сохранения результатов
+	DECLARE Error ROW;	
+	
+	-- 18.10.2010
+	-- Проверяем заполнена ли кэш таблица ошибок для конкретной системы
+	-- Если не заполнена, то выполняем инициализацию
+	ERRORTP_LOCK : BEGIN ATOMIC
+		IF NOT EXISTS(SystemErrorTP.rows[]) THEN
+					CALL ErrorTPCache(isCode);
+		END IF;
+	END ERRORTP_LOCK;	
+	-- пытаемся найти нужный код
+	SET Error.Codes = THE (SELECT SETP.ERROR_MSG, SETP.ERROR_CODE FROM SystemErrorTP.rows[] AS SETP WHERE SETP.IS_ERROR_CODE = isErrorCode);
+		
+	-- запросим БД
+	--	set Error.Codes[] = SELECT ERROR_TP.ERROR_MSG, ERROR_TP.ERROR_CODE FROM Database.ERROR_TP WHERE ERROR_TP.IS_CODE = isCode AND ERROR_TP.IS_ERROR_CODE = isErrorCode;
+	-- ничего не нашлось, пишем коды по умолчанию
+	IF (CARDINALITY(Error.Codes[]) = 0) then
+		IF (isCode = 'COD') OR (isCode = 'SOFIA_DEBT') OR (isCode = 'FACTURA') OR (isCode = 'XBANK') OR (isCode = 'IBSO_RKO') THEN
+			SET errorCode = '-400';
+		ELSEIF (isCode = 'IASK') OR (isCode = 'SOFIA_LOAN') OR (isCode = 'IBSO') OR (isCode = 'KZKFL') THEN
+			SET errorCode = '-500';
+		ELSEIF (isCode = 'WAY4') then
+			SET errorCode = '-600';
+		END IF;
+
+		SET errorMsg = 'Ошибка обработки, операция не может быть выполнена';
+	ELSE
+		-- нашлось
+		SET errorCode = Error.Codes[1].ERROR_CODE;
+		SET errorMsg = Error.Codes[1].ERROR_MSG;
+	END IF;
+
+END;
+
+-- переменная хранит ошибки для конкретной системы (в каждом адаптере системы будет своя таблица значений)
+DECLARE SystemErrorTP SHARED ROW;
+
+------------------------------------------
+--
+--	Кеширование таблицы перекодировки ошибок
+--
+------------------------------------------
+CREATE PROCEDURE ErrorTPCache(IN System CHARACTER)
+BEGIN
+	--Освобождаем кэш
+	DELETE FIELD SystemErrorTP.rows;
+
+	SET SystemErrorTP.rows[] =  (SELECT ERROR_TP.ERROR_MSG, ERROR_TP.ERROR_CODE, ERROR_TP.IS_ERROR_CODE FROM Database.ERROR_TP WHERE ERROR_TP.IS_CODE = System);	
+END;	
+
+-- Переменная для хранения локального кеша объектов, необходимых для работы адаптера к системе
+DECLARE SysObjCache SHARED ROW;
+
+------------------------------------------
+--
+-- Процедура инициализации кеша системных объектов для конкретного адаптера системы
+-- Входные параметры:
+-- sysID - идентификатор системы, для которой необходиом инициализировать кэш
+--
+------------------------------------------
+CREATE PROCEDURE InitSysObjCache(IN sysID CHARACTER)
+BEGIN
+	DECLARE tempRow ROW;
+	SET tempRow.row[] = (SELECT OBJ_TP.ENTITY_ID AS ENTITY_ID, OBJ_TP.OBJ_SYS_ID AS OBJ_SYS_ID, OBJ_TP.OBJ_ESB_ID AS OBJ_ESB_ID FROM Database.OBJ_TP WHERE OBJ_TP.SYS_ID = sysID);	
+	
+	FOR r AS tempRow.row[] DO
+		SET tempRow.tree.{UPPER(r.ENTITY_ID)}.toESB.{UPPER(r.OBJ_SYS_ID)} = r.OBJ_ESB_ID;
+		SET tempRow.tree.{UPPER(r.ENTITY_ID)}.fromESB.{UPPER(r.OBJ_ESB_ID)} = r.OBJ_SYS_ID;
+	END FOR;	
+
+	IF EXISTS(tempRow.tree[]) THEN
+		--Освобождаем кэш
+		DELETE FIELD SysObjCache.OBJ_TP;
+
+		SET SysObjCache.OBJ_TP = tempRow.tree;
+		SET SysObjCache.OBJ_TP.valid = TRUE;
+		SET SysObjCache.OBJ_TP.updateDtTm	 = CURRENT_TIMESTAMP;
+	ELSE
+
+		SET SysObjCache.OBJ_TP.valid = FALSE;
+		-- Надо выдать сообщение об ошибке
+		THROW USER EXCEPTION VALUES ('-100','Таблица перекодировки OBJ_TP не инициализирована для системы с sysID: ' || sysID);
+
+	END IF;	
+
+END;	
+
+------------------------------------------
+--
+-- Функция перекодировки из формата системы в формат шины и обратно
+-- Входные параметры:
+-- sysID	- код системы
+-- objSysTP - название справочника (SYSTEMIDTP и т.д.)
+-- objID    - значение для перекодировки в формате системы или в формате шины (зависит от toESB)
+-- toESB	- направление перекодировки (если true - из формата системы в формат шины, если false - из формата шины в формат системы)
+-- thrExcept - выбрасывать ли исключение или просто вернуть ответ 'NULL' для дальнейшей обработки в коде ( обычно равно true)
+------------------------------------------
+CREATE FUNCTION decodeObj(IN sysID CHARACTER, IN objSysTP CHARACTER,IN objID CHARACTER, IN toESB BOOLEAN, IN thrExcept BOOLEAN) RETURNS CHARACTER
+BEGIN
+
+	-- Обновляем кеш каждые 30 минут либо когда его нет		
+	OBJ_TYPE_LOCK : BEGIN ATOMIC
+		IF CURRENT_TIMESTAMP - INTERVAL '30' MINUTE > SysObjCache.OBJ_TP.updateDtTm OR SysObjCache.OBJ_TP.valid IS NULL or NOT(SysObjCache.OBJ_TP.valid) THEN
+			CALL InitSysObjCache(sysID);
+		END IF;
+	END OBJ_TYPE_LOCK;
+
+	DECLARE val CHARACTER;	
+	DECLARE direction CHARACTER 'toESB';
+	IF NOT(toESB) THEN
+		SET direction = 'fromESB';
+	END IF;		
+
+	SET val = COALESCE(SysObjCache.OBJ_TP.{UPPER(objSysTP)}.{direction}.{UPPER(objID)},'NULL');
+
+	-- Если нужно, то генерим исключение, иначе возвращаем ответ 'NULL' и дальше уже обрабатываем
+	IF thrExcept THEN
+		IF val = 'NULL' THEN
+			IF toESB THEN
+				THROW USER EXCEPTION VALUES ('-100','Не удается перекодировать по таблице OBJ_TP значение поля OBJ_SYS_ID: ' || objID || ' для системы SYS_ID: ' || sysID || ' по справочнику ENTITY_ID: ' || objSysTP);	
+			ELSE
+				THROW USER EXCEPTION VALUES ('-100','Не удается перекодировать по таблице OBJ_TP значение поля OBJ_ESB_ID: ' || objID || ' для системы SYS_ID: ' || sysID || ' по справочнику ENTITY_ID: ' || objSysTP);	
+			END IF;		
+		ELSE
+			RETURN val;
+		END IF;
+	ELSE
+			RETURN val;
+	END IF;
+						
+END;
+
+-- Наименование справочника ДУЛов в таблице OBJ_TP
+DECLARE OBJ_TP_DUL_ENTITY_ID	CONSTANT CHARACTER	'DULTP';
+
+------------------------------------------
+--
+-- Функция перекодировки ДУЛа из формата системы в формат шины и обратно
+-- Входные параметры:
+-- sysID	- код системы
+-- objID    - значение для перекодировки в формате системы или в формате шины (зависит от toESB)
+-- toESB	- направление перекодировки (если true - из формата системы в формат шины, если false - из формата шины в формат системы)
+--
+------------------------------------------
+CREATE FUNCTION DecodeDocType(IN sysID CHARACTER, IN objID CHARACTER, IN toESB BOOLEAN) RETURNS CHARACTER
+BEGIN
+	RETURN decodeObj(sysID, OBJ_TP_DUL_ENTITY_ID, objID, toESB,true);
+END;
+
+------------------------------------------
+/*
+	Функции перекодировки кода валюты из ЦОДа в ISO-код для ответов информационных сервисов 
+	и обратная перекодировка для проведения операций
+	
+Доллар США              |USD|     840 *
+рубль                   |RUR|     810 *
+Фунт стерлингов         |GBP|     826 *
+Нидерландский гульден   |NLG|     528
+Швейцарский франк       |CHF|     756
+Шведская крона          |SEK|     752
+Итальянская лира        |ITL|     380
+Французский франк       |FRF|     250
+Финляндская марка       |FIM|     246
+Норвежская крона        |NOK|     578
+Датская крона           |DKK|     208
+Канадский доллар        |CAD|     124
+Японская йена           |JPY|     392
+Австрийский шиллинг     |ATS|      40
+Австралийский доллар    |AUD|      36
+Бельгийский франк       |BEF|      56
+ЭКЮ                     |XEU|     954
+Испанская песета        |ESP|     724
+Сингапурский доллар     |SGD|     702
+Золото                  |AUR|      98 *
+Болгарский лев          |BGL|     100
+Белорусский рубль       |BYB|     112
+Китайский юань          |CNY|     156
+Чешская крона           |CZK|     203
+Индийская рупия Клиринговая   |C45|     245
+Немецкая марка          |DEM|     276
+Греческая Драхма        |GRD|     300
+Индийская рупия         |INR|     356
+Ирландский фунт         |IEP|     372
+Казахский тенге         |KZT|     398
+Киргизский сом          |KGS|     417
+Люксембургский франк    |LUF|     442
+Молдавский лей          |MDL|     498
+Польский злотый         |PLZ|     616
+Португальское эскудо    |PTE|     620
+Таджикский рубл         |TJR|     762
+Турецая лира            |TRL|     792
+Туркменский манат       |TMM|     795
+Украинская гривна       |UAH|     980
+Узбекский сум           |UZS|     860
+Эстонская крона         |EEK|     233
+Латвийский лат          |LVL|     428
+Литовский лит           |LTL|     440
+Таджикские сомони       |TJS|     972
+Белорусский рубль       |BYR|     974
+Болгарский  лев         |BGN|     975
+Евро                    |EUR|     978 *
+Польского злотого       |PLN|     985
+
+-- 18.11 Добавлены новые значения в справочник
+-- 25.05.2012 Изменены коды для Платины (PAT) и Палладия (PAD)
+
+Новая турецкая лира		|TRY| 	  949
+Платина					|PAT|	  76
+Палладий 				|PAD|	  33
+Серебро 				|ARG| 	  99	
+
+
+*/
+------------------------------------------
+
+------------------------------------------
+--
+--	Таблица перекодировки и процедура её инициализации
+--	Используется в адаптере АС ЦОД и WAY (для выгрузки курсов валют)
+--
+------------------------------------------
+
+-- TODO Убрать из таблицы код RUB, когда выяснится, что с ним делать
+DECLARE gs_CurrencyCodToISOMapping SHARED ROW;
+
+CREATE PROCEDURE Internal_CreateCurrencyCodToISOMapping()
+BEGIN
+	IF NOT EXISTS(gs_CurrencyCodToISOMapping.Cur[])THEN
+		
+		SET gs_CurrencyCodToISOMapping.Cur[] = LIST {
+
+				ROW('USD' AS COD, 840 AS ISO),
+				ROW('RUR' AS COD, 810 AS ISO),
+				ROW('GBP' AS COD, 826 AS ISO),
+				ROW('AUR' AS COD, 98 AS ISO),
+				ROW('ARG' AS COD, 99 AS ISO),
+				ROW('PAT' AS COD, 76 AS ISO),				
+				ROW('PAD' AS COD, 33 AS ISO),								
+				ROW('NLG' AS COD, 528 AS ISO),
+				ROW('CHF' AS COD, 756 AS ISO),
+				ROW('SEK' AS COD, 752 AS ISO),
+				ROW('ITL' AS COD, 380 AS ISO),
+				ROW('FRF' AS COD, 250 AS ISO),
+				ROW('FIM' AS COD, 246 AS ISO),
+				ROW('NOK' AS COD, 578 AS ISO),
+				ROW('DKK' AS COD, 208 AS ISO),
+				ROW('CAD' AS COD, 124 AS ISO),
+				ROW('JPY' AS COD, 392 AS ISO),
+				ROW('ATS' AS COD, 40 AS ISO),
+				ROW('AUD' AS COD, 36 AS ISO),
+				ROW('BEF' AS COD, 56 AS ISO),
+				ROW('XEU' AS COD, 954 AS ISO),
+				ROW('ESP' AS COD, 724 AS ISO),
+				ROW('SGD' AS COD, 702 AS ISO),
+				ROW('BGL' AS COD, 100 AS ISO),
+				ROW('BYB' AS COD, 112 AS ISO),
+				ROW('CNY' AS COD, 156 AS ISO),
+				ROW('CZK' AS COD, 203 AS ISO),
+				ROW('C45' AS COD, 245 AS ISO),
+				ROW('DEM' AS COD, 276 AS ISO),
+				ROW('GRD' AS COD, 300 AS ISO),
+				ROW('INR' AS COD, 356 AS ISO),
+				ROW('IEP' AS COD, 372 AS ISO),
+				ROW('KZT' AS COD, 398 AS ISO),
+				ROW('KGS' AS COD, 417 AS ISO),
+				ROW('LUF' AS COD, 442 AS ISO),
+				ROW('MDL' AS COD, 498 AS ISO),
+				ROW('PLZ' AS COD, 616 AS ISO),
+				ROW('PTE' AS COD, 620 AS ISO),
+				ROW('TJR' AS COD, 762 AS ISO),
+				ROW('TRL' AS COD, 792 AS ISO),
+				ROW('TMM' AS COD, 795 AS ISO),
+				ROW('UAH' AS COD, 980 AS ISO),
+				ROW('UZS' AS COD, 860 AS ISO),
+				ROW('EEK' AS COD, 233 AS ISO),
+				ROW('LVL' AS COD, 428 AS ISO),
+				ROW('LTL' AS COD, 440 AS ISO),
+				ROW('TJS' AS COD, 972 AS ISO),
+				ROW('BYR' AS COD, 974 AS ISO),
+				ROW('BGN' AS COD, 975 AS ISO),
+				ROW('EUR' AS COD, 978 AS ISO),
+				ROW('PLN' AS COD, 985 AS ISO),
+				ROW('RUB' AS COD, 643 AS ISO),
+				ROW('TRY' AS COD, 949 AS ISO),
+				ROW('XAU' AS COD, 959 AS ISO),				
+				ROW('XAG' AS COD, 961 AS ISO),
+				ROW('XPT' AS COD, 962 AS ISO),
+				ROW('XPD' AS COD, 964 AS ISO)
+			};
+	END IF;
+END;
+
+------------------------------------------
+--
+--	Функция возвращает код валюты ISO (числовой) по заданному коду ЦОД (буквенному)
+--
+------------------------------------------
+CREATE FUNCTION CodToIsoCur(IN codCur CHARACTER) RETURNS INTEGER
+BEGIN
+	CALL Internal_CreateCurrencyCodToISOMapping();
+	RETURN THE(SELECT ITEM c.ISO FROM gs_CurrencyCodToISOMapping.Cur[] AS c WHERE c.COD = codCur);
+END;
+
+------------------------------------------
+--
+--	Функция возвращает код валюты ЦОД (буквенный) по заданному коду ISO (числовому) 
+--
+------------------------------------------
+CREATE FUNCTION IsoToCodCur(IN isoCur INTEGER) RETURNS CHARACTER
+BEGIN
+	CALL Internal_CreateCurrencyCodToISOMapping();
+	RETURN THE(SELECT ITEM c.COD FROM gs_CurrencyCodToISOMapping.Cur[] AS c WHERE c.ISO = isoCur);
+END;
+
+------------------------------------------
+--
+--	Функция возвращает код валюты ЦОД (буквенный) по заданному коду ISO (числовому), если передан цифровой код 
+--
+------------------------------------------
+CREATE FUNCTION IsoToCodCurSafe(IN isoCur CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF isoCur = '' THEN
+		RETURN isoCur;
+	ELSEIF LENGTH(TRANSLATE(isoCur, '0123456789', '')) <> 0 THEN
+		RETURN isoCur;
+	ELSE
+		DECLARE isoCurInt INTEGER CAST(isoCur AS INTEGER);
+		CALL Internal_CreateCurrencyCodToISOMapping();
+		RETURN THE(SELECT ITEM c.COD FROM gs_CurrencyCodToISOMapping.Cur[] AS c WHERE c.ISO = isoCurInt);
+	END IF; 	
+END;
+
+
+------------------------------------------
+--
+--	Таблица перекодировки страны и процедура её инициализации
+--
+------------------------------------------
+
+DECLARE gs_CountryAbcToNumMapping SHARED ROW;
+
+CREATE PROCEDURE Internal_CreateCountryAbcToNumMapping()
+BEGIN
+	IF NOT EXISTS(gs_CountryAbcToNumMapping.Country[])THEN
+		
+		SET gs_CountryAbcToNumMapping.Country[] = LIST {
+
+				ROW('ABW' AS ABC, '533' AS NUM),
+				ROW('AFG' AS ABC, '004' AS NUM),
+				ROW('AGO' AS ABC, '024' AS NUM),
+				ROW('AIA' AS ABC, '660' AS NUM),
+				ROW('ALA' AS ABC, '248' AS NUM),
+				ROW('ALB' AS ABC, '008' AS NUM),
+				ROW('AND' AS ABC, '020' AS NUM),
+				ROW('ANT' AS ABC, '530' AS NUM),
+				ROW('ARE' AS ABC, '784' AS NUM),
+				ROW('ARG' AS ABC, '032' AS NUM),
+				ROW('ARM' AS ABC, '051' AS NUM),
+				ROW('ASM' AS ABC, '016' AS NUM),
+				ROW('ATA' AS ABC, '010' AS NUM),
+				ROW('ATF' AS ABC, '260' AS NUM),
+				ROW('ATG' AS ABC, '028' AS NUM),
+				ROW('AUS' AS ABC, '036' AS NUM),
+				ROW('AUT' AS ABC, '040' AS NUM),
+				ROW('AZE' AS ABC, '031' AS NUM),
+				ROW('BDI' AS ABC, '108' AS NUM),
+				ROW('BEL' AS ABC, '056' AS NUM),
+				ROW('BEN' AS ABC, '204' AS NUM),
+				ROW('BFA' AS ABC, '854' AS NUM),
+				ROW('BGD' AS ABC, '050' AS NUM),
+				ROW('BGR' AS ABC, '100' AS NUM),
+				ROW('BHR' AS ABC, '048' AS NUM),
+				ROW('BHS' AS ABC, '044' AS NUM),
+				ROW('BIH' AS ABC, '070' AS NUM),
+				ROW('BLR' AS ABC, '112' AS NUM),
+				ROW('BLZ' AS ABC, '084' AS NUM),
+				ROW('BMU' AS ABC, '060' AS NUM),
+				ROW('BOL' AS ABC, '068' AS NUM),
+				ROW('BRA' AS ABC, '076' AS NUM),
+				ROW('BRB' AS ABC, '052' AS NUM),
+				ROW('BRN' AS ABC, '096' AS NUM),
+				ROW('BTN' AS ABC, '064' AS NUM),
+				ROW('BVT' AS ABC, '074' AS NUM),
+				ROW('BWA' AS ABC, '072' AS NUM),
+				ROW('CAF' AS ABC, '140' AS NUM),
+				ROW('CAN' AS ABC, '124' AS NUM),
+				ROW('CCK' AS ABC, '166' AS NUM),
+				ROW('CHE' AS ABC, '756' AS NUM),
+				ROW('CHI' AS ABC, '830' AS NUM),
+				ROW('CHL' AS ABC, '152' AS NUM),
+				ROW('CHN' AS ABC, '156' AS NUM),
+				ROW('CIV' AS ABC, '384' AS NUM),
+				ROW('CMR' AS ABC, '120' AS NUM),
+				ROW('COG' AS ABC, '178' AS NUM),
+				ROW('COK' AS ABC, '184' AS NUM),
+				ROW('COL' AS ABC, '170' AS NUM),
+				ROW('COM' AS ABC, '174' AS NUM),
+				ROW('CPV' AS ABC, '132' AS NUM),
+				ROW('CRI' AS ABC, '188' AS NUM),
+				ROW('CUB' AS ABC, '192' AS NUM),
+				ROW('CXR' AS ABC, '162' AS NUM),
+				ROW('CYM' AS ABC, '136' AS NUM),
+				ROW('CYP' AS ABC, '196' AS NUM),
+				ROW('CZE' AS ABC, '203' AS NUM),
+				ROW('DEU' AS ABC, '276' AS NUM),
+				ROW('DJI' AS ABC, '262' AS NUM),
+				ROW('DMA' AS ABC, '212' AS NUM),
+				ROW('DNK' AS ABC, '208' AS NUM),
+				ROW('DOM' AS ABC, '214' AS NUM),
+				ROW('DZA' AS ABC, '012' AS NUM),
+				ROW('ECU' AS ABC, '218' AS NUM),
+				ROW('EGY' AS ABC, '818' AS NUM),
+				ROW('ERI' AS ABC, '232' AS NUM),
+				ROW('ESH' AS ABC, '732' AS NUM),
+				ROW('ESP' AS ABC, '724' AS NUM),
+				ROW('EST' AS ABC, '233' AS NUM),
+				ROW('ETH' AS ABC, '231' AS NUM),
+				ROW('FIN' AS ABC, '246' AS NUM),
+				ROW('FJI' AS ABC, '242' AS NUM),
+				ROW('FLK' AS ABC, '238' AS NUM),
+				ROW('FRA' AS ABC, '250' AS NUM),
+				ROW('FRO' AS ABC, '234' AS NUM),
+				ROW('FSM' AS ABC, '583' AS NUM),
+				ROW('GAB' AS ABC, '266' AS NUM),
+				ROW('GBR' AS ABC, '826' AS NUM),
+				ROW('GEO' AS ABC, '268' AS NUM),
+				ROW('GHA' AS ABC, '288' AS NUM),
+				ROW('GIB' AS ABC, '292' AS NUM),
+				ROW('GIN' AS ABC, '324' AS NUM),
+				ROW('GLP' AS ABC, '312' AS NUM),
+				ROW('GMB' AS ABC, '270' AS NUM),
+				ROW('GNB' AS ABC, '624' AS NUM),
+				ROW('GNQ' AS ABC, '226' AS NUM),
+				ROW('GRC' AS ABC, '300' AS NUM),
+				ROW('GRD' AS ABC, '308' AS NUM),
+				ROW('GRL' AS ABC, '304' AS NUM),
+				ROW('GST' AS ABC, '274' AS NUM),
+				ROW('GTM' AS ABC, '320' AS NUM),
+				ROW('GUF' AS ABC, '254' AS NUM),
+				ROW('GUM' AS ABC, '316' AS NUM),
+				ROW('GUY' AS ABC, '328' AS NUM),
+				ROW('HKG' AS ABC, '344' AS NUM),
+				ROW('HMD' AS ABC, '334' AS NUM),
+				ROW('HND' AS ABC, '340' AS NUM),
+				ROW('HRV' AS ABC, '191' AS NUM),
+				ROW('HTI' AS ABC, '332' AS NUM),
+				ROW('HUN' AS ABC, '348' AS NUM),
+				ROW('IDN' AS ABC, '360' AS NUM),
+				ROW('IMY' AS ABC, '833' AS NUM),
+				ROW('IND' AS ABC, '356' AS NUM),
+				ROW('IOT' AS ABC, '086' AS NUM),
+				ROW('IRL' AS ABC, '372' AS NUM),
+				ROW('IRN' AS ABC, '364' AS NUM),
+				ROW('IRQ' AS ABC, '368' AS NUM),
+				ROW('ISL' AS ABC, '352' AS NUM),
+				ROW('ISR' AS ABC, '376' AS NUM),
+				ROW('ITA' AS ABC, '380' AS NUM),
+				ROW('JAM' AS ABC, '388' AS NUM),
+				ROW('JOR' AS ABC, '400' AS NUM),
+				ROW('JPN' AS ABC, '392' AS NUM),
+				ROW('JTN' AS ABC, '396' AS NUM),
+				ROW('KAZ' AS ABC, '398' AS NUM),
+				ROW('KEN' AS ABC, '404' AS NUM),
+				ROW('KGZ' AS ABC, '417' AS NUM),
+				ROW('KHM' AS ABC, '116' AS NUM),
+				ROW('KIR' AS ABC, '296' AS NUM),
+				ROW('KNA' AS ABC, '659' AS NUM),
+				ROW('KOR' AS ABC, '410' AS NUM),
+				ROW('KWT' AS ABC, '414' AS NUM),
+				ROW('LAO' AS ABC, '418' AS NUM),
+				ROW('LBN' AS ABC, '422' AS NUM),
+				ROW('LBR' AS ABC, '430' AS NUM),
+				ROW('LBY' AS ABC, '434' AS NUM),
+				ROW('LCA' AS ABC, '662' AS NUM),
+				ROW('LIE' AS ABC, '438' AS NUM),
+				ROW('LKA' AS ABC, '144' AS NUM),
+				ROW('LSO' AS ABC, '426' AS NUM),
+				ROW('LTU' AS ABC, '440' AS NUM),
+				ROW('LUX' AS ABC, '442' AS NUM),
+				ROW('LVA' AS ABC, '428' AS NUM),
+				ROW('MAC' AS ABC, '446' AS NUM),
+				ROW('MAR' AS ABC, '504' AS NUM),
+				ROW('MCO' AS ABC, '492' AS NUM),
+				ROW('MDA' AS ABC, '498' AS NUM),
+				ROW('MDG' AS ABC, '450' AS NUM),
+				ROW('MDV' AS ABC, '462' AS NUM),
+				ROW('MEX' AS ABC, '484' AS NUM),
+				ROW('MHL' AS ABC, '584' AS NUM),
+				ROW('MID' AS ABC, '488' AS NUM),
+				ROW('MKD' AS ABC, '807' AS NUM),
+				ROW('MLI' AS ABC, '466' AS NUM),
+				ROW('MLT' AS ABC, '470' AS NUM),
+				ROW('MMR' AS ABC, '104' AS NUM),
+				ROW('MNG' AS ABC, '496' AS NUM),
+				ROW('MNP' AS ABC, '580' AS NUM),
+				ROW('MOZ' AS ABC, '508' AS NUM),
+				ROW('MRT' AS ABC, '478' AS NUM),
+				ROW('MSR' AS ABC, '500' AS NUM),
+				ROW('MTQ' AS ABC, '474' AS NUM),
+				ROW('MUS' AS ABC, '480' AS NUM),
+				ROW('MWI' AS ABC, '454' AS NUM),
+				ROW('MYS' AS ABC, '458' AS NUM),
+				ROW('MYT' AS ABC, '175' AS NUM),
+				ROW('NAM' AS ABC, '516' AS NUM),
+				ROW('NCL' AS ABC, '540' AS NUM),
+				ROW('NER' AS ABC, '562' AS NUM),
+				ROW('NFK' AS ABC, '574' AS NUM),
+				ROW('NGA' AS ABC, '566' AS NUM),
+				ROW('NIC' AS ABC, '558' AS NUM),
+				ROW('NIU' AS ABC, '570' AS NUM),
+				ROW('NLD' AS ABC, '528' AS NUM),
+				ROW('NOR' AS ABC, '578' AS NUM),
+				ROW('NPL' AS ABC, '524' AS NUM),
+				ROW('NRU' AS ABC, '520' AS NUM),
+				ROW('NZL' AS ABC, '554' AS NUM),
+				ROW('OMN' AS ABC, '512' AS NUM),
+				ROW('PAK' AS ABC, '586' AS NUM),
+				ROW('PAN' AS ABC, '591' AS NUM),
+				ROW('PCN' AS ABC, '612' AS NUM),
+				ROW('PER' AS ABC, '604' AS NUM),
+				ROW('PHL' AS ABC, '608' AS NUM),
+				ROW('PLW' AS ABC, '585' AS NUM),
+				ROW('PNG' AS ABC, '598' AS NUM),
+				ROW('POL' AS ABC, '616' AS NUM),
+				ROW('PRI' AS ABC, '630' AS NUM),
+				ROW('PRK' AS ABC, '408' AS NUM),
+				ROW('PRT' AS ABC, '620' AS NUM),
+				ROW('PRY' AS ABC, '600' AS NUM),
+				ROW('PSE' AS ABC, '275' AS NUM),
+				ROW('PYF' AS ABC, '258' AS NUM),
+				ROW('QAT' AS ABC, '634' AS NUM),
+				ROW('REU' AS ABC, '638' AS NUM),
+				ROW('ROM' AS ABC, '642' AS NUM),
+				ROW('RUS' AS ABC, '643' AS NUM),
+				ROW('RWA' AS ABC, '646' AS NUM),
+				ROW('SAU' AS ABC, '682' AS NUM),
+				ROW('SDN' AS ABC, '736' AS NUM),
+				ROW('SEN' AS ABC, '686' AS NUM),
+				ROW('SGP' AS ABC, '702' AS NUM),
+				ROW('SGS' AS ABC, '239' AS NUM),
+				ROW('SHN' AS ABC, '654' AS NUM),
+				ROW('SJM' AS ABC, '744' AS NUM),
+				ROW('SLB' AS ABC, '090' AS NUM),
+				ROW('SLE' AS ABC, '694' AS NUM),
+				ROW('SLV' AS ABC, '222' AS NUM),
+				ROW('SMR' AS ABC, '674' AS NUM),
+				ROW('SOM' AS ABC, '706' AS NUM),
+				ROW('SPM' AS ABC, '666' AS NUM),
+				ROW('STP' AS ABC, '678' AS NUM),
+				ROW('SUR' AS ABC, '740' AS NUM),
+				ROW('SVK' AS ABC, '703' AS NUM),
+				ROW('SVN' AS ABC, '705' AS NUM),
+				ROW('SWE' AS ABC, '752' AS NUM),
+				ROW('SWZ' AS ABC, '748' AS NUM),
+				ROW('SYC' AS ABC, '690' AS NUM),
+				ROW('SYR' AS ABC, '760' AS NUM),
+				ROW('TCA' AS ABC, '796' AS NUM),
+				ROW('TCD' AS ABC, '148' AS NUM),
+				ROW('TGO' AS ABC, '768' AS NUM),
+				ROW('THA' AS ABC, '764' AS NUM),
+				ROW('TJK' AS ABC, '762' AS NUM),
+				ROW('TKL' AS ABC, '772' AS NUM),
+				ROW('TKM' AS ABC, '795' AS NUM),
+				ROW('TMP' AS ABC, '626' AS NUM),
+				ROW('TON' AS ABC, '776' AS NUM),
+				ROW('TTO' AS ABC, '780' AS NUM),
+				ROW('TUN' AS ABC, '788' AS NUM),
+				ROW('TUR' AS ABC, '792' AS NUM),
+				ROW('TUV' AS ABC, '798' AS NUM),
+				ROW('TWN' AS ABC, '158' AS NUM),
+				ROW('TZA' AS ABC, '834' AS NUM),
+				ROW('UGA' AS ABC, '800' AS NUM),
+				ROW('UKR' AS ABC, '804' AS NUM),
+				ROW('UMI' AS ABC, '581' AS NUM),
+				ROW('URY' AS ABC, '858' AS NUM),
+				ROW('USA' AS ABC, '840' AS NUM),
+				ROW('UZB' AS ABC, '860' AS NUM),
+				ROW('VAT' AS ABC, '336' AS NUM),
+				ROW('VCT' AS ABC, '670' AS NUM),
+				ROW('VEN' AS ABC, '862' AS NUM),
+				ROW('VGB' AS ABC, '092' AS NUM),
+				ROW('VIR' AS ABC, '850' AS NUM),
+				ROW('VNM' AS ABC, '704' AS NUM),
+				ROW('VUT' AS ABC, '548' AS NUM),
+				ROW('WAK' AS ABC, '872' AS NUM),
+				ROW('WLF' AS ABC, '876' AS NUM),
+				ROW('WSM' AS ABC, '882' AS NUM),
+				ROW('YEM' AS ABC, '887' AS NUM),
+				ROW('YUG' AS ABC, '891' AS NUM),
+				ROW('ZAF' AS ABC, '710' AS NUM),
+				ROW('ZAR' AS ABC, '180' AS NUM),
+				ROW('ZMB' AS ABC, '894' AS NUM),
+				ROW('ZWE' AS ABC, '716' AS NUM),
+				ROW('PAD' AS ABC, '964' AS NUM),
+				ROW('PAT' AS ABC, '962' AS NUM),
+				ROW('AUR' AS ABC, '959' AS NUM),
+				ROW('ARG' AS ABC, '961' AS NUM)
+			};
+	END IF;
+END;
+
+------------------------------------------
+--
+--	Функция возвращает код страны (числовой) по заданному коду (буквенному)
+--
+------------------------------------------
+CREATE FUNCTION AbcToNumCountry(IN abcCountry CHARACTER) RETURNS CHARACTER
+BEGIN
+	CALL Internal_CreateCountryAbcToNumMapping();
+	RETURN THE(SELECT ITEM c.NUM FROM gs_CountryAbcToNumMapping.Country[] AS c WHERE c.ABC = abcCountry);
+END;
+
+------------------------------------------
+--
+--	Функция возвращает код страны (буквенный) по заданному коду (числовому) 
+--
+------------------------------------------
+CREATE FUNCTION NumToAbcCountry(IN numCountry CHARACTER) RETURNS CHARACTER
+BEGIN
+	CALL Internal_CreateCountryAbcToNumMapping();
+	RETURN THE(SELECT ITEM c.ABC FROM gs_CountryAbcToNumMapping.Country[] AS c WHERE c.NUM = numCountry);
+END;
+
+------------------------------------------
+--
+--	Функция возвращает код страны (буквенный) по заданному коду (числовому), если передан цифровой код 
+--
+------------------------------------------
+CREATE FUNCTION NumToAbcCountrySafe(IN numCountry CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF numCountry = '' THEN
+		RETURN numCountry;
+	ELSEIF LENGTH(TRANSLATE(numCountry, '0123456789', '')) <> 0 THEN
+		RETURN numCountry;
+	ELSE
+		CALL Internal_CreateCountryAbcToNumMapping();
+		RETURN THE(SELECT ITEM c.ABC FROM gs_CountryAbcToNumMapping.Country[] AS c WHERE c.NUM = numCountry);
+	END IF; 	
+END;
+
+------------------------------------------
+--
+--	Модуль отправки сообщения для логирования при ответе
+--  системы о загрузке файла с курсами валют
+--
+------------------------------------------
+CREATE COMPUTE MODULE ARMCRNf_LogReplyMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- Формируем сообщение для логирования в базу 
+		DECLARE tns NAMESPACE 'http://croc.ru/sbrf/bp/EventMsg';
+
+		SET OutputRoot.XMLNSC.tns:Event.(XML.NamespaceDecl)xmlns:tns = 'http://croc.ru/sbrf/bp/EventMsg'; 
+		DECLARE oEvent REFERENCE TO OutputRoot.XMLNSC.tns:Event;
+		SET oEvent.tns:EventDate = getLocalTimeStamp();
+		SET oEvent.tns:EventSource = Environment.Variables.SystemId;
+		SET oEvent.tns:EventReciever = 'EVENT.LOGGING';
+		IF LENGTH(TRIM(Environment.Variables.SystemName)) <> 0 THEN 
+			SET oEvent.tns:Operation = 'Сообщение обработано адаптером ' || Environment.Variables.SystemName;
+		ELSE
+			SET oEvent.tns:Operation = 'Сообщение обработано адаптером';
+		END IF;	
+		SET oEvent.tns:QueueName = 'UNKNOWN';
+		SET oEvent.tns:ProcStatus = 'SUCCESS';
+		SET oEvent.tns:ErrorText = '';
+		SET oEvent.tns:EventMsg = CAST(InputRoot.BLOB.BLOB AS CHAR CCSID 1208);
+		SET oEvent.tns:RqUID = 'UNKNOWN';		
+
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+/**
+ * Формирует структуру RbBrchId
+ */
+CREATE FUNCTION GetRbBrchId(IN RegionId CHARACTER, IN AgencyId CHARACTER) RETURNS CHARACTER BEGIN
+	DECLARE RbBrchId CHARACTER '';
+
+	IF (RegionId IS NOT NULL) THEN
+		IF LENGTH(RegionId) = 3 THEN
+			RETURN SUBSTRING(RegionId FROM 2) || AgencyId;
+		ELSE
+			RETURN RegionId || AgencyId;
+		END IF;
+	END IF;
+
+	RETURN '';
+END;
+
+/**
+ * Корректирует значения поля Name во всем сообщении, дополняя лидирующими символами PadChar до Length символов
+ * Root		- ссылка на корневой элемент
+ * Name		- имя элемента, значенеи которого требуется скорректировать
+ * PadChar	- символ, которым будет дополнятсья значение
+ * Length	- длина результируюшего значени
+ * 
+ * Процедура игнорирует пустые поля и значения полей, длина значений которых больше или равна требуемой
+ */
+CREATE PROCEDURE PadFieldValue(IN Root REFERENCE, IN Name CHARACTER, IN PadChar CHARACTER, IN Length INTEGER)
+BEGIN
+	FOR Field AS Root.*:*[] DO
+		IF FIELDNAME(Field) = Name THEN
+			DECLARE Len INTEGER LENGTH(FIELDVALUE(Field));
+
+			IF Len > 0 AND Len < Length THEN
+				SET Field VALUE = ru.croc.sbrf.bp.common.esql.PadLeft(Field, PadChar, Length);
+			END IF;
+		END IF;
+
+		CALL PadFieldValue(Field, Name, PadChar, Length);
+	END FOR;
+END;
+
+------------------------------------------
+--
+-- Функция поиска значений (множество значений) в формате шины по значению в формате системы
+-- 05.08.2011 Используется в проекте Таллиман для определения списка идентификаторов SystemId кредитных систем
+-- Входные параметры:
+-- sysID	- код системы (TLN - Таллиман)
+-- objSysTP - название справочника (SYSTEMIDTP и т.д.)
+-- objID    - значение для перекодировки в формате системы
+-- refSystemId - ссылка, куда записываем полученное дерево с ответами
+------------------------------------------
+-- Переменная для хранения локального кеша объектов, необходимых для работы операции (разработана для операции IICF (проект Таллиман)
+-- доработка для использования ф-ии в нескольких системах (нужна для операции CDL)
+DECLARE MultiObjCache SHARED ROW;
+
+CREATE PROCEDURE searchMultiObj(IN sysID CHARACTER, IN objSysTP CHARACTER,IN objID CHARACTER, IN refSystemId REFERENCE)
+BEGIN
+
+	-- Обновляем кеш каждые 30 минут либо когда его нет		
+	TAL_OBJ_LOCK : BEGIN ATOMIC
+		IF CURRENT_TIMESTAMP - INTERVAL '30' MINUTE > MultiObjCache.{sysID}.updateDtTm OR MultiObjCache.{sysID}.valid IS NULL OR NOT(MultiObjCache.{sysID}.valid) THEN
+			SET MultiObjCache.{sysID}.OBJ_TP = NULL;
+			SET MultiObjCache.{sysID}.OBJ_TP[] = (SELECT OBJ_TP.OBJ_SYS_ID AS OBJ_SYS_ID, OBJ_TP.OBJ_ESB_ID AS OBJ_ESB_ID FROM Database.OBJ_TP WHERE OBJ_TP.SYS_ID = sysID AND OBJ_TP.ENTITY_ID = objSysTP);	
+
+			SET MultiObjCache.{sysID}.valid = TRUE;
+			SET MultiObjCache.{sysID}.updateDtTm	 = CURRENT_TIMESTAMP;			
+		END IF;
+	END TAL_OBJ_LOCK;
+
+	SET refSystemId.col[] = (SELECT objTP.OBJ_ESB_ID FROM MultiObjCache.{sysID}.OBJ_TP[] AS objTP WHERE objTP.OBJ_SYS_ID = UPPER(objID));
+
+END;
+
+
+------------------------------------------
+--
+-- Трансформирует поля в заголовке MQMD к их правильным типам
+-- Входные параметры:
+-- input	- ссылка на испорченный (строковый) MQMD заголовок
+--
+------------------------------------------
+CREATE PROCEDURE ResolveMQMDTypes (IN input REFERENCE)
+BEGIN
+	IF FIELDNAME(input) = 'MQMD' THEN
+		SET input.Transactional		= CAST(input.Transactional AS BOOLEAN);
+		SET input.Version			= CAST(input.Version AS INTEGER);
+		SET input.Report			= CAST(input.Report AS INTEGER);
+		SET input.MsgType			= CAST(input.MsgType AS INTEGER);
+		SET input.Expiry			= CAST(input.Expiry AS INTEGER);
+		SET input.Feedback			= CAST(input.Feedback AS INTEGER);
+		SET input.Encoding			= CAST(input.Encoding AS INTEGER);
+		SET input.CodedCharSetId	= CAST(input.CodedCharSetId AS INTEGER);
+		SET input.Priority			= CAST(input.Priority AS INTEGER);
+		SET input.Persistence		= CAST(input.Persistence AS INTEGER);
+		SET input.MsgId				= CAST(input.MsgId AS BLOB);
+		SET input.CorrelId			= CAST(input.CorrelId AS BLOB);
+		SET input.BackoutCount		= CAST(input.BackoutCount AS INTEGER);
+		SET input.AccountingToken	= CAST(input.AccountingToken AS BLOB);
+		SET input.PutApplType		= CAST(input.PutApplType AS INTEGER);
+		SET input.PutDate			= CAST(input.PutDate AS DATE);
+		SET input.PutTime			= NULL;
+		SET input.GroupId			= CAST(input.GroupId AS BLOB);
+		SET input.MsgSeqNumber		= CAST(input.MsgSeqNumber AS INTEGER);
+		SET input.Offset			= CAST(input.Offset AS INTEGER);
+		SET input.MsgFlags			= CAST(input.MsgFlags AS INTEGER);
+		SET input.OriginalLength	= CAST(input.OriginalLength AS INTEGER);
+	END IF;
+END;
+
+
+------------------------------------------
+--
+-- Устнаваливает заголовок Properties ответного сообщения
+-- Входные параметры:
+-- InputRoot	- входящее сообщение
+-- OutputRoot	- исходщее сообщение
+--
+------------------------------------------
+CREATE PROCEDURE SetResponseProperties(IN InputRoot REFERENCE, IN OutputRoot REFERENCE)
+BEGIN
+	SET OutputRoot.Properties					= InputRoot.ComIbmAggregateReplyBody.REQUEST.Properties;
+	SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+	SET OutputRoot.Properties.ExpirationTime	= NULL;
+END;
+
+------------------------------------------
+--
+-- Процедура проставляет время жизни сообщения и настройки для перенаправления сообщения при истечении времени жизни в очередь 
+-- Входные параметры:
+-- OutputRoot	- исходящее сообщение
+--
+------------------------------------------
+CREATE PROCEDURE SetCommonMQReplyHeaders(IN OutputRoot REFERENCE)
+BEGIN
+	-- Указываем время жизни соообщения и настройки для перенаправления сообщения при истечении времени жизни в очередь 
+	SET OutputRoot.MQMD.Report		= MQRO_EXPIRATION_WITH_FULL_DATA;
+	-- Время, через которое сообщения удаляется из очереди
+	SET OutputRoot.MQMD.Expiry		= ESB_EXPIRE_TIMEOUT;
+	SET OutputRoot.MQMD.ReplyToQ	= ESB_TIMEOUT_QUEUE;
+END;
+
+------------------------------------------
+--
+-- Процедура проставляет заголовки ответного MQ сообщения в адаптерах бэк-офисных систем
+-- Входные параметры:
+-- InputRoot	- входящее сообщение
+-- OutputRoot	- исходящее сообщение
+--
+------------------------------------------
+CREATE PROCEDURE PrepareMQReplyHeaders(IN InputRoot REFERENCE, IN OutputRoot REFERENCE)
+BEGIN
+	-- Восстанавливаем все заголовки
+	IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+	END IF;
+	SET OutputRoot.MQMD				= InputRoot.ComIbmAggregateReplyBody.*[<].MQMD;
+
+	-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+	SET OutputRoot.MQMD.CorrelId	= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.MQMD.MsgId AS BLOB);
+	SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+
+	CALL SetCommonMQReplyHeaders(OutputRoot);
+END;
+
+------------------------------------------
+--
+-- Процедура устаналивает MQ-адресата ответного сообщения
+-- Входные параметры:
+-- MQMDRoot					- Родительское поле заголовка MQMD
+-- OutputLocalEnvironment	- LocalEnvironment исходщего сообщения
+--
+------------------------------------------
+
+CREATE PROCEDURE SetMQReplyDestination(IN MQMDRoot REFERENCE, IN OutputLocalEnvironment REFERENCE)
+BEGIN
+	SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName =
+		MQMDRoot.MQMD.ReplyToQ;
+	SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName =
+		MQMDRoot.MQMD.ReplyToQMgr;
+END;
+
+------------------------------------------
+--
+-- Формирует ответное сообщение
+-- Входные параметры:
+-- InputRoot	- входящее сообщение
+-- OutputRoot	- исходщее сообщение
+--
+------------------------------------------
+CREATE PROCEDURE AddOrigHead(IN InputRoot REFERENCE, IN OutputRoot REFERENCE)
+BEGIN
+	CALL SetResponseProperties(InputRoot, OutputRoot);
+
+	CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+ 	SET OutputRoot.XMLNSC	= InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC;
+END;
+
+------------------------------------------
+--
+-- Процедура копирует ReplyToQ и ReplyToQMgr
+-- Входные параметры:
+-- MQMDRoot		- Родительское поле заголовка MQMD
+-- OutputRoot	- Исходящее сообщение
+--
+------------------------------------------
+CREATE PROCEDURE CopyMQMDReply(IN MQMDRoot REFERENCE, IN OutputRoot REFERENCE)
+BEGIN
+	SET OutputRoot.MQMD.ReplyToQ	= MQMDRoot.MQMD.ReplyToQ;
+	SET OutputRoot.MQMD.ReplyToQMgr	= MQMDRoot.MQMD.ReplyToQMgr;
+END;
+
+------------------------------------------
+--
+-- Процедура проставляет заголовки ответного MQ сообщения в ПМИЛ
+-- Входные параметры:
+-- InRequest	- исходное входящее сообщение запроса
+-- OutputRoot	- исходящее сообщение
+--
+------------------------------------------
+CREATE PROCEDURE PreparePMILMQResponseHeaders(IN InRequest REFERENCE, IN OutputRoot REFERENCE)
+BEGIN
+	SET OutputRoot.MQMD.MsgId			= CAST(InRequest.MQMD.MsgId		AS BLOB);
+	SET OutputRoot.MQMD.CorrelId		= CAST(InRequest.MQMD.CorrelId	AS BLOB);
+
+	CALL CopyMQMDReply(InRequest, OutputRoot);
+
+	IF (InRequest.MQMD.Priority IS NOT NULL) THEN
+		SET OutputRoot.MQMD.Priority	= CAST(InRequest.MQMD.Priority AS INTEGER);
+	END IF;
+END;
+
+------------------------------------------
+--
+-- Функция возвращает имя очереди для сообщений с тайм-аутом
+-- RETURNS CHARACTER
+--
+------------------------------------------
+CREATE FUNCTION GetTimeoutQueue() RETURNS CHARACTER
+BEGIN
+	RETURN ESB_TIMEOUT_QUEUE;
+END;
+
+------------------------------------------
+--
+-- Функция возвращает время жизни MQ сообщений
+-- RETURNS INTEGER
+--
+------------------------------------------
+CREATE FUNCTION GetExpireTimeout() RETURNS INTEGER
+BEGIN
+	RETURN ESB_EXPIRE_TIMEOUT;
+END;
+
+------------------------------------------
+--
+-- Функция очищает строку от лидирующих/завершающих TAB'ов и пробелов
+-- RETURNS CHARACTER
+--
+------------------------------------------
+CREATE FUNCTION TrimWhitespace(IN value CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE oldvalue CHARACTER '';
+	DECLARE newvalue CHARACTER value;
+	DECLARE tab CHARACTER CAST(X'09' AS CHARACTER CCSID 1208); 
+	
+	IF value <> '' THEN
+		WHILE oldvalue <> newvalue DO
+			SET oldvalue = newvalue;
+			SET newvalue = TRIM(tab FROM TRIM(oldvalue));
+		END WHILE;
+	END IF;
+	
+	RETURN newvalue;
+END;
+
+/**
+ * Функция для использования в проектах ДКО.
+ * Генерирует 32-значную случайную последовательность
+ * из постоянного префикса, текущей системной даты и
+ * 8-ти значной случайной последовательности из цифр.
+ * @result - сформированное значение OperUID.
+ **/
+CREATE FUNCTION GenerateOperUID4DCO() RETURNS CHARACTER BEGIN
+	DECLARE prefixPart CHARACTER 'PAYMENT';
+	DECLARE timeStampPart CHARACTER CAST(ru.croc.sbrf.bp.common.esql.getLocalTS() AS CHAR FORMAT 'ddMMyyHHmmssSSS');
+	DECLARE randPart CHARACTER SUBSTRING( CAST( (FLOOR(POWER(10, 10) + RAND()*POWER(10, 10))) AS CHARACTER FORMAT '0') FROM 2 );
+		
+	RETURN prefixPart || timeStampPart || randPart;
+END;
+
+-- проверяет наличие непустого значения в поле
+-- [in] inField	- проверяемое поле
+-- [retval]	- возвращает TRUE, если есть непустое значение или FALSE в противном случае
+CREATE FUNCTION isValueExist(IN inField REFERENCE) RETURNS BOOLEAN
+BEGIN
+	IF inField IS NOT NULL AND 0 < LENGTH(inField) THEN
+		RETURN TRUE;
+	ELSE
+		RETURN FALSE; 	
+	END	IF;
+END;	
+
+/**
+ * Формирование заголовков XML
+ */
+CREATE PROCEDURE CreateXmlHeader(IN OutputRoot REFERENCE, IN encoding CHARACTER, IN doCreateDomain BOOLEAN)
+BEGIN
+	IF doCreateDomain THEN
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	END IF;
+
+	CREATE FIRSTCHILD OF OutputRoot.XMLNSC TYPE XMLNSC.XmlDeclaration; 
+	SET OutputRoot.XMLNSC.(XMLNSC.XmlDeclaration)*.(XMLNSC.Attribute)Version = '1.0'; 
+	SET OutputRoot.XMLNSC.(XMLNSC.XmlDeclaration)*.(XMLNSC.Attribute)Encoding = encoding;
+END;
+
+-- Возвращает UUID без символов '-'
+CREATE FUNCTION GenerateUUID()
+RETURNS CHARACTER
+BEGIN
+	RETURN REPLACE(uuidaschar, '-', '');
+END;
+
+/**
+ *  Функция считывает описание последней искл. ситуации
+ * 		InputExcTree 		- ссылка на дерево исключений
+ */
+CREATE FUNCTION GetLastExceptionText(IN InputExcTree REFERENCE, IN includeInserts BOOLEAN) RETURNS CHARACTER
+BEGIN
+    -- Ссылка на первый элемент
+    DECLARE ptrException REFERENCE TO InputExcTree.*[1];
+    DECLARE messageText CHARACTER;
+    DECLARE nodeName CHARACTER;
+
+    -- Перемещаем указатель на последний элемент дерева исключений
+	WHILE LASTMOVE(ptrException) DO
+		--Доходим до последнего дочернего элемента
+		MOVE ptrException LASTCHILD;
+	END WHILE;
+
+	--Перемещаем указатель на узел детального описания
+	MOVE ptrException PARENT;
+	IF ptrException.Number IS NULL THEN
+		MOVE ptrException PARENT;
+	END IF;
+
+	SET messageText = ptrException.Text;
+
+	IF includeInserts = TRUE THEN
+		SET messageText = messageText || ':';
+		FOR InsertRef AS ptrException.Insert[] DO
+			SET messageText = messageText || ' ' || InsertRef.Text;
+		END FOR;
+	END IF;
+
+	RETURN messageText;
+END;

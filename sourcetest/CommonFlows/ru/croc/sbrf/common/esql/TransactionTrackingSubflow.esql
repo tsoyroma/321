@@ -1,0 +1,226 @@
+BROKER SCHEMA ru.croc.sbrf.common.esql
+
+-- Домен MQRFH2
+DECLARE MQRFH2_DOMAIN CONSTANT CHARACTER 'MQRFH2';
+-- формат MQRFH2
+DECLARE MQRFH2_FORMAT CONSTANT CHARACTER 'MQHRF2';
+
+-- константа: код типа события старт
+DECLARE StartedCode CONSTANT INTEGER 1;
+-- константа: код типа события приёма сообщения
+DECLARE InboundCode CONSTANT INTEGER 2;
+-- константа: код типа комбинированного события старт и приём сообщения
+DECLARE StartedInboundCode CONSTANT INTEGER 3;
+-- константа: код типа комбинированного события приём сообщения и завершение
+DECLARE InboundFinishedCode CONSTANT INTEGER 10;
+-- константа: код типа события отправки сообщения
+DECLARE OutboundCode CONSTANT INTEGER 4;
+-- константа: код типа комбинированного события отправка сообщения и завершение
+DECLARE OutboundFinishedCode CONSTANT INTEGER 12;
+
+-- константа: разделитель частей идентификатора
+DECLARE IdSeparator CONSTANT CHARACTER ':';
+-- константа: разделитель кода тербанка
+DECLARE TBCodeSeparator CONSTANT CHARACTER '.';
+-- константа: имя узла - xml комментария для передачи идентифкатора связи
+DECLARE CommentNodeName CONSTANT CHARACTER 'Comment';
+
+-- константа: имя родительского узла для ttapi
+DECLARE ParentNodeName CONSTANT CHARACTER 'ttapi';
+-- константа: имя узла с временем события
+DECLARE TimestampNodeName CONSTANT CHARACTER 'timestamp';
+-- константа: имя узла с типом события
+DECLARE EventTypeNodeName CONSTANT CHARACTER 'type';
+-- константа: имя узла с идентификатором узла
+DECLARE NodeIdNodeName CONSTANT CHARACTER 'nodeId';
+-- константа: имя узла с признаком синхронного взаимодействия
+DECLARE IsSynchronousNodeName CONSTANT CHARACTER 'isSynchronous';
+-- константа: имя узла с идентификатором связи
+DECLARE LinkIdNodeName CONSTANT CHARACTER 'linkId';
+-- константа: имя узла со статусом
+DECLARE StatusNodeName CONSTANT CHARACTER 'status';
+-- константа: имя узла с именем транзакции
+DECLARE TransactionNameNodeName CONSTANT CHARACTER 'transactionName';
+-- константа: имя узла с именем приложения
+DECLARE ApplicationNameNodeName CONSTANT CHARACTER 'applicationName';
+-- константа: имя узла с именем сервера
+DECLARE ServerNameNodeName CONSTANT CHARACTER 'serverName';
+
+-- тип события (м.б. комбинацией двух, например STARTED_INBOUND)
+DECLARE EventType EXTERNAL INTEGER 0;
+-- идентификатор узла
+DECLARE NodeId EXTERNAL CHARACTER '';
+-- признак синхронного взаимодействия
+DECLARE IsSynchronous EXTERNAL BOOLEAN false;
+-- идентификатор связи
+DECLARE LinkId EXTERNAL CHARACTER '';
+-- статус транзакции
+DECLARE Status EXTERNAL CHARACTER 'Good';
+-- имя транзакции
+DECLARE TransactionName EXTERNAL CHARACTER '';
+-- имя приложения
+DECLARE ApplicationName EXTERNAL CHARACTER '';
+-- признак включенного логирования транзакций
+DECLARE IsEnabled EXTERNAL CHARACTER '0';
+-- имя сервера
+DECLARE ServerName EXTERNAL CHARACTER '';
+-- признак считывания LinkId из эхо. 
+-- Используется для случаев вызова внешних систем, не использующих логирование транзакций
+DECLARE IsByEcho EXTERNAL BOOLEAN false;
+
+CREATE FILTER MODULE TransactionTrackingSubflow_IsEnable
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- учту флаг включения логирования транзакций
+		RETURN '1' = IsEnabled;
+	END;
+
+END MODULE;
+
+
+CREATE COMPUTE MODULE TransactionTrackingSubflow_FillData
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+
+		-- если оригинальное сообщение из эхо, то просто пропускаю.
+		IF EXISTS(OutputRoot.XMLNSC.OrigMess[]) THEN
+			RETURN TRUE;
+		ELSE
+			-- узел с данными для логирования
+			DECLARE ttapiNode ROW;
+			-- сперва запомню временную метку
+			SET ttapiNode.{TimestampNodeName} = CAST
+				(
+					CURRENT_TIMESTAMP
+					AS CHARACTER FORMAT 'yyyy-MM-dd HH:mm:ss.SSSSSSZZ'
+				);
+			-- запомню поля, изменяющие значения
+			-- тип события
+			SET ttapiNode.{EventTypeNodeName} = EventType;
+			-- ссылка на узел с комментарием, содержащим идентификатор связи
+			DECLARE linkIdRef REFERENCE TO OutputRoot.XMLNSC.(XMLNSC.Comment){CommentNodeName};
+			-- признак наличия идентификатора связи
+			DECLARE isLinkIdExists BOOLEAN LASTMOVE(linkIdRef);
+			-- если тип события содержит приём сообщения, то идентификатор связи надо взять из xml комментария
+			IF EventType IN (InboundCode, StartedInboundCode, InboundFinishedCode) THEN
+				-- для случаев вызова внешних систем, не использующих логирование транзакций...
+				-- возьму комментарий из эхо
+				IF IsByEcho THEN
+					MOVE linkIdRef TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.{CommentNodeName};
+					SET isLinkIdExists = LASTMOVE(linkIdRef);
+				END IF;
+				-- идентификатор связи надо взять из xml комментария, если он есть
+				IF isLinkIdExists THEN
+					SET ttapiNode.{LinkIdNodeName} = FIELDVALUE(linkIdRef);
+				END IF;
+			ELSE
+				-- иначе: если тип события содержит отправку сообщения, то идентификатор связи надо сохранить в xml комментарий
+				IF EventType IN (OutboundCode, OutboundFinishedCode) THEN
+					-- для случаев вызова внешних систем, не использующих логирование транзакций...
+					-- запишу комментарий в пользовательские переменные среды. Оттуда они попадут в эхо
+					IF IsByEcho THEN
+						MOVE linkIdRef TO Environment.UserProperties.{CommentNodeName};
+						SET isLinkIdExists = LASTMOVE(linkIdRef);
+					END IF;
+					-- идентификатор связи склею из переменной среды и временной метки
+					SET ttapiNode.{LinkIdNodeName} = 
+						COALESCE(LinkId, '') 
+						|| IdSeparator 
+						|| ttapiNode.{TimestampNodeName};
+					-- запомню идентификатор связи в XML комментарий
+					-- он никому не помешает и никто его не удалит
+					IF NOT isLinkIdExists THEN
+						IF IsByEcho THEN
+							CREATE FIRSTCHILD OF Environment.UserProperties
+								NAME CommentNodeName 
+								VALUE ttapiNode.{LinkIdNodeName};
+						ELSE
+							CREATE FIRSTCHILD OF OutputRoot.XMLNSC 
+								TYPE XMLNSC.Comment 
+								NAME CommentNodeName 
+								VALUE ttapiNode.{LinkIdNodeName};
+						END IF;
+					ELSE
+						SET linkIdRef VALUE = 
+							ttapiNode.{LinkIdNodeName};
+					END IF;
+					-- признак синхронного взаимодействия
+					SET ttapiNode.{IsSynchronousNodeName} = IsSynchronous;
+				ELSE
+					-- иначе: очищу
+					IF isLinkIdExists THEN
+						DELETE FIELD linkIdRef;
+					END IF;
+				END IF;
+			END IF;
+			-- статус
+			SET ttapiNode.{StatusNodeName} = Status;
+			
+			-- теперь "отпущу" вызывавший поток		
+			PROPAGATE TO TERMINAL 'out';
+			
+			-- и спокойно сформирую остальные данные
+	
+			-- описание операции склею из типа и иногда присутствующего имени
+			DECLARE suffix CHARACTER 
+				COALESCE(Environment.UserProperties.Operation, '') 
+				|| COALESCE(Environment.UserProperties.OperName, '');
+			-- идентификатор узла склею из переменной среды и описания операции
+			SET ttapiNode.{NodeIdNodeName} = 
+				COALESCE(NodeId, '') || IdSeparator || COALESCE(suffix, '');
+			-- если тип события содержит старт, то задам описательные параметры
+			IF EventType IN (StartedCode, StartedInboundCode) THEN
+				-- имя транзакции тоже склею из кода тербанка, переменной среды и описания операции
+				-- код тербанка получаю из имени брокера: 2 и 3 цифры
+				SET ttapiNode.{TransactionNameNodeName} = 
+					COALESCE(SUBSTRING(BrokerName FROM 2 FOR 2), '') 
+					|| TBCodeSeparator 
+					|| COALESCE(TransactionName, '') 
+					|| IdSeparator 
+					|| COALESCE(suffix, '');
+				-- имя приложения
+				-- если не задано, то подставлю группу выполнения
+				IF 0 = LENGTH(ApplicationName) THEN
+					SET ttapiNode.{ApplicationNameNodeName} = ExecutionGroupLabel;
+				ELSE
+					SET ttapiNode.{ApplicationNameNodeName} = ApplicationName;
+				END IF;
+				-- имя сервера
+				-- если не задано, то подставлю имя брокера
+				IF 0 = LENGTH(ServerName) THEN
+					SET ttapiNode.{ServerNameNodeName} = BrokerName;
+				ELSE
+					SET ttapiNode.{ServerNameNodeName} = ServerName;
+				END IF;
+			END IF;
+	
+			-- задам формат
+			SET OutputRoot.MQMD.Format = MQRFH2_FORMAT;
+			-- Создаем заголовок MQRFH2
+			CREATE LASTCHILD OF OutputRoot DOMAIN(MQRFH2_DOMAIN) NAME MQRFH2_DOMAIN;
+			-- перенесу заполненные данные
+			SET OutputRoot.MQRFH2.{ParentNodeName} = ttapiNode;
+
+			-- отправлю логирование
+			PROPAGATE TO TERMINAL 'out1';
+	
+			RETURN FALSE;
+		END IF;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

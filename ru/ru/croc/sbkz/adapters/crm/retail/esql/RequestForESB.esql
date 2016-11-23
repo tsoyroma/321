@@ -1,0 +1,1010 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crm.retail.esql
+
+PATH ru.croc.sbkz.utils;
+
+/**
+ * Маршрутизация потока в соответствии с операцией
+ * Розничного CRM.
+ **/
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER COALESCE(FIELDVALUE(InputRoot.XMLNSC.*[<].MessageType), FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode));
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'CRMOnlineAMLRequest' THEN
+			SET labelName = 'CRMOnlineAMLRequest';
+		WHEN 'CRMOnlineSMSGateRequest' THEN
+			SET labelName = 'CRMOnlineSMSGateRequest';
+		WHEN 'CRMOnlinePragmaSearchRq' THEN
+			SET labelName = 'CRMOnlinePragmaSearchRq';
+		WHEN 'CRMOnlinePragmaTransactionRq' THEN
+			SET labelName = 'CRMOnlinePragmaTransactionRq';
+		WHEN 'CRMOnlinePragmaRq' THEN
+			SET labelName = 'CRMOnlinePragmaRq';
+		WHEN 'CRMContactPragmaRq' THEN
+			SET labelName = 'CRMContactPragmaRq';
+		WHEN 'CRMWay4ContractsCardsRequest' THEN
+			SET labelName = 'CRMWay4ContractsCardsRequest';
+		WHEN 'CRMWay4TrnRequest' THEN
+			SET labelName = 'CRMWay4TrnRequest';
+		WHEN 'CRMWay4LoyaltyRequest' THEN
+			SET labelName = 'CRMWay4LoyaltyRequest';
+		WHEN 'CRMOnlineEPKSearchRq' THEN
+			SET labelName = 'CRMOnlineEPKSearchRq';
+		WHEN 'CRMOnlineEPKRq' THEN
+			SET labelName = 'CRMOnlineEPKRq';
+		WHEN 'CRMEPKAccountRequest' THEN
+			SET labelName = 'CRMEPKAccountRequest';
+		WHEN 'CRMOnlinePragmaProductRequest' THEN
+			SET labelName = 'CRMOnlinePragmaProductRequest';
+		WHEN 'order_change' THEN
+			SET labelName = 'order_change_rq';
+		WHEN 'user_add' THEN
+			SET labelName = 'user_add_rq';
+		WHEN 'CRMGetPrivateClientAccountListRq' THEN
+			SET labelName = 'CRMGetPrivateClientAccountListRq';
+		WHEN 'sCreditListforApprove' THEN-- u07357 23.07.2015
+			SET labelName = 'sCreditListforApprove';
+		WHEN 'Way4CardAddSMSRq' THEN
+			SET labelName = 'Way4CardAddSMSRq';
+		WHEN 'Way4SbolAddRq' THEN
+			SET labelName = 'Way4SbolAddRq';	
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForESB(CRM Retail)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Задание параметров маршрутизации в заголовке MQRFH2.
+ * Случай для запросов с агрегацией. Связка адаптер - ПМИЛ.
+ **/
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в AML "Проверка наличия клиента в чёрном списке": CRMOnlineAMLRequest -> KZBlackListRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZBlackListRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZBlackListRq;
+		
+		SET OutRq.PersonInfo.inds:PersonName.inds:LastName = InpRq.DataRq.Contact.LastName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:FirstName = InpRq.DataRq.Contact.FirstName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName = InpRq.DataRq.Contact.MiddleName;
+		
+		SET OutRq.AMLOnly = '1';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в iMAP "Отсылка SMS сообщения": CRMOnlineSMSGateRequest -> KZSendSMSRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSendSMSRq';		
+		
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZSendSMSRq;
+		
+		SET OutRq.OperUID		= InpRq.DataRq.SMS.SiebelActionId;
+		SET OutRq.SPName		= 'A';
+		SET OutRq.VersionId 	= '1.3.0';
+		SET OutRq.PhoneNumber 	= REPLACE(InpRq.DataRq.SMS.PhoneNumber, '+', '');
+		SET OutRq.SMSText 		= InpRq.DataRq.SMS.Text;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в МАБПК Прагма "Получение списка ФЛ по атрибутам": CRMOnlinePragmaSearchRq -> KZGetPersonInfoByAttrRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetPersonInfoByAttrRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+		
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.OperUID		= '';
+		SET OutRq.SPName		= '';
+		
+		SET OutRq.PersonInfo.inds:NameAddrType					= 'Customer';
+		SET OutRq.PersonInfo.inds:PersonName.inds:LastName		= InpRq.DataRq.Contact.LastName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:FirstName		= InpRq.DataRq.Contact.FirstName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName	= InpRq.DataRq.Contact.MiddleName;
+		
+		IF InpRq.DataRq.Contact.BirthDate <> '' THEN
+			SET OutRq.PersonInfo.inds:BirthDt					= convertFromCRMDate(InpRq.DataRq.Contact.BirthDate);
+		END IF;
+
+		SET OutRq.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdType		= InpRq.DataRq.Contact.Category;
+		SET OutRq.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdStatus		= 'true';
+		SET OutRq.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdNum		= InpRq.DataRq.Contact.DocNumber;
+		SET OutRq.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IssueDt		= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT ESB_DATE_FORMAT);
+		SET OutRq.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IssuedBy		= '-';
+		
+		IF InpRq.DataRq.Contact.IIN <> '' THEN
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'PersonIdExt';
+			SET OutRq.PersonInfo.PersonIdExt[<].Key = 'IIN';
+			SET OutRq.PersonInfo.PersonIdExt[<].Value = InpRq.DataRq.Contact.IIN;
+		END IF;
+		IF InpRq.DataRq.Contact.DLNumber <> '' THEN
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'PersonIdExt';
+			SET OutRq.PersonInfo.PersonIdExt[<].Key = 'RNN';
+			SET OutRq.PersonInfo.PersonIdExt[<].Value = InpRq.DataRq.Contact.DLNumber;
+		END IF;
+		IF InpRq.DataRq.Contact.SiebelContractId <> '' THEN
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'PersonIdExt';
+			SET OutRq.PersonInfo.PersonIdExt[<].Key = 'CRMROZN';
+			SET OutRq.PersonInfo.PersonIdExt[<].Value = InpRq.DataRq.Contact.SiebelContractId;
+		END IF;
+		IF InpRq.DataRq.Contact.IntegrationId <> '' THEN
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'PersonIdExt';
+			SET OutRq.PersonInfo.PersonIdExt[<].Key = 'MABPK';
+			SET OutRq.PersonInfo.PersonIdExt[<].Value = InpRq.DataRq.Contact.IntegrationId;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Получение информации о транзакциях по счёту ФЛ": CRMOnlinePragmaTransactionRq -> KZGetTransactionsInfoRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetTransactionsInfoRq';		
+
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.OperUID		= '';
+		SET OutRq.SPName		= '';
+
+		IF InpRq.DataRq.Contact.IntegrationId <> '' THEN
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'PersonIdExt';
+			SET OutRq.PersonInfo.PersonIdExt[<].Key = 'MABPK';
+			SET OutRq.PersonInfo.PersonIdExt[<].Value = InpRq.DataRq.Contact.IntegrationId;
+		END IF;
+		
+		SET OutRq.AcctInfo.AcctId	= InpRq.DataRq.Contact.FINCORPAccount.FINAccountNumber;
+		SET OutRq.StartDate			= convertFromCRMDate(InpRq.DataRq.Contact.FINCORPAccount.StartDate);
+		SET OutRq.EndDate			= convertFromCRMDate(InpRq.DataRq.Contact.FINCORPAccount.EndDate);
+
+		RETURN TRUE;		
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в ПМИЛ "Запрос информации по ФЛ из АБС - композитный": CRMOnlinePragmaRq -> KZGetCompPersonInfoByIDRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO5
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetCompPersonInfoByIDRq';		
+		
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.OperUID		= '';
+		SET OutRq.SPName		= '';
+
+		IF InpRq.DataRq.Contact.IntegrationId <> '' THEN
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'PersonIdExt';
+			SET OutRq.PersonInfo.PersonIdExt[<].Key = 'MABPK';
+			SET OutRq.PersonInfo.PersonIdExt[<].Value = InpRq.DataRq.Contact.IntegrationId;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Создание или обновление физ. лица внешней системой": CRMContactPragmaRq -> KZSendPrivateClientDataRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO6
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSendPrivateClientDataRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:orgs = orgs;
+		
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.Message.DataRq.Contact;
+
+		SET outRef.OperUID		= '';
+		SET outRef.SPName		= '';
+		
+		CREATE FIELD OutputRoot.XMLNSC.*[<].PersonInfo AS outRef;
+		
+		SET outRef.inds:PersonName.inds:LastName	= inRef.LastName;
+		SET outRef.inds:PersonName.inds:FirstName	= inRef.FirstName;
+		SET outRef.inds:PersonName.inds:MiddleName	= inRef.MiddleName;
+
+		IF EXISTS(inRef.PersonalAddress[]) THEN
+			CREATE FIELD outRef.inds:ContactInfo;
+		END IF;
+		DECLARE outPostAddr REFERENCE TO outRef;
+		FOR inPersonalAddress AS inRef.PersonalAddress[] DO  
+			CREATE LASTCHILD OF outRef.inds:ContactInfo AS outPostAddr NAMESPACE ifxca NAME 'PostAddr';
+			SET outPostAddr.ifxca:City			= inPersonalAddress.City;
+			SET outPostAddr.ifxca:StateProv		= inPersonalAddress.County;
+			SET outPostAddr.ifxca:Area			= inPersonalAddress.District;
+			SET outPostAddr.ifxca:PostalCode	= inPersonalAddress.PostalCode;
+			SET outPostAddr.ifxca:Country		= inPersonalAddress.Country;
+			SET outPostAddr.ifxca:AddrType		= recodeAddressTypeFromCRM(inPersonalAddress.Type);
+			SET outPostAddr.ifxca:Street		= inPersonalAddress.Street;
+			SET outPostAddr.ifxca:House			= inPersonalAddress.House;
+			SET outPostAddr.ifxca:Building		= inPersonalAddress.Building;
+			SET outPostAddr.ifxca:Flat			= inPersonalAddress.Apt;
+		END FOR;
+		
+		SET outRef.inds:BirthDt			= convertFromCRMDate(inRef.BirthDate);
+		SET outRef.inds:Gender			= recodeGenderFromCRM(inRef.MF);
+		SET outRef.inds:MaritalStatus	= recodeMaritalStatusFromCRM(inRef.MaritalStatus);
+		
+		IF EXISTS(inRef.PubContactCredential[]) THEN
+			CREATE FIELD outRef.inds:IdentityCards;
+		END IF;
+		DECLARE outIdentityCard REFERENCE TO outRef;
+		FOR inPubContactCredential AS inRef.PubContactCredential[] DO
+			CREATE LASTCHILD OF outRef.inds:IdentityCards AS outIdentityCard NAMESPACE inds NAME 'IdentityCard';
+			SET outIdentityCard.inds:IdType		= inPubContactCredential.Category;
+			SET outIdentityCard.inds:IdNum		= inPubContactCredential.DocNumber;
+			SET outIdentityCard.inds:IssueDt	= convertFromCRMDate(inPubContactCredential.IssueDate);
+			SET outIdentityCard.inds:IssuedBy	= inPubContactCredential.IssuingCountry;
+			SET outIdentityCard.inds:ValidTo	= convertFromCRMDate(inPubContactCredential.ExpiryDate);
+		END FOR;
+		IF NOT EXISTS(outRef.inds:IdentityCards.*:*[]) THEN
+			SET outRef.inds:IdentityCards	= NULL;
+		END IF;
+		
+		SET outRef.inds:BirthPlace		= inRef.PlaceofBirth;
+		SET outRef.inds:Resident		= recodeBooleanFromCRM(inRef.Resident);
+		SET outRef.inds:Citizenship		= inRef.Citizenship;
+		
+		IF inRef.IntegrationId <> '' THEN
+			CREATE LASTCHILD OF outRef NAME 'PersonIdExt';
+			SET outRef.PersonIdExt[<].Key	= 'MABPK';
+			SET outRef.PersonIdExt[<].Value	= inRef.IntegrationId;
+		END IF;
+		IF inRef.SiebelContactId <> '' THEN
+			CREATE LASTCHILD OF outRef NAME 'PersonIdExt';
+			SET outRef.PersonIdExt[<].Key	= 'CRMROZN';
+			SET outRef.PersonIdExt[<].Value	= inRef.SiebelContactId;
+		END IF;
+		IF inRef.IIN <> '' THEN
+			CREATE LASTCHILD OF outRef NAME 'PersonIdExt';
+			SET outRef.PersonIdExt[<].Key	= 'IIN';
+			SET outRef.PersonIdExt[<].Value	= inRef.IIN;
+		END IF;
+		IF inRef.DLNumber <> '' THEN
+			CREATE LASTCHILD OF outRef NAME 'PersonIdExt';
+			SET outRef.PersonIdExt[<].Key	= 'RNN';
+			SET outRef.PersonIdExt[<].Value	= inRef.DLNumber;
+		END IF;
+		IF inRef.SIC <> '' THEN
+			CREATE LASTCHILD OF outRef NAME 'PersonIdExt';
+			SET outRef.PersonIdExt[<].Key	= 'SIC';
+			SET outRef.PersonIdExt[<].Value	= inRef.SIC;
+		END IF;
+		
+		SET outRef.ClientType			= inRef.Type;
+		
+		IF EXISTS(inRef.AlternatePhone[]) THEN
+			CREATE FIELD outRef.Phones;
+		END IF;
+		DECLARE outPhone REFERENCE TO outRef;
+		FOR inAlternatePhone AS inRef.AlternatePhone[] DO  
+			CREATE LASTCHILD OF outRef.Phones AS outPhone NAME 'Phone';
+			SET outPhone.PhoneType		= recodeContactTypeFromCRM(inAlternatePhone.Type);
+			SET outPhone.PhoneNum		= inAlternatePhone.Phone;
+			SET outPhone.Allowed		= recodeBooleanFromCRM(inAlternatePhone.Allowed);
+			SET outPhone.From			= inAlternatePhone.From;
+			SET outPhone.Till			= inAlternatePhone.Till;
+		END FOR;
+		IF inRef.CommunicationAddress.Address <> '' THEN
+			SET outRef.EMails.EMail.EMailAddr	= inRef.CommunicationAddress.Address;
+			SET outRef.EMails.EMail.Allowed		= recodeBooleanFromCRM(inRef.CommunicationAddress.Allowed);
+		END IF;
+		
+		SET outRef.ClientCategory		= inRef.Category;
+		SET outRef.LatLastName			= inRef.LatLastName;
+		SET outRef.LatFirstName			= inRef.LatFirstName;
+		
+		IF EXISTS(inRef.PartyRelationshipTo[]) THEN
+			CREATE FIELD outRef.RelPersons;
+		END IF;
+		DECLARE outRelPerson REFERENCE TO outRef;
+		FOR inPartyRelationshipTo AS inRef.PartyRelationshipTo[] DO  
+			CREATE LASTCHILD OF outRef.RelPersons AS outRelPerson NAME 'RelPerson';
+			
+			IF inPartyRelationshipTo.RelatedPartyIntegrationId <> '' THEN
+				CREATE LASTCHILD OF outRelPerson NAME 'RelPersonId';
+				SET outRelPerson.RelPersonId[<].Key	= 'MABPK';
+				SET outRelPerson.RelPersonId[<].Value	= inPartyRelationshipTo.RelatedPartyIntegrationId;
+			END IF;
+			IF inPartyRelationshipTo.SiebelId <> '' THEN
+				CREATE LASTCHILD OF outRelPerson NAME 'RelPersonId';
+				SET outRelPerson.RelPersonId[<].Key	= 'CRMROZN';
+				SET outRelPerson.RelPersonId[<].Value	= inPartyRelationshipTo.SiebelId;
+			END IF;
+			IF inPartyRelationshipTo.IntegrationId <> '' THEN
+				CREATE LASTCHILD OF outRelPerson NAME 'RelPersonId';
+				SET outRelPerson.RelPersonId[<].Key	= 'LINK';
+				SET outRelPerson.RelPersonId[<].Value	= inPartyRelationshipTo.IntegrationId;
+			END IF;
+			
+			SET outRelPerson.RelationshipType		= inPartyRelationshipTo.RelationshipType;
+			SET outRelPerson.RelationshipSubType	= inPartyRelationshipTo.RelationshipSubtype;
+		END FOR;
+		
+		IF inRef.StatDivision <> '' THEN
+			SET outRef.FirstContactBankInfo.banks:BranchId = inRef.StatDivision;
+		END IF;
+		
+		SET outRef.IsForeignPP			= recodeBooleanFromCRM(inRef.FPOP);
+		SET outRef.PersonStatus			= recodePersonStatusFromCRM(inRef.ContactStatus);
+		SET outRef.Segment				= inRef.Segment;
+		SET outRef.StatDivision			= inRef.StatDivision;
+		SET outRef.ABSManager			= inRef.QPragmaManager;
+		
+		IF EXISTS(inRef.Registration[]) THEN
+			CREATE FIELD outRef.RegData;
+		END IF;
+		DECLARE outRegRecord REFERENCE TO outRef;
+		FOR inRegistration AS inRef.Registration[] DO
+			CREATE LASTCHILD OF outRef.RegData AS outRegRecord NAME 'RegRecord';
+			SET outRegRecord.RegCountry		= inRegistration.IssuingCountry;
+			SET outRegRecord.RegNumber		= inRegistration.RegNumber;
+			SET outRegRecord.RegPlace		= inRegistration.Point;
+			SET outRegRecord.RegAgency		= inRegistration.Account;
+			SET outRegRecord.RegDate		= convertFromCRMDate(inRegistration.IssueDate);
+			SET outRegRecord.ExpDate		= convertFromCRMDate(inRegistration.ExpiryDate);
+			SET outRegRecord.ReIssueDate	= convertFromCRMDate(inRegistration.ReIssueDate);
+			SET outRegRecord.CertDate		= convertFromCRMDate(inRegistration.CertificateDate);
+			
+			IF inRegistration.LocalId <> '' THEN
+				CREATE LASTCHILD OF outRegRecord NAME 'IdRec';
+				SET outRegRecord.IdRec[<].IdKey		= 'LID';
+				SET outRegRecord.IdRec[<].IdValue	= inRegistration.LocalId;
+			END IF;
+			IF inRegistration.SiebelId <> '' THEN
+				CREATE LASTCHILD OF outRegRecord NAME 'IdRec';
+				SET outRegRecord.IdRec[<].IdKey		= 'SID';
+				SET outRegRecord.IdRec[<].IdValue	= inRegistration.SiebelId;
+			END IF;
+			IF inRegistration.IntegrationId <> '' THEN
+				CREATE LASTCHILD OF outRegRecord NAME 'IdRec';
+				SET outRegRecord.IdRec[<].IdKey		= 'IID';
+				SET outRegRecord.IdRec[<].IdValue	= inRegistration.IntegrationId;
+			END IF;
+		END FOR;
+		
+		DECLARE outEmploymentHistoryExt REFERENCE TO outRef;
+		FOR inFINCORPContactExperience AS inRef.FINCORPContactExperience[] DO
+			CREATE LASTCHILD OF outRef AS outEmploymentHistoryExt NAME 'EmploymentHistoryExt';
+			SET outEmploymentHistoryExt.inds:Occupation		= inFINCORPContactExperience.Place;
+			SET outEmploymentHistoryExt.inds:JobTitle		= inFINCORPContactExperience.Title;
+			CREATE FIELD outEmploymentHistoryExt.OrgRec;
+			IF inFINCORPContactExperience.AccountIntegrationId <> '' THEN
+				CREATE LASTCHILD OF outEmploymentHistoryExt.OrgRec NAME 'OrgId';
+				SET outEmploymentHistoryExt.OrgRec.OrgId[<].orgs:OrgType	= 'CRMID';
+				SET outEmploymentHistoryExt.OrgRec.OrgId[<].orgs:OrgNum		= inFINCORPContactExperience.AccountIntegrationId;
+			END IF;
+			IF inFINCORPContactExperience.BIN <> '' THEN
+				CREATE LASTCHILD OF outEmploymentHistoryExt.OrgRec NAME 'OrgId';
+				SET outEmploymentHistoryExt.OrgRec.OrgId[<].orgs:OrgType	= 'BIN';
+				SET outEmploymentHistoryExt.OrgRec.OrgId[<].orgs:OrgNum		= inFINCORPContactExperience.BIN;
+			END IF;
+			IF inFINCORPContactExperience.AccountType <> '' THEN
+				SET outEmploymentHistoryExt.OrgRec.orgs:OrgInfo.orgs:IndustId.orgs:Org			= 'GOST';
+				SET outEmploymentHistoryExt.OrgRec.orgs:OrgInfo.orgs:IndustId.orgs:IndustNum	= inFINCORPContactExperience.AccountType;
+			END IF;
+			DECLARE outContactInfo REFERENCE TO outEmploymentHistoryExt;
+			CREATE FIELD outEmploymentHistoryExt.OrgRec.orgs:OrgInfo.orgs:CompositeContactInfo.ifxca:ContactInfo AS outContactInfo;
+			SET outContactInfo.ifxca:PhoneNum					= inFINCORPContactExperience.WorkPhone;
+			SET outContactInfo.ifxca:PostAddr.ifxca:City		= inFINCORPContactExperience.City;
+			SET outContactInfo.ifxca:PostAddr.ifxca:StateProv	= inFINCORPContactExperience.County;
+			SET outContactInfo.ifxca:PostAddr.ifxca:Area		= inFINCORPContactExperience.District;
+			SET outContactInfo.ifxca:PostAddr.ifxca:PostalCode	= inFINCORPContactExperience.PostalCode;
+			SET outContactInfo.ifxca:PostAddr.ifxca:Country		= inFINCORPContactExperience.Country;
+			SET outContactInfo.ifxca:PostAddr.ifxca:Street		= inFINCORPContactExperience.Street;
+			SET outContactInfo.ifxca:PostAddr.ifxca:House		= inFINCORPContactExperience.House;
+			SET outContactInfo.ifxca:PostAddr.ifxca:Flat		= inFINCORPContactExperience.Apt;
+			
+			SET outEmploymentHistoryExt.AccountCategory			= inFINCORPContactExperience.AccountCategory;
+			SET outEmploymentHistoryExt.PlaceCategory			= inFINCORPContactExperience.Category;
+		END FOR;
+
+		IF EXISTS(inRef.Authority[]) THEN
+			CREATE FIELD outRef.AuthorityList;
+		END IF;
+		DECLARE outAuthority REFERENCE TO outRef;
+		FOR inAuthority AS inRef.Authority[] DO
+			CREATE LASTCHILD OF outRef.AuthorityList AS outAuthority NAME 'Authority';
+			SET outAuthority.IsActive		= recodeBooleanFromCRM(inAuthority.Active);
+			SET outAuthority.WarrantNumber	= inAuthority.WarrantNumber;
+			SET outAuthority.RegDate		= convertFromCRMDate(inAuthority.RegDate);
+			SET outAuthority.IssueDate		= convertFromCRMDate(inAuthority.IssueDate);
+			SET outAuthority.ExpDate		= convertFromCRMDate(inAuthority.ExpiryDate);
+			
+			IF inAuthority.ConIntegationId <> '' THEN
+				SET outAuthority.AuthPersonId.Key	= 'MABPK';
+				SET outAuthority.AuthPersonId.Value	= inAuthority.ConIntegationId;
+			END IF;
+			
+			SET outAuthority.NotaryInfo.NotaryName			= inAuthority.NotaryName;
+			SET outAuthority.NotaryInfo.NotaryAddress		= inAuthority.NotaryAddr;
+			SET outAuthority.NotaryInfo.NotaryLicense		= inAuthority.NotaryLicense;
+			SET outAuthority.NotaryInfo.NotaryLicenseDate	= convertFromCRMDate(inAuthority.NotaryLicenseDate);
+			SET outAuthority.NotaryInfo.NotaryPhone			= inAuthority.NotaryPhone;
+			IF NOT EXISTS(outAuthority.NotaryInfo.*[]) THEN
+				SET outAuthority.NotaryInfo = NULL;
+			END IF;
+
+			SET outAuthority.AuthAccount.AccountId			= inAuthority.FINSAccount.FINSAccountNumber;
+			SET outAuthority.AuthAccount.AccountStatus		= inAuthority.FINSAccount.FINSAccountStatus;
+			FOR inPermissions AS inAuthority.FINSAccount.Permissions[] DO
+				CREATE LASTCHILD OF outAuthority.AuthAccount NAME 'Permission' VALUE inPermissions.Permissions;
+			END FOR;
+			IF NOT EXISTS(outAuthority.AuthAccount.*[]) THEN
+				SET outAuthority.AuthAccount = NULL;
+			END IF;
+		END FOR;
+		
+		SET outRef.ClientJobTitle		= inRef.AccountTitle;
+		SET outRef.ClientWorkPlace		= inRef.AccountPlace;
+		SET outRef.ClientWorkPlaceCat	= recodeAccountCategoryFromCRM(inRef.AccountCategory);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Запрос данных о платёжных карточках и контрактах": CRMWay4ContractsCardsRequest -> KZGetPersonContractsCardsRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO7
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetPersonContractsCardsRq';		
+
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.OperUID		= '';
+		SET OutRq.SPName		= 'CRMr';
+
+		IF InpRq.DataRq.UNKP <> '' THEN
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'PersonIdExt';
+			SET OutRq.PersonInfo.PersonIdExt[<].Key = 'WAY';
+			SET OutRq.PersonInfo.PersonIdExt[<].Value = InpRq.DataRq.UNKP;
+		END IF;
+		
+		RETURN TRUE;		
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в ЕПК "Передача данных по юридическому лицу для поиска": CRMOnlineEPKSearchRq -> KZGetMDMLegalInfoByAttrRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO8
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetMDMLegalInfoByAttrRq';		
+
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef.SPName						= 'CRMr';
+
+		SET outRef.OrgInfo.OrgIdExt[1].Key		= 'RNN';
+		SET outRef.OrgInfo.OrgIdExt[1].Value	= inRef.DataRq.Account.RNN;
+		SET outRef.OrgInfo.OrgIdExt[2].Key		= 'BIN';
+		SET outRef.OrgInfo.OrgIdExt[2].Value	= inRef.DataRq.Account.BIN;
+		SET outRef.OrgInfo.OrgAttr.Country		= inRef.DataRq.Account.CountryCode;
+		SET outRef.ServiceAttr.Key				= 'SC';
+		SET outRef.ServiceAttr.Value			= inRef.MessageType;
+		
+		-- добавим отметку, чтобы различать два исходящих запроса KZGetMDMLegalInfoByAttrRq по разным интерфейсам
+		SET Environment.UserProperties.OperationSubtype = 'Search';
+		
+		RETURN TRUE;		
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в ЕПК "Запрос информации по найденному юридическому лицу в ЕПК": CRMOnlineEPKRq -> KZGetMDMLegalInfoByAttrRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO9
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetMDMLegalInfoByAttrRq';		
+
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef.SPName						= 'CRMr';
+
+		SET outRef.OrgInfo.OrgIdExt[1].Key		= 'CIF';
+		SET outRef.OrgInfo.OrgIdExt[1].Value	= inRef.DataRq.Account.IntegrationId;
+		SET outRef.ServiceAttr.Key				= 'SC';
+		SET outRef.ServiceAttr.Value			= inRef.MessageType;
+
+		-- добавим отметку, чтобы различать два исходящих запроса KZGetMDMLegalInfoByAttrRq по разным интерфейсам
+		SET Environment.UserProperties.OperationSubtype = 'Get';
+		
+		RETURN TRUE;		
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в ЕПК "Создание/обновление данных юридического лица и его контактных лиц": CRMEPKAccountRequest -> KZSendMDMLegalClientDataRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO10
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSendMDMLegalClientDataRq';		
+
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef.SPName						= 'CRMr';
+
+		SET outRef.OrgInfo.orgs:LegalName		= inRef.DataRq.Account.LegalName;
+		SET outRef.OrgInfo.orgs:EstablishDate	= inRef.DataRq.Account.RegDate;
+		SET outRef.OrgInfo.orgs:EmployerCode	= inRef.DataRq.Account.OPF;
+		SET outRef.OrgInfo.OrgIdExt[1].Key		= 'CIF';
+		SET outRef.OrgInfo.OrgIdExt[1].Value	= inRef.DataRq.Account.IntegrationId;
+		SET outRef.OrgInfo.OrgIdExt[2].Key		= 'CRMr';
+		SET outRef.OrgInfo.OrgIdExt[2].Value	= inRef.DataRq.Account.CRMId;
+		SET outRef.OrgInfo.OrgIdExt[3].Key		= 'RNN';
+		SET outRef.OrgInfo.OrgIdExt[3].Value	= inRef.DataRq.Account.RNN;
+		SET outRef.OrgInfo.OrgIdExt[4].Key		= 'BIN';
+		SET outRef.OrgInfo.OrgIdExt[4].Value	= inRef.DataRq.Account.BIN;
+		
+		SET outRef.OrgInfo.OrgAttr.KeyPerson.PositionKey					= 'CONTACT';
+		SET outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.inds:NameAddrType	= 'Customer';
+		SET outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.inds:PersonName.inds:LastName	= inRef.DataRq.Account.Contact.LastName;
+		SET outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.inds:PersonName.inds:FirstName	= inRef.DataRq.Account.Contact.FirstName;
+		SET outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.PersonIdExt[1].Key				= 'CIF';
+		SET outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.PersonIdExt[1].Value			= inRef.DataRq.Account.Contact.ContactIntegrationId;
+		SET outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.PersonIdExt[2].Key				= 'CRMr';
+		SET outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.PersonIdExt[2].Value			= inRef.DataRq.Account.Contact.ContactSiebelId;
+		
+		CREATE FIELD outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.Phones;
+		DECLARE outPhone REFERENCE TO outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.Phones;
+		IF inRef.DataRq.Account.Contact.ContactPhone <> '' THEN
+			CREATE LASTCHILD OF outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.Phones AS outPhone NAME 'Phone';
+			SET outPhone.PhoneType	= 'Mobile'; 
+			SET outPhone.PhoneNum	= inRef.DataRq.Account.Contact.ContactPhone; 
+		END IF;
+		IF inRef.DataRq.Account.Contact.ContactWorkPhone <> '' THEN
+			CREATE LASTCHILD OF outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.Phones AS outPhone NAME 'Phone';
+			SET outPhone.PhoneType	= 'Work'; 
+			SET outPhone.PhoneNum	= inRef.DataRq.Account.Contact.ContactWorkPhone; 
+		END IF;
+		IF inRef.DataRq.Account.Contact.ContactFax <> '' THEN
+			CREATE LASTCHILD OF outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.Phones AS outPhone NAME 'Phone';
+			SET outPhone.PhoneType	= 'DayFax'; 
+			SET outPhone.PhoneNum	= inRef.DataRq.Account.Contact.ContactFax; 
+		END IF;
+		IF NOT EXISTS(outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.Phones.*[]) THEN
+			SET outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.Phones = NULL;
+		END IF;
+		
+		IF inRef.DataRq.Account.Contact.ContactEmail <> '' THEN
+			SET outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.EMails.EMail.EMailAddr	= inRef.DataRq.Account.Contact.ContactEmail;
+		END IF;
+		
+		SET outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.PersonStatus	= recodePersonStatusFromCRM(inRef.DataRq.Account.Contact.ContactStatus);
+		SET outRef.OrgInfo.OrgAttr.KeyPerson.PersonInfo.ClientJobTitle	= inRef.DataRq.Account.Contact.JobTitle;
+		SET outRef.OrgInfo.OrgAttr.Country								= inRef.DataRq.Account.CountryCode;
+		SET outRef.OrgInfo.OrgAttr.ShortName							= inRef.DataRq.Account.NameShort;
+		SET outRef.OrgInfo.OrgAttr.FullName								= inRef.DataRq.Account.NameFull;
+		
+		RETURN TRUE;		
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК "Передача идентификатора сделки в АБС": CRMOnlinePragmaProductRequest -> KZSendDealInfoRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO11
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSendDealInfoRq';		
+
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.OperUID		= '';
+		SET OutRq.SPName		= 'CRMr';		
+		
+		SET OutRq.PersonInfo.PersonIdExt.Key	= 'MABPK';
+		SET OutRq.PersonInfo.PersonIdExt.Value	= InpRq.DataRq.Contact.IntegrationId;
+
+		SET OutRq.DealInfo.DealIdExt.Key		= 'CRMr';
+		SET OutRq.DealInfo.DealIdExt.Value		= InpRq.DataRq.Contact.ssOpportunity.SsId;
+		SET OutRq.DealInfo.MngLogin				= InpRq.DataRq.Contact.ssOpportunity.ManagerLogin;
+		SET OutRq.DealInfo.ProductType			= InpRq.DataRq.Contact.ssOpportunity.ProductType;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в WAY4 "Получение данных о транзакциях по контрактам": CRMOnlineWay4TrnRequest -> KZGetPersonContractCardTransactionsRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO12
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetPersonContractCardTransactionsRq';		
+
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.OperUID		= '';
+		SET OutRq.SPName		= 'CRMr';
+
+		IF InpRq.DataRq.AgreementNumber <> '' THEN
+			SET OutRq.ContractInfo.ContractExtId.Key	= 'RBSN';
+			SET OutRq.ContractInfo.ContractExtId.Value	= InpRq.DataRq.AgreementNumber;
+		END IF;
+		
+		RETURN TRUE;		
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в WAY4 "Запрос о  подключении/отключении платежной карты клиента к программе лояльности": CRMWay4LoyaltyRequest -> KZMngClientProgramRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO13
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZMngClientProgramRq';		
+
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.OperUID		= '';
+		SET OutRq.SPName		= 'CRMr';
+
+		SET OutRq.ProgramInfo.ProgramCode					= 'LOYALTY';
+		SET OutRq.ProgramInfo.ProgramName					= InpRq.DataRq.LoyaltyName;
+		SET OutRq.ProgramInfo.PersonInfo.PersonIdExt.Key	= 'WAY';
+		SET OutRq.ProgramInfo.PersonInfo.PersonIdExt.Value	= InpRq.DataRq.UNKP;
+		SET OutRq.ProgramInfo.ContractInfo.ContractNumber	= InpRq.DataRq.AgreementNumber;
+		SET OutRq.ProgramInfo.CardInfo.cards:CardNumber		= InpRq.DataRq.CardNumber;
+		SET OutRq.ProgramInfo.Action						= CASE
+			WHEN InpRq.DataRq.LoyaltyAction = 'Y' THEN 'ADD'
+			WHEN InpRq.DataRq.LoyaltyAction = 'N' THEN 'DEL'
+			ELSE NULL
+		END;
+		
+		RETURN TRUE;		
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE RequestForESB_ConvertLKA2MDO11
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		SET OutputRoot = InputRoot;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertLKA2MDO11_user_add
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		SET OutputRoot = InputRoot;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_lka
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		SET OutputRoot = InputRoot;		
+		DECLARE systemId, adapterType CHARACTER;		
+		SET systemId 	= 'urn:sbkzsystems:lka';
+		SET adapterType = 'urn:sbkztypes:esb:adapter';		
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM_CRMGetPrivateClientAccountListRq
+/*
+CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetPersonInfoByAttrRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+		
+		CALL FillMDOStandartElementsForIMAPRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.OperUID		= '';
+		SET OutRq.SPName		= '';
+		
+		SET OutRq.PersonInfo.inds:NameAddrType					= 'Customer';
+		SET OutRq.PersonInfo.inds:PersonName.inds:LastName		= InpRq.DataRq.Contact.LastName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:FirstName		= InpRq.DataRq.Contact.FirstName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName	= InpRq.DataRq.Contact.MiddleName;
+		
+		IF InpRq.DataRq.Contact.BirthDate <> '' THEN
+			SET OutRq.PersonInfo.inds:BirthDt					= convertFromCRMDate(InpRq.DataRq.Contact.BirthDate);
+		END IF;
+
+		SET OutRq.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdType		= InpRq.DataRq.Contact.Category;
+		SET OutRq.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdStatus		= 'true';
+		SET OutRq.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdNum		= InpRq.DataRq.Contact.DocNumber;
+		SET OutRq.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IssueDt		= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT ESB_DATE_FORMAT);
+		SET OutRq.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IssuedBy		= '-';
+		
+		IF InpRq.DataRq.Contact.IIN <> '' THEN
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'PersonIdExt';
+			SET OutRq.PersonInfo.PersonIdExt[<].Key = 'IIN';
+			SET OutRq.PersonInfo.PersonIdExt[<].Value = InpRq.DataRq.Contact.IIN;
+		END IF;
+		IF InpRq.DataRq.Contact.DLNumber <> '' THEN
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'PersonIdExt';
+			SET OutRq.PersonInfo.PersonIdExt[<].Key = 'RNN';
+			SET OutRq.PersonInfo.PersonIdExt[<].Value = InpRq.DataRq.Contact.DLNumber;
+		END IF;
+		IF InpRq.DataRq.Contact.SiebelContractId <> '' THEN
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'PersonIdExt';
+			SET OutRq.PersonInfo.PersonIdExt[<].Key = 'CRMROZN';
+			SET OutRq.PersonInfo.PersonIdExt[<].Value = InpRq.DataRq.Contact.SiebelContractId;
+		END IF;
+		IF InpRq.DataRq.Contact.IntegrationId <> '' THEN
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'PersonIdExt';
+			SET OutRq.PersonInfo.PersonIdExt[<].Key = 'MABPK';
+			SET OutRq.PersonInfo.PersonIdExt[<].Value = InpRq.DataRq.Contact.IntegrationId;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+*/
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.Message;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountListRq';
+		
+		SET outRoot.RqUID	=	inRoot.MessageId;
+		SET outRoot.RqTm	=	CAST(CURRENT_DATE AS CHARACTER FORMAT 'yyyy-MM-ddHH:MM:SS');
+		--SET outRoot.OperUID	=	inRoot.*:OperUID;
+		--SET outRoot.SPName	=	inRoot.SPName;
+		SET outRoot.SPName	=	'CRMRetail';
+
+		SET outRoot.RegNumber = inRoot.MessageId;
+		
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key   = 'IIN';
+		SET curElm.Value = inRoot.DataRq.Contact.IIN;
+		
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'CUSTCODE';
+		SET curElm.Value = 'ClientId';
+		
+		SET outRoot.ServiceAttr.AttrId    = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = '2.0';
+
+		CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_ACCOUNT';
+		CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_DEPOSIT';
+		CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_CREDIT';
+
+		SET Environment.UserProperties.IIN = inRoot.DataRq.Contact.IIN;
+		
+		RETURN TRUE;
+	END;	
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_TEST
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZsCreditListforApproveRq';
+		/*SET outRoot.RqUID = inRoot.RqUID;
+		SET outRoot.RqTm = inRoot.RqTm;
+		SET outRoot.ServiceCode = 'sCreditListforApprove';
+		SET outRoot.Status.StatusCode = '1';
+		SET outRoot.Status.StatusDesc = ' ';*/
+		
+		SET outRoot = inRoot;
+		SET outRoot.mqmsgid = InputRoot.MQMD.MsgId;
+		--SET outRoot = inRoot;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertWay4CardAddSMSRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZCRMCardAddSMSRq';
+ 
+		SET outRoot.RqUID							= inRoot.MsgId;
+		SET outRoot.RegNumber		      		    = inRoot.MsgData.Application.RegNumber;
+		SET outRoot.ClientNumber		      		= inRoot.MsgData.Application.ObjectFor.ContractIDT.Client.ClientInfo.ClientNumber;
+		--SET outRoot.BankInfo.RbTbBrchId				= inRoot.*:BankInfo.*:RbTbBrchId;
+		--SET outRoot.CardAcctId.SystemId				= inRoot.*:CardAcctId.*:SystemId;
+		SET outRoot.CardAcctId.CardNum				= inRoot.MsgData.Application.Requestor.ContractNumber; 
+		SET outRoot.CardAcctId.AddrSMS				= inRoot.MsgData.Application.Data.QueEvent.Comment;
+		SET outRoot.CardAcctId.ActionCode			= inRoot.MsgData.Application.Data.QueEvent.ActionCode;
+	--	SET outRoot.CardAcctId.BankInfo.RbTbBrchId	= inRoot.*:CardAcctId.*:BankInfo.*:RbTbBrchId;
+
+		--SET Environment.UserProperties.OperUID    	= inRoot.*:OperUID;
+		SET Environment.UserProperties.Operation		= 'KZCRMCardAddSMSRq';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertWay4SbolAddRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWay4SbolAddRq';
+ 
+		SET outRoot.RqUID							= inRoot.MsgId;
+		SET outRoot.RegNumber						= inRoot.MsgData.Information.RegNumber;
+		SET outRoot.CustomIDT						= inRoot.MsgData.Information.ObjectFor.ClientIDT.CustomIDT;
+		SET outRoot.CustomCode						= inRoot.MsgData.Information.ObjectFor.ClientIDT.CustomCode;		
+			
+		SET Environment.UserProperties.Operation		= 'KZWay4SbolAddRq';
+		RETURN TRUE;
+	END;
+END MODULE;

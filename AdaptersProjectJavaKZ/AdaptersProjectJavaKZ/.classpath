@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="src" path=""/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="var" path="JCN_HOME/javacompute.jar"/>
+	<classpathentry kind="var" path="JCN_HOME/jplugin2.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_30062015/AdaptersProjectJavaKZ/lib/commons-io-2.4.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_30062015/AdaptersProjectJavaKZ/lib/commons-logging-1.1.1.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_30062015/AdaptersProjectJavaKZ/lib/guava-16.0.1.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_30062015/AdaptersProjectJavaKZ/lib/iola-2.3-161.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_30062015/AdaptersProjectJavaKZ/lib/junit-4.11.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_30062015/AdaptersProjectJavaKZ/lib/servlet-api-2.5.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_30062015/AdaptersProjectJavaKZ/lib/xmlsec-1.4.4.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/AdaptersProjectJavaKZ/lib/FileTransfer-0.5-jar-with-dependencies.jar"/>
+	<classpathentry kind="output" path=""/>
+</classpath>

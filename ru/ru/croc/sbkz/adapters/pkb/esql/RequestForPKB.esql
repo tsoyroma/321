@@ -1,0 +1,819 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pkb.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+/**
+ * Сохранение исходного сообщения в Environment.
+ **/
+CREATE COMPUTE MODULE RequestForPKB_SaveOrigMess
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.Source.MQMD 		= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 	= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 		= InputBody;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+/**
+ * Определяет тип запроса: получение списка доступных отчетов
+ * или же получение данных по конкретному отчету.
+ **/
+CREATE COMPUTE MODULE RequestForPKB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZGetPKBReportListRq' THEN
+			SET labelName = 'KZGetPKBReportListRq';
+		WHEN 'KZGetCreditHistoryRq' THEN
+			SET labelName = 'KZGetCreditHistoryRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in PKB(RequestForPKB)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Сохранение параметров SOAP-заголовка
+ * в Environment.UserProperties.SOAPHeaderData
+ **/ 
+CREATE COMPUTE MODULE RequestForPKB_SaveSOAPHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		SET Environment.UserProperties.SOAPHeaderData 	= InputRoot.XMLNSC.*:*[<].SOAPHeaderData;
+		
+		CALL CopyEntireMessage();
+		
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+	
+END MODULE;
+
+/**
+ * Формирование тела SOAP-запроса для получения списка
+ * доступных отчетов для клиента.
+ **/
+CREATE COMPUTE MODULE RequestForPKB_MakeSOAPBodyForListRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		DECLARE docRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE FIELD OutputRoot.XMLNSC.ws_credit:GetAvailableReportsForId AS docRoot; 
+		SET docRoot.ws_credit:idNumber = InputRoot.XMLNSC.KZGetPKBReportListRq.PersonInfo.PersonId;
+		SET docRoot.ws_credit:xmlParams.keyValue.idTypeImportCode = CASE InputRoot.XMLNSC.KZGetPKBReportListRq.PersonInfo.PersonIdType
+				WHEN PERSON_ID_TYPE_RNN THEN ID_TYPE_IMPORT_CODE_RNN 
+				WHEN PERSON_ID_TYPE_IIN THEN ID_TYPE_IMPORT_CODE_IIN
+				WHEN PERSON_ID_TYPE_UR THEN ID_TYPE_IMPORT_CODE_UR		
+				END;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Преобразование ответа списка отчетов в МДО формат.
+ **/
+CREATE COMPUTE MODULE RequestForPKB_ConvertList2MDO
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders();
+		
+		DECLARE outRs REFERENCE TO OutputRoot;
+		
+		IF EXISTS(InputRoot.XMLNSC.ws_credit:GetAvailableReportsForIdResponse
+				.ws_credit:GetAvailableReportsForIdResult.CigResultError[]) THEN
+			DECLARE statusCode CHARACTER InputRoot.XMLNSC.ws_credit:GetAvailableReportsForIdResponse
+				.ws_credit:GetAvailableReportsForIdResult.CigResultError.Errmessage.(XMLNSC.Attribute)code;
+			DECLARE statusDesc CHARACTER InputRoot.XMLNSC.ws_credit:GetAvailableReportsForIdResponse
+				.ws_credit:GetAvailableReportsForIdResult.CigResultError.Errmessage;
+				
+			CREATE FIELD OutputRoot.XMLNSC.KZGetPKBReportListRs AS outRs;
+			CALL FillMDOStandartElementsRs(Environment.UserProperties.Source.Body, statusCode
+					, statusDesc, OutputRoot.XMLNSC);		
+		ELSE
+			DECLARE inputReportList REFERENCE TO InputRoot.XMLNSC.ws_credit:GetAvailableReportsForIdResponse
+				.ws_credit:GetAvailableReportsForIdResult.CigResult.Result.EntitiesAndReports.Entity.Reports;
+		
+			CREATE FIELD OutputRoot.XMLNSC.KZGetPKBReportListRs AS outRs;
+			CALL FillMDOStandartElementsRs(Environment.UserProperties.Source.Body, STATUS_CODE_OK
+					, '', OutputRoot.XMLNSC);
+			CREATE FIELD outRs.ReportList;
+			
+			FOR report AS inputReportList.Report[] DO
+				CREATE LASTCHILD OF outRs.ReportList NAME 'Report';
+				SET outRs.ReportList.Report[<].ReportId 	= report.(XMLNSC.Attribute)id;
+				SET outRs.ReportList.Report[<].ImportCode 	= report.(XMLNSC.Attribute)importcode;
+				SET outRs.ReportList.Report[<].NameNative 	= report.(XMLNSC.Attribute)namenative;
+				SET outRs.ReportList.Report[<].NameEn 		= report.(XMLNSC.Attribute)nameen;
+			END FOR;
+		END IF;	
+				
+		
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Формирует тело SOAP-запроса для получения конкретного отчета
+ * по клиенту в одном из форматов (XML или HTML
+ **/
+CREATE COMPUTE MODULE RequestForPKB_MakeSOAPBodyForReportRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		DECLARE docRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE FIELD OutputRoot.XMLNSC.ws_credit:GetReports AS docRoot; 
+		
+		SET docRoot.ws_credit:xmlDoc.identifiers.identifier = InputRoot.XMLNSC.KZGetCreditHistoryRq.PersonInfo.PersonId;
+		SET docRoot.ws_credit:xmlDoc.identifiers.identifier.(XMLNSC.Attribute)reportImportCode = InputRoot.XMLNSC.KZGetCreditHistoryRq.ReportCode;
+		SET docRoot.ws_credit:xmlDoc.identifiers.identifier.(XMLNSC.Attribute)ConsentConfirmed = '1';
+		SET docRoot.ws_credit:xmlDoc.identifiers.identifier.(XMLNSC.Attribute)idTypeImportCode = CASE InputRoot.XMLNSC.KZGetCreditHistoryRq.PersonInfo.PersonIdType
+				WHEN PERSON_ID_TYPE_RNN THEN ID_TYPE_IMPORT_CODE_RNN 
+				WHEN PERSON_ID_TYPE_IIN THEN ID_TYPE_IMPORT_CODE_IIN
+				WHEN PERSON_ID_TYPE_UR THEN ID_TYPE_IMPORT_CODE_UR	
+				END;
+		SET docRoot.ws_credit:outputFormat = InputRoot.XMLNSC.KZGetCreditHistoryRq.ReportFormat;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Проверка на то, какого формата вернулся отчет
+ * и принятие решения о дальнейшем роутинге потока.
+ **/
+CREATE FILTER MODULE RequestForPKB_IsXMLFormat
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		IF Environment.UserProperties.Source.Body.KZGetCreditHistoryRq.ReportFormat = REPORTFORMAT_XML THEN
+			RETURN TRUE;
+		ELSEIF Environment.UserProperties.Source.Body.KZGetCreditHistoryRq.ReportFormat = REPORTFORMAT_HTML THEN
+			RETURN FALSE;
+		END IF;
+	END;
+
+END MODULE;
+
+/**
+ * Извлекает из ответа с отчетом BLOB с содержимым
+ * отчета и передает его далее, на распаковку из zip-
+ * архива.
+ **/
+CREATE COMPUTE MODULE RequestForPKB_ExtractBlob
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CREATE LASTCHILD OF OutputRoot DOMAIN('BLOB') NAME 'BLOB';
+		SET OutputRoot.BLOB.BLOB = InputRoot.XMLNSC.ws_credit:GetReportsResponse.ws_credit:GetReportsResult;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Преобразование ответа списка отчетов в МДО формат для отчета
+ * в формате HTML.
+ **/
+CREATE COMPUTE MODULE RequestForPKB_ConvertReport2MDOHTML
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE outRs REFERENCE TO OutputRoot;
+		
+		CALL CopyMessageHeaders();
+		
+		CREATE FIELD OutputRoot.XMLNSC.KZGetCreditHistoryRs AS outRs;
+		CALL FillMDOStandartElementsRs(Environment.UserProperties.Source.Body, STATUS_CODE_OK, '', OutputRoot.XMLNSC);
+		SET outRs.Report = CAST(InputRoot.BLOB.BLOB AS CHARACTER CCSID REPORT_CCSID);
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Преобразует входящие BLOB-данные xml-отчета в
+ * дерево домена XMLNSC для последующей обработки.
+ **/
+CREATE COMPUTE MODULE RequestForPKB_BuildReportXMLTree
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') PARSE(InputRoot.BLOB.BLOB CCSID REPORT_CCSID); 
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Преобразование ответа списка отчетов в МДО формат для отчета
+ * в формате XML.
+ **/
+CREATE COMPUTE MODULE RequestForPKB_ConvertReport2MDOXML
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE inpRs REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRs REFERENCE TO OutputRoot;
+		
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE FIELD OutputRoot.XMLNSC.KZGetCreditHistoryRs AS outRs;
+		
+		IF FIELDNAME(inpRs) = 'CigResultError' THEN
+			DECLARE statusCode CHARACTER inpRs.Errmessage.(XMLNSC.Attribute)code;
+			DECLARE statusDesc CHARACTER inpRs.Errmessage;
+			
+			CALL FillMDOStandartElementsRs(Environment.UserProperties.Source.Body, statusCode, statusDesc, OutputRoot.XMLNSC);
+		ELSE
+			CALL FillMDOStandartElementsRs(Environment.UserProperties.Source.Body, STATUS_CODE_OK, '', OutputRoot.XMLNSC);
+
+            -- XML отчёт для САКД
+	  	    CREATE LASTCHILD OF outRs NAME 'PKB_RESPONSE_XML';
+			DECLARE PKB_RESPONSE_XML REFERENCE TO outRs.PKB_RESPONSE_XML[<];
+		    SET outRs.PKB_RESPONSE_XML = InputRoot.XMLNSC.*[<];
+				
+			FOR contr AS inpRs.ExistingContracts.Contract[] DO
+				CREATE LASTCHILD OF outRs NAME 'Agreement';
+				DECLARE agreement REFERENCE TO outRs.Agreement[<];
+				CALL FillAgreementInfo(inpRs, contr, outRs.Agreement[<], FALSE);
+			END FOR;
+			
+			FOR contr AS inpRs.TerminatedContracts.Contract[] DO
+				CREATE LASTCHILD OF outRs NAME 'Agreement';
+				DECLARE agreement REFERENCE TO outRs.Agreement[<];
+				CALL FillAgreementInfo(inpRs, contr, outRs.Agreement[<], TRUE);
+			END FOR;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+	
+	/**
+	 * Заполняет информацию по договору из отчета.
+	 **/
+	CREATE PROCEDURE FillAgreementInfo(IN root REFERENCE, IN contract REFERENCE, IN agreement REFERENCE, IN isTerminated BOOLEAN)
+	BEGIN		
+		SET Environment.UserProperties.PKBRoles1 = NULL;
+				
+		DECLARE varLastUpdate CHARACTER;		
+
+		SET agreement.BKI = PKB_BKI;
+				
+		SET agreement.PersonInfo.inds:PersonName.inds:LastName VALUE = root.Header.Surname.(XMLNSC.Attribute)value;
+		SET agreement.PersonInfo.inds:PersonName.inds:FirstName VALUE = root.Header.Name.(XMLNSC.Attribute)value;
+		SET agreement.PersonInfo.inds:PersonName.inds:MiddleName VALUE = root.Header.FathersName.(XMLNSC.Attribute)value;
+		
+		SET agreement.BankName VALUE = SUBSTRING(contract.FinancialInstitution.(XMLNSC.Attribute)value FROM 1 FOR 40);
+		--SET agreement.AcctId VALUE = contract.LoanAccount.(XMLNSC.Attribute)value;
+		SET agreement.AcctId VALUE = contract.CodeOfContract.(XMLNSC.Attribute)value;
+
+		SET varLastUpdate = contract.LastUpdate.(XMLNSC.Attribute)value;
+
+		IF LENGTH(varLastUpdate) > 3 THEN
+		   SET agreement.LastChangeDate VALUE = ConvertDateToXsdDate(varLastUpdate);
+		ELSE
+		   SET agreement.LastChangeDate VALUE = varLastUpdate;
+		END IF;
+  
+        --SET agreement.LastChangeDate VALUE = ConvertDateToXsdDate(contract.LastUpdate.(XMLNSC.Attribute)value);
+		SET agreement.OpenDate VALUE = ConvertDateToXsdDate(contract.DateOfCreditStart.(XMLNSC.Attribute)value);
+		
+		IF isTerminated THEN
+			IF contract.DateOfRealRepayment IS NULL 
+					OR TRIM(contract.DateOfRealRepayment.(XMLNSC.Attribute)value) = '' 
+					OR contract.DateOfRealRepayment.(XMLNSC.Attribute)value = '-' THEN
+				SET agreement.CloseDate VALUE = CAST(CURRENT_DATE - INTERVAL '1' DAY AS CHARACTER FORMAT 'yyyy-MM-dd');
+			ELSE
+				SET agreement.CloseDate VALUE = ConvertDateToXsdDate(contract.DateOfRealRepayment.(XMLNSC.Attribute)value);
+			END IF;
+		ELSE
+			SET agreement.CloseDate VALUE = ConvertDateToXsdDate(contract.DateOfCreditEnd.(XMLNSC.Attribute)value);
+		END IF;
+		
+		IF isTerminated THEN
+			SET agreement.ApplicationStatus = '2';
+		ELSE
+			SET agreement.ApplicationStatus = '1';
+		END IF;
+		
+		DECLARE residual_part1 CHARACTER;
+		DECLARE residual_part2 CHARACTER;
+
+		DECLARE creditLimit_part1 CHARACTER;
+		DECLARE creditLimit_part2 CHARACTER;
+
+		
+		
+		SET agreement.AcctCur VALUE = contract.CurrencyCode.(XMLNSC.Attribute)value;
+		
+
+		
+			IF contract.ContractTypeCode = 'Contract.Type .CreditContract' THEN
+				SET agreement.CurAmt  = FormatMoneyAmount(contract.CreditLimit.(XMLNSC.Attribute)value, agreement.AcctCur);
+				IF contract.TypeOfFounding.(XMLNSC.Attribute)id IN ('20') THEN					
+					
+					SET creditLimit_part1 = REPLACE(SUBSTRING(FIELDVALUE(contract.CreditLimit.(XMLNSC.Attribute)value) BEFORE ','),' ','');
+					
+					IF creditLimit_part1 <> '' OR creditLimit_part1  <> '0' THEN
+						
+						SET creditLimit_part2 = SUBSTRING(FIELDVALUE(contract.CreditLimit.(XMLNSC.Attribute)value) AFTER ',');
+						CALL removeChar(creditLimit_part2,creditLimit_part2);
+					
+						SET residual_part1 = REPLACE(SUBSTRING(FIELDVALUE(contract.ResidualAmount.(XMLNSC.Attribute)value) BEFORE ','),' ','');
+						SET residual_part2 = SUBSTRING(FIELDVALUE(contract.ResidualAmount.(XMLNSC.Attribute)value) AFTER ',');
+						CALL removeChar(residual_part2,residual_part2);
+										
+						SET agreement.DebtSum = ROUND(CAST(creditLimit_part1||'.'||creditLimit_part2 AS DECIMAL),0) - ROUND(CAST(residual_part1||'.'||residual_part2 AS DECIMAL),0);
+					
+					ELSE
+						
+						SET agreement.DebtSum = '0';
+					
+					END IF;
+					
+				ELSE 
+										
+					SET agreement.DebtSum = FormatMoneyAmount(contract.ResidualAmount.(XMLNSC.Attribute)value, agreement.AcctCur);
+					
+				END IF;		
+			ELSE
+				SET agreement.CurAmt  = FormatMoneyAmount(contract.TotalAmount.(XMLNSC.Attribute)value, agreement.AcctCur);
+				SET agreement.DebtSum = COALESCE(FormatMoneyAmount(contract.OutstandingAmount.(XMLNSC.Attribute)value, agreement.AcctCur),'0');	
+				
+				/*IF contract.TypeOfFounding.(XMLNSC.Attribute)id IN ('20') THEN				
+					
+					SET creditLimit_part1 = COALESCE(REPLACE(SUBSTRING(FIELDVALUE(contract.CreditLimit.(XMLNSC.Attribute)value) BEFORE ','),' ',''),'0');
+					SET creditLimit_part2 = COALESCE(SUBSTRING(FIELDVALUE(contract.CreditLimit.(XMLNSC.Attribute)value) AFTER ','),'0');
+					CALL removeChar(creditLimit_part2,creditLimit_part2);
+					
+					SET residual_part1 = COALESCE(REPLACE(SUBSTRING(FIELDVALUE(contract.ResidualAmount.(XMLNSC.Attribute)value) BEFORE ','),' ',''),'0');
+					SET residual_part2 = COALESCE(SUBSTRING(FIELDVALUE(contract.ResidualAmount.(XMLNSC.Attribute)value) AFTER ','),'0');
+					CALL removeChar(residual_part2,residual_part2);
+										
+					SET agreement.DebtSum = ROUND(CAST(creditLimit_part1||'.'||creditLimit_part2 AS DECIMAL),0) - ROUND(CAST(residual_part1||'.'||residual_part2 AS DECIMAL),0);
+					
+				ELSE
+										
+					SET agreement.DebtSum = FormatMoneyAmount(contract.OutstandingAmount.(XMLNSC.Attribute)value, agreement.AcctCur);								
+					
+				END IF;	*/	
+			END IF;
+					
+			IF NOT(contract.NominalRate.(XMLNSC.Attribute)value IS NULL 
+					OR contract.NominalRate.(XMLNSC.Attribute)value = '') THEN
+				IF CAST(contract.NominalRate.(XMLNSC.Attribute)value AS DECIMAL) <> 0 THEN
+					SET agreement.PerRate VALUE = contract.NominalRate.(XMLNSC.Attribute)value;
+				END IF;
+			END IF;
+		
+		SET agreement.MonthSum = FormatMoneyAmount(contract.MonthlyInstalmentAmount.(XMLNSC.Attribute)value, agreement.AcctCur);
+		
+		CASE contract.PeriodicityOfPayments.(XMLNSC.Attribute)id
+		WHEN '1' THEN
+			SET agreement.PayPeriod = '15';
+		WHEN '2' THEN
+			SET agreement.PayPeriod = '30';
+		WHEN '3' THEN
+			SET agreement.PayPeriod = '60';
+		WHEN '4' THEN
+			SET agreement.PayPeriod = '90';
+		WHEN '5' THEN
+			SET agreement.PayPeriod = '120';
+		WHEN '6' THEN
+			SET agreement.PayPeriod = '150';
+		WHEN '7' THEN
+			SET agreement.PayPeriod = '180';
+		WHEN '8' THEN
+			SET agreement.PayPeriod = '360';
+		/*WHEN '9' THEN
+			SET agreement.PayPeriod = 'срок кредита(в днях)';	*/						
+		END CASE;
+		
+		-- Значение для которого нет условия как по умолчанию вставлять?
+		/*
+		SET agreement.CreditTarget = CASE contract.PurposeOfCredit.(XMLNSC.Attribute)id
+				WHEN '5' THEN '1' 
+				WHEN '3' THEN '2'
+				WHEN '4' THEN '2' 
+				WHEN '6' THEN '3' 
+				WHEN '8' THEN '3' 
+				WHEN '1' THEN '5' 
+				WHEN '2' THEN '5'
+				WHEN '7' THEN '5' 
+				END; */
+		
+		SET agreement.CreditTarget = '5';
+		SET agreement.PayScheme = 'N';
+		
+		/*IF contract.ContractTypeCode = 'Contract.Type .CreditContract' THEN
+			SET agreement.CreditType = '3';
+		ELSE*/
+			IF contract.TypeOfFounding.(XMLNSC.Attribute)id IN ('1') THEN
+				SET agreement.CreditType = '1';
+			ELSEIF contract.TypeOfFounding.(XMLNSC.Attribute)id IN ('2', '8', '10', '11', '121', '122', '123', '124', '125', '131', '132', '141', '142', '143', '150', '160', '1251', '1410', '1411', '1422','161', '17', '19','21','22','23','24','25','26','27','28','29','30','31','32','33') THEN
+				SET agreement.CreditType = '2';
+			ELSEIF contract.TypeOfFounding.(XMLNSC.Attribute)id IN ('9', '43', '4', '5', '6', '7', '18') THEN
+				SET agreement.CreditType = '3';
+			ELSEIF contract.TypeOfFounding.(XMLNSC.Attribute)id IN ('20') THEN
+				SET agreement.CreditType = '5'; 	
+			ELSEIF contract.TypeOfFounding.(XMLNSC.Attribute)id IN ('8') THEN
+				---SET agreement.CreditType = '6';
+				SET agreement.CreditType = '2'; -- 04/02/2015 u00671
+			ELSE
+				SET agreement.CreditType = '4';		
+			END IF;
+		--END IF;
+		
+		
+		IF contract.TypeOfFounding.(XMLNSC.Attribute)id IN ('1') THEN
+			SET agreement.MBCreditType = '1';
+		ELSEIF contract.TypeOfFounding.(XMLNSC.Attribute)id IN ('2', '8', '10', '11', '121', '122', '123', '124', '125', '131', '132', '141', '142', '143', '150', '160', '1251', '1410', '1411', '1422','161', '17', '19') THEN
+			SET agreement.MBCreditType = '2';
+		ELSEIF contract.TypeOfFounding.(XMLNSC.Attribute)id IN ('9', '43', '4', '6', '7', '18') THEN
+			SET agreement.MBCreditType = '3';
+		ELSEIF contract.TypeOfFounding.(XMLNSC.Attribute)id IN ('20') THEN
+			SET agreement.MBCreditType = '5'; 	
+		ELSE
+			SET agreement.MBCreditType = '4';		
+		END IF;
+	
+		
+		
+		DECLARE subjectRoleValue CHARACTER contract.SubjectRole.(XMLNSC.Attribute)value;
+		DECLARE i INTEGER 1;
+		CALL AssignPKBRoleList(Environment.UserProperties);
+		
+		X: WHILE i <= CARDINALITY(Environment.UserProperties.PKBRoles.RoleId[]) DO
+			DECLARE roleDescConcat CHARACTER Environment.UserProperties.PKBRoles.RoleDesc[i];
+			DECLARE startDescPos INTEGER 1;
+			DECLARE endDescPos INTEGER POSITION(ROLEDESC_DELIMITER IN roleDescConcat FROM startDescPos+1);
+			
+			WHILE endDescPos <> 0 DO
+				DECLARE roleDescSingle CHARACTER;
+				SET roleDescSingle = SUBSTRING(roleDescConcat FROM startDescPos FOR endDescPos - startDescPos);
+				IF SanitizeText(roleDescSingle) = SanitizeText(subjectRoleValue) THEN
+					SET agreement.Role = Environment.UserProperties.PKBRoles.RoleId[i];
+					LEAVE X;
+				END IF;
+				SET startDescPos = endDescPos + 1;
+				SET endDescPos = POSITION(ROLEDESC_DELIMITER IN roleDescConcat FROM startDescPos+1);
+			END WHILE;
+			
+			IF SanitizeText(SUBSTRING(Environment.UserProperties.PKBRoles.RoleDesc[i] FROM startDescPos)) 
+					= SanitizeText(subjectRoleValue) THEN
+				SET agreement.Role = Environment.UserProperties.PKBRoles.RoleId[i];
+				LEAVE X;
+			END IF;
+			
+			SET i = i + 1;
+		END WHILE X;
+		
+		/* Изменения сделанные 12.05.2015 by Japenov Aydar u06068 Разделение ролей! */
+		
+		IF CARDINALITY(contract.SubjectRole[]) = '1' THEN 
+			SET agreement.MBRole = SetMBRole(contract.SubjectRole.(XMLNSC.Attribute)value);
+		ELSE
+			
+			FOR subRoles AS contract.SubjectRole[] DO
+			
+				IF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Заёмщик' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '1';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Созаемщик' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '2';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Созаёмщик' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '2';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Заемщик' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '1';		
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Гарант' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '3';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Залогодатель' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '4';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Правопреемник' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '4';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Работодатель' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '4';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Собственник/Сособственник' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '4';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Жена/Муж' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '4';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Кредитор, в пользу которого выдана банковская гарантия/поручительство' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '4';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Должник с субсидиарной ответственностью' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '2';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Должник с долевой ответственностью' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '2';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Поручитель' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '3';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'ClaimHolder' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '4';	
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Созаемщик (присоединившееся лицо) с солидарными обязательствами' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '2';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Гарант' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '3';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'PolicyHolder' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '4';	
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Принципал' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '4';
+				ELSEIF FIELDVALUE(subRoles.(XMLNSC.Attribute)value) = 'Представитель, действующий на основании доверенности' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBRoles' VALUE '4';													
+				END IF;	
+			
+			END FOR;	
+			
+			DECLARE chooseFirstRole CHARACTER;			
+			DECLARE chooseSecondRole CHARACTER;
+			DECLARE chooseThirdRole CHARACTER;
+			DECLARE chooseFourthRoel CHARACTER;
+			
+			SET chooseFirstRole = COALESCE(THE(SELECT ITEM attr FROM Environment.UserProperties.PKBRoles1.MBRoles[] AS attr WHERE attr = '1'),'0');	
+			SET chooseSecondRole = COALESCE(THE(SELECT ITEM attr FROM Environment.UserProperties.PKBRoles1.MBRoles[] AS attr WHERE attr = '2'),0);
+			SET chooseThirdRole = COALESCE(THE(SELECT ITEM attr FROM Environment.UserProperties.PKBRoles1.MBRoles[] AS attr WHERE attr = '3'),0);
+			SET chooseFourthRoel = COALESCE(THE(SELECT ITEM attr FROM Environment.UserProperties.PKBRoles1.MBRoles[] AS attr WHERE attr = '4'),0);			
+			
+			DECLARE resultRole CHARACTER;
+			
+			IF chooseFirstRole <> '1' THEN
+				IF chooseSecondRole <> '2' THEN
+					IF chooseThirdRole <> '3' THEN
+						SET resultRole = '4';							
+					ELSE
+						SET resultRole = chooseThirdRole;						
+					END IF;	
+				ELSE
+					SET resultRole = chooseSecondRole;	
+				END IF;	
+			ELSE
+				SET resultRole = chooseFirstRole;	
+			END IF;	
+				 
+			SET agreement.MBRole = resultRole;
+													
+		END IF;
+		
+		
+		IF CARDINALITY(contract.Collateral[]) = '1' THEN 
+			SET agreement.CollateralType = getTypeGuarantee(contract.Collateral.TypeOfGuarantee.(XMLNSC.Attribute)value);
+		ELSE
+		
+			FOR subFounding AS contract.Collateral[] DO
+			
+				IF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Бланковые' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '1';
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Залог недвижимости жилой/коммерческой' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '2';
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Залог транспортных средств' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '2';
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Залог оборудования и специальной техники' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '2';
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Залог имущественных прав' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '2';
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Залог ценных бумаг и драгоценных металлов' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '2';
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Залог товаров в обороте' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '2';
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Залог имущества, поступающего в собственность в будущем' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '2';
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Залог объектов незавершенного строительства' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '2';
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Залог денег, размещенных на сбер.счете/заклад денег' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '2';
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Залог иного имущества, не изъятого из гражданского оборота' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '2';																					
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Гарантия/поручительство физического лица' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '1';
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Гарантия/поручительство юридического лица' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '1';
+				ELSEIF FIELDVALUE(subFounding.TypeOfGuarantee.(XMLNSC.Attribute)value) = 'Другие способы обеспечения' THEN
+					CREATE LASTCHILD OF Environment.UserProperties.PKBRoles1 NAME 'MBType' VALUE '2';			
+				END IF;	
+			
+			END FOR;
+			
+			DECLARE chooseFirstType CHARACTER;			
+			DECLARE chooseSecondType CHARACTER;
+			
+			SET chooseFirstType = COALESCE(THE(SELECT ITEM attr FROM Environment.UserProperties.PKBRoles1.MBType[] AS attr WHERE attr = '1'),0);	
+			SET chooseSecondType = COALESCE(THE(SELECT ITEM attr FROM Environment.UserProperties.PKBRoles1.MBType[] AS attr WHERE attr = '2'),0);			
+					
+			
+			DECLARE resultType CHARACTER;
+			
+			IF chooseSecondType <> '2' THEN
+				SET resultType = '1';
+			ELSE
+				SET resultType = chooseSecondType;	
+			END IF;	
+				 
+			SET agreement.CollateralType = resultType;
+		
+		END IF;
+		
+		SET agreement.Restruct = '3';
+		SET agreement.ChargeOff = '3';
+		
+		SET agreement.NoDelay = XML_NODELAY_POS;
+		/*
+		FOR payment AS contract.PaymentsCalendar.Payment[] DO
+			IF payment.value <> '0' AND payment.value <> '-' THEN
+				SET agreement.NoDelay = XML_NODELAY_NEG;
+				-- should be BREAK here
+			END IF;
+		END FOR;
+		*/
+		SET agreement.DelaySum = FormatMoneyAmount(contract.OverdueAmount.(XMLNSC.Attribute)value, agreement.AcctCur);
+		
+		DECLARE delayStatus CHARACTER;
+		CALL GetCreditDelayInfo(contract.PaymentsCalendar, agreement, delayStatus);
+		IF delayStatus = '1' THEN 	
+		   SET agreement.NoDelay = XML_NODELAY_NEG;
+		END IF;		   
+	END;
+	
+	/**
+	 * Заполняет по данным агрегата paymentAggr в delayInfoRoot
+	 * набор DelayInfo с рассчитаными просрочками по выплате кредита.
+	 **/
+	CREATE PROCEDURE GetCreditDelayInfo(IN paymentAggr REFERENCE, IN delayInfoRoot REFERENCE, OUT delayStatus CHARACTER) BEGIN
+		DECLARE outputDateFormat CONSTANT CHARACTER 'yyyy-MM-dd';
+		
+		DECLARE lastProcessedMonth INTEGER 0;
+
+		SET delayStatus = '0';					  
+        /* Isakov A. 20/02/2014 : Платежная дисциплина ранее передавалась за 12 месяцев, согласно новому формату в ТранзактСМ просрочки должны передаваться за 24 месяца. */
+        
+        DECLARE YearRecNum INTEGER CARDINALITY(paymentAggr.Year[]);
+		WHILE YearRecNum > 0 DO
+		    	
+		  DECLARE paymentYear REFERENCE TO paymentAggr.Year[YearRecNum];
+
+          DECLARE MonthRecNum INTEGER CARDINALITY(paymentYear.Payment[]);
+          WHILE MonthRecNum > 0 DO
+              	
+			DECLARE paymentMonth REFERENCE TO paymentYear.Payment[MonthRecNum];
+				
+			IF paymentMonth.value <> '-' AND paymentMonth.value <> '0' AND paymentMonth.value <> '' THEN
+			   DECLARE dateMonth CHARACTER paymentMonth.number;
+			   DECLARE dateYear  CHARACTER paymentYear.title;
+			   DECLARE dayInterval INTERVAL CAST(paymentMonth.value AS INTERVAL DAY);
+						
+			   DECLARE paymentDate DATE;
+			   DECLARE lastDayDate DATE;
+			   DECLARE startDayDate DATE;
+			   DECLARE currStartMonth INTEGER;
+						
+			   SET paymentDate = CAST('1/'||dateMonth||'/'||dateYear AS DATE FORMAT 'd/M/yyyy');
+			   SET currStartMonth = EXTRACT(MONTH FROM paymentDate) + 12*EXTRACT(YEAR FROM paymentDate);
+
+			   IF lastProcessedMonth = 0 OR currStartMonth < lastProcessedMonth THEN
+				  SET lastDayDate = paymentDate + INTERVAL '1' MONTH - INTERVAL '1' DAY;
+				  SET startDayDate = lastDayDate - dayInterval;
+							
+				  CREATE LASTCHILD OF delayInfoRoot NAME 'DelayInfo';
+
+				  SET delayInfoRoot.DelayInfo[<].StartDelayDate = CAST(startDayDate AS CHARACTER FORMAT outputDateFormat);
+				  SET delayInfoRoot.DelayInfo[<].EndDelayDate = CAST(lastDayDate AS CHARACTER FORMAT outputDateFormat);
+				  SET lastProcessedMonth = EXTRACT(MONTH FROM startDayDate) + 12*EXTRACT(YEAR FROM startDayDate);
+	   		      SET delayStatus = '1';					  
+			   END IF;
+			END IF;
+				
+			SET MonthRecNum = MonthRecNum - 1;
+		  END WHILE;
+	    
+		  SET YearRecNum = YearRecNum - 1;
+		END WHILE;
+
+	END;
+	
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Восстановление заголовков MQ для ответа.
+ **/
+CREATE COMPUTE MODULE RequestForPKB_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+		SET OutputRoot.MQMD.Format 		= MQFMT_STRING;
+		
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(Environment.UserProperties.Source, OutputLocalEnvironment);
+		
+		SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+

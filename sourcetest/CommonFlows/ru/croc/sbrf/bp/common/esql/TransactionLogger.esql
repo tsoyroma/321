@@ -1,0 +1,111 @@
+BROKER SCHEMA ru.croc.sbrf.bp.common.esql
+
+-- Время жизни сообщений в backout-очереди
+DECLARE BOMesLifeTime EXTERNAL CHARACTER '864000';
+
+CREATE COMPUTE MODULE TransactionLogger_CallWriteTransactionLog
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- Создаем ссылку на MQRFH2C.usr заголовок
+		DECLARE usr REFERENCE TO InputRoot.MQRFH2C.usr;
+		-- Форматируем данные к виду '2006-10-07T12:06:56.568+01:00'
+		-- Делаем вызов хранимой процедуры
+		CALL ru.croc.sbrf.bp.common.esql.WRITE_TRANSACTION_LOG(
+		usr.ExtLogRqUID,
+		CAST(usr.ExtLogRqTm AS CHARACTER FORMAT 'I'),
+		IsNULL(CAST(usr.ExtLogRsTm AS CHARACTER FORMAT 'I')),
+		IsNULL(TRIM(usr.ExtLogSourceSystem)),
+		IsNULL(TRIM(usr.ExtLogTargetSystem)),
+		IsNULL(TRIM(usr.ExtLogClientTbId )),
+		IsNULL(TRIM(usr.ExtLogOperationName)),
+		IsNULL(TRIM(usr.ExtLogOperationStatus)),
+		IsNULL(TRIM(usr.ExtLogReplyCode)),
+		IsNULL(RIGHT(TRIM(usr.ExtLogErrorMsg),1024))
+		);
+		RETURN TRUE;
+	END;
+
+
+END MODULE;
+------------------------------------------------------------
+--
+-- Проверка значения для переданного параметра на существование и на пустое значение
+-- Если пусто или не существует, то возвращаем UNKNOWN
+--
+------------------------------------------------------------
+CREATE FUNCTION IsNULL(IN val CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF val is NULL or TRIM(val) = '' THEN
+		RETURN NULL;
+	ELSE
+		RETURN val;
+	END IF;
+END;
+----------------------------------
+--
+-- Хранимая процедура для записи информации расширенного логирования в базу данных
+-- prquid - идентификатор сообщения
+-- prqtm - дата и время начала транзакции
+-- prstm - дата и время окончания транзакции
+-- psourcesystem - система, которая инициировала запрос
+-- ptargetsystem - система(ы) в которые производился запрос
+-- pclienttbid - код банка клиента
+-- poperationname - название операции: OperationId + [OperationTypeId]
+-- poperationstatus - статус операции (SUCCESS,TIMEOUT,ERROR)
+-- preplycode - код ответа в систему
+-- perrormsg - краткое описание ошибки
+----------------------------------
+
+CREATE PROCEDURE WRITE_TRANSACTION_LOG(
+IN prquid CHARACTER,
+IN prqtm CHARACTER,
+IN prstm CHARACTER,
+IN psourcesystem CHARACTER,
+IN ptargetsystem CHARACTER,
+IN pclienttbid CHARACTER,
+IN poperationname CHARACTER,
+IN poperationstatus CHARACTER,
+IN preplycode CHARACTER,
+IN perrormsg CHARACTER)
+LANGUAGE DATABASE
+EXTERNAL NAME "WRITE_TRANSACTION_LOG";
+------------------------------------------------------------
+--
+-- Модуль для записи сообщений в очередь ошибочных сообщений
+--
+------------------------------------------------------------
+CREATE COMPUTE MODULE TransactionLogger_SetOptionsForBQ
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+
+		-- Устанавливаем время жизни сообщений в backout-очереди
+		-- Задается в параметрах потока
+		SET OutputRoot.MQMD.Expiry = CAST(BOMesLifeTime AS INTEGER);
+
+		-- Запишем описание исключения в заголовок сообщение и отправим в backout-очередь
+		SET OutputRoot.MQRFH2C.usr.TransactionLoggerException = CreateExceptionString(OutputLocalEnvironment,InputExceptionList);
+		
+		-- Берем последние 800 символов для записи в syslog
+		SET OutputLocalEnvironment.sFullException = RIGHT(OutputRoot.MQRFH2C.usr.TransactionLoggerException,800);
+
+		--Записываем содержимое ошибки в syslog
+		PROPAGATE TO TERMINAL 'out1' ENVIRONMENT OutputLocalEnvironment DELETE NONE;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

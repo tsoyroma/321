@@ -1,0 +1,1051 @@
+BROKER SCHEMA ru.croc.sbrf.mdm.common
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+-- Обрабатывает теги HumanFactor
+-- Возвращает TRUE, если элемент обработан
+CREATE FUNCTION recodeQCInfo(IN qcElement REFERENCE, IN extClient REFERENCE) RETURNS BOOLEAN
+BEGIN
+	DECLARE parent REFERENCE TO qcElement;
+    DECLARE qcPath CHARACTER '';	-- Для поиска значений DQCValidationType и DQCStatusType
+    DECLARE isPersonTransaction BOOLEAN FALSE;
+	
+    -- требуется путь относительно OrgRec (для сообщений по корпоратам)
+    WHILE LASTMOVE(parent) AND NOT FIELDNAME(parent) = 'OrgRec' DO
+    	SET qcPath = '/' || FIELDNAME(parent) || qcPath;
+    	MOVE parent PARENT;    		
+    END WHILE;
+
+	-- если такого parent'а не нашли, то возможно это физ. лицо
+    IF NOT LASTMOVE(parent) THEN
+    	SET isPersonTransaction = TRUE;
+    	MOVE parent TO qcElement;
+    	SET qcPath = '';
+	    -- требуется путь относительно PersonInfo
+	    WHILE LASTMOVE(parent) AND NOT FIELDNAME(parent) = 'PersonInfo' DO
+	    	SET qcPath = '/' || FIELDNAME(parent) || qcPath;
+	    	MOVE parent PARENT;    		
+	    END WHILE;
+    END IF;
+    
+    -- если и теперь не нашли, то выходим
+    IF NOT LASTMOVE(parent) THEN 
+    	RETURN FALSE;
+    END IF;
+    
+    SET qcPath = SUBSTRING(qcPath FROM 2);
+    -- Установим parent на родительский элемент QC
+    MOVE parent TO qcElement;
+    MOVE parent PARENT;
+    
+    -- Обработаем QC тег		
+	CASE FIELDNAME(qcElement)
+	WHEN 'NameQC' THEN
+		IF isPersonTransaction THEN
+			CALL recodeQCElement(extClient, qcPath || '/FullNameQC', qcElement.FullNameQC, parent.LastName || ' ' || parent.FirstName || COALESCE(' ' || parent.MiddleName, ''), 'FullNamePerson');
+			-- Т.к. Gender находится на уровень выше, перемести указатель
+			MOVE parent PARENT;
+			CALL recodeQCElement(extClient, qcPath || '/GenderQC', qcElement.GenderQC, parent.Gender, 'Gender');
+		ELSE
+			CALL recodeQCElement(extClient, qcPath, qcElement, parent.Name, 'Name');
+		END IF;
+	WHEN 'AddressQC' THEN
+		-- адреса связанных лиц не обрабатываем
+		IF NOT CONTAINS(qcPath, 'RelPerson') THEN
+			CALL recodeQCElement(extClient, qcPath || '/ValidationStatus', qcElement.ValidationStatus, parent.Addr3, 'Address' || COALESCE( '(' || parent.AddrType ||')', ''));
+			CALL recodeQCElement(extClient, qcPath || '/QualityCode', qcElement.QualityCode, parent.Addr3, 'Address' || COALESCE( '(' || parent.AddrType ||')', ''));
+			CALL recodeQCElement(extClient, qcPath || '/PostalCodeQC', qcElement.PostalCodeQC, parent.Addr3, 'Address' || COALESCE( '(' || parent.AddrType ||')', ''));
+			
+			-- перенесем элемент AddrStandardInd с уровня QC на уровень PostAddr
+			CREATE PREVIOUSSIBLING OF parent.AddressQC FROM qcElement.AddrStandardInd;
+		END IF;
+	WHEN 'PhoneQC' THEN 
+		-- контакты связанных лиц не обрабатываем
+		IF NOT CONTAINS(qcPath, 'RelPerson') THEN
+			CALL recodeQCElement(extClient, qcPath, qcElement, COALESCE(parent.ContactNum, parent.ContactValue), 'Phone' || COALESCE('(' || parent.ContactType ||')', ''));
+		END IF;
+	WHEN 'EmailQC' THEN 
+		-- контакты связанных лиц не обрабатываем
+		IF NOT CONTAINS(qcPath, 'RelPerson') THEN
+			CALL recodeQCElement(extClient, qcPath, qcElement, COALESCE(parent.ContactNum, parent.ContactValue), 'Email' || COALESCE('(' || parent.ContactType ||')', ''));
+		END IF;
+	WHEN 'TaxIdQC' THEN
+		-- один и тот же элемент используется для кода качества ИНН и кода качества КИО
+		IF FIELDNAME(parent) = 'TINInfo' THEN
+			CALL recodeQCElement(extClient, qcPath, qcElement, parent.TaxId, 'TaxId');
+		ELSEIF FIELDNAME(parent) = 'KIOInfo' THEN
+			CALL recodeQCElement(extClient, qcPath, qcElement, parent.TaxId, 'KIO');
+		END IF;
+	WHEN 'EgrulINNQC' THEN 
+		-- один и тот же элемент используется для кода качества ИНН и кода качества КИО
+		IF FIELDNAME(parent) = 'TINInfo' THEN
+			CALL recodeQCElement(extClient, qcPath, qcElement, parent.EgrulINN, 'TaxIdEGRUL');
+		ELSEIF FIELDNAME(parent) = 'KIOInfo' THEN
+			CALL recodeQCElement(extClient, qcPath, qcElement, parent.EgrulINN, 'KioEGRUL');
+		END IF;
+	WHEN 'OrgNumQC' THEN
+		IF qcElement <> '' THEN
+			CALL recodeQCElement(extClient, qcPath, qcElement, parent.OrgNum, 'OrgNum' || COALESCE('(' || parent.OrgType || ')', ''));
+		END IF;
+	WHEN 'OkatoQC' THEN 
+		CALL recodeQCElement(extClient, qcPath, qcElement, parent.OkatoKladr, 'OkatoKladr');
+	WHEN 'LicenseQC' THEN
+		CALL recodeQCElement(extClient, qcPath || '/LicenseNumQC', qcElement.LicenseNumQC, parent.LicenseNum, 'LicenseNum' || COALESCE('(' || parent.LicenseType || ')', ''));
+	WHEN 'GovIssueIdenteQC' THEN
+		-- ДУЛы связанных лиц не обрабатываем
+		IF isPersonTransaction THEN
+			CALL recodeQCElement(extClient, qcPath || '/NumberQC', qcElement.NumberQC, TRIM(COALESCE(parent.IdSeries || ' ', '') || parent.IdNum), 'IdNum' || COALESCE('(' || parent.IdType || ')', ''));
+		END IF;
+	WHEN 'EgrulCompanyQC' THEN 
+		CALL recodeQCElement(extClient, qcPath, qcElement, parent.EgrulCompany, 'EgrulCompany');
+	WHEN 'EgrulAddrQC' THEN 
+		CALL recodeQCElement(extClient, qcPath, qcElement, parent.EgrulAddr, 'EgrulAddr');
+	WHEN 'EgrulStatusQC' THEN
+		-- Для общего статуса проверки передаем в качестве значения наименование по ЕГРЮЛ
+		CALL recodeQCElement(extClient, qcPath, qcElement, parent.EgrulCompany, 'Egrul');
+	WHEN 'StateRegPrimeNumQC' THEN
+		CALL recodeQCElement(extClient, qcPath, qcElement, parent.StateRegPrimeNum, 'StateRegPrimeNum');
+	WHEN 'EgrulOGRNQC' THEN
+		CALL recodeQCElement(extClient, qcPath, qcElement, parent.EgrulOGRN, 'EgrulOGRN');
+	WHEN 'TaxRegReasonCodeQC' THEN
+		CALL recodeQCElement(extClient, qcPath, qcElement, parent.TaxRegReasonCode, 'TaxRegReasonCode');
+	WHEN 'IndustIdQC' THEN
+		CALL recodeQCElement(extClient, qcPath, qcElement, parent.IndustNum, 'OrgNum' || COALESCE('(' || parent.Org || ')', ''));
+	WHEN 'SWIFTQC' THEN
+		CALL recodeQCElement(extClient, qcPath, qcElement, parent.BankId, 'SWIFT');
+	WHEN 'BICQC' THEN
+		CALL recodeQCElement(extClient, qcPath, qcElement, parent.BankId, 'BIC');
+	WHEN 'BirthDtQC' THEN
+		IF isPersonTransaction THEN
+			CALL recodeQCElement(extClient, qcPath, qcElement, parent.Birthday, 'Birthday');
+		END IF;
+	WHEN 'ReturnFlowQC' THEN
+		CALL recodeQCElement(extClient, qcPath, qcElement, parent.ReturnFlowInd, 'ReturnFlow');
+	ELSE
+		RETURN FALSE;
+	END CASE;
+	
+	RETURN TRUE;
+END;
+
+-- Перекодирует элемент HumanFactor
+CREATE PROCEDURE recodeQCElement(IN extClient REFERENCE
+	, IN qcPath CHARACTER, IN qcField REFERENCE, IN linkField CHARACTER, IN visibleName CHARACTER)
+BEGIN
+	-- если отсутствует хотя бы один необходимый элемент
+	-- или не заполнен статус проверки
+	IF NOT LASTMOVE(qcField) OR FIELDVALUE(qcField) IS NULL OR FIELDVALUE(qcField) = '' THEN
+		RETURN;
+	END IF;
+	
+	-- Получим значения из кеша
+	DECLARE qcElement ROW;
+	TABLE_CACHE_LOCK : BEGIN ATOMIC
+		CALL ru.croc.sbrf.mdm.common.InitDqcCache();
+		SET qcElement.row[] = SELECT 
+				  a.SB_DQC_VALIDATION_TP_CD AS DQCValidationType
+				, a.SB_DQC_ST_TP_CD			AS DQCStatusType
+			FROM TableCache.CDSBDQCFACTOR.rows[] AS a
+			WHERE a.PATH_TO_QC = qcPath AND a.DQC_VALUE = FIELDVALUE(qcField)
+		;
+	END TABLE_CACHE_LOCK;
+	
+	-- Если найдено, то создадим запись SBDQCResultBObj
+	IF EXISTS(qcElement.row[]) THEN
+		CREATE LASTCHILD OF extClient NAME 'SBDQCResultBObj';
+		SET extClient.SBDQCResultBObj[<].DataReference = visibleName;
+		SET extClient.SBDQCResultBObj[<].DataValue = COALESCE(linkField, 'EMPTY');
+		SET extClient.SBDQCResultBObj[<].DQCValidationType = qcElement.row[>].DQCValidationType;
+		SET extClient.SBDQCResultBObj[<].DQCStatusType = qcElement.row[>].DQCStatusType; 
+	END IF;
+END;
+
+-- собирает информацию о текущей транзакции
+CREATE PROCEDURE initContext(IN ctx REFERENCE, IN ref REFERENCE, IN sysId CHARACTER)
+BEGIN
+	DECLARE refRoot REFERENCE TO ref;
+	WHILE LASTMOVE(refRoot) DO
+		MOVE refRoot PARENT;
+	END WHILE;
+
+	DECLARE Service CHARACTER '';
+	DECLARE Operation CHARACTER '';
+	
+	DECLARE operationRoot REFERENCE TO refRoot;
+	
+	IF EXISTS(refRoot.XMLNSC.IFX[]) THEN
+		SET Service = FIELDNAME(refRoot.XMLNSC.IFX.*[<]);
+		SET Operation = FIELDNAME(refRoot.XMLNSC.IFX.{Service}.*[<]);
+		MOVE operationRoot TO refRoot.XMLNSC.IFX.{Service}.*[<];
+	ELSE
+		SET Operation = FIELDNAME(refRoot.XMLNSC.*[<]);
+		MOVE operationRoot TO refRoot.XMLNSC.*[<];
+	END IF;
+
+	SET ctx.Service = Service;
+	SET ctx.Operation = Operation;
+	SET ctx.sysId = sysId;
+	SET ctx.direction = CASE WHEN ENDSWITH(Operation, 'Rq') THEN Direction2MDM ELSE DirectionFromMDM END;
+END;
+
+-- перекодирует поддерево AgreemtInfo
+CREATE PROCEDURE recodeAgreemtInfo(IN sysId CHARACTER, IN toMdm BOOLEAN, IN agreemtInfo REFERENCE)
+BEGIN
+	IF LASTMOVE(agreemtInfo) THEN
+		DECLARE ctx ROW;
+		CALL initContext(ctx, agreemtInfo, sysId);
+
+		CALL recode(agreemtInfo, 'AgreemtType', 'CDAGREEMENTTP', ctx);
+		CALL recode(agreemtInfo, 'Status', 'CDAGREEMENTSTTP', ctx);
+		CALL recode(agreemtInfo, 'ProductCurrency', 'CDCURRENCYTP', ctx);
+		-- TODO: выкинуть перекодировку BranchNum, когда будет принято решение о прекращении поддержки справочника
+		CALL recode(agreemtInfo, 'BranchNum', 'CDSBSUBDIVISIONTP', ctx);
+
+		FOR info AS agreemtInfo.LoanInfo[] DO
+			CALL recodeAgreemtComponentInfo(info, ctx);
+		END FOR;
+
+		FOR info AS agreemtInfo.DepInfo[] DO
+			CALL recodeAgreemtComponentInfo(info, ctx);
+		END FOR;
+
+		FOR info AS agreemtInfo.CardInfo[] DO
+			CALL recodeAgreemtComponentInfo(info, ctx);
+		END FOR;
+
+		FOR info AS agreemtInfo.CssInfo[] DO
+			CALL recodeAgreemtComponentInfo(info, ctx);
+		END FOR;
+
+		FOR info AS agreemtInfo.ServiceInfo[] DO
+			CALL recodeAgreemtComponentInfo(info, ctx);
+		END FOR;
+
+		FOR info AS agreemtInfo.CdboInfo[] DO
+			CALL recodeAgreemtComponentInfo(info, ctx);
+		END FOR;
+
+		FOR info AS agreemtInfo.DepoInfo[] DO
+			CALL recodeAgreemtComponentInfo(info, ctx);
+		END FOR;
+	END IF;
+END;
+
+-- Перекодирует LoanInfo/DepInfo/CardInfo/CssInfo/ServiceInfo/CdboInfo/DepoInfo
+CREATE PROCEDURE recodeAgreemtComponentInfo(IN acInfo REFERENCE, IN ctx REFERENCE)
+BEGIN
+	CALL recode(acInfo, 'ProdType', 'CDPRODTP', ctx);
+	FOR ci AS acInfo.CustId[] DO
+		CALL recode(ci, 'Role', 'CDCONTRACTROLETP', ctx);
+	END FOR;
+	FOR ci AS acInfo.AgreemtCustRole[] DO
+		CALL recode(ci, 'Role', 'CDCONTRACTROLETP', ctx);
+	END FOR;
+	
+END;
+
+-- перекодирует поддерево CustRec
+CREATE PROCEDURE recodeCustRec(IN sysId CHARACTER, IN toMdm BOOLEAN, IN custRec REFERENCE)
+BEGIN
+	IF LASTMOVE(custRec) THEN
+		CALL recodeCustInfo(sysId, toMdm, custRec.CustInfo);
+	END IF;
+END;
+
+-- перекодирует поддерево CustInfo
+CREATE PROCEDURE recodeCustInfo(IN sysId CHARACTER, IN toMdm BOOLEAN, IN custInfo REFERENCE)
+BEGIN
+	IF LASTMOVE(custInfo) THEN
+		DECLARE ctx ROW;
+		CALL initContext(ctx, custInfo, sysId);
+
+		FOR cursor AS custInfo.PersonInfo.ContactInfo.ContactData[] DO
+			-- категорию контакта перекодируем только в обратном потоке, т.к. в прямом она заполняется автоматически
+			IF NOT toMdm THEN
+				CALL recode(cursor, 'ContactPref', 'CDCONTMETHCAT', ctx);
+			END IF;
+			CALL recode(cursor, 'ContactType', 'CDCONTMETHTP', ctx);
+		END FOR;
+
+		FOR cursor AS custInfo.PersonInfo.ContactInfo.PostAddr[] DO
+			CALL recode(cursor, 'AddrType', 'CDADDRUSAGETP', ctx);
+			CALL recode(cursor, 'Country', 'CDCOUNTRYTP', ctx);
+			CALL recodeBool(toMdm, cursor.AddrStatus);
+		END FOR;
+	
+		-- если перекодировка МДМ -> шина, то ИНН перекодируем до остальных документоа
+		IF NOT toMdm THEN
+			CALL identityCardToTaxId(custInfo);
+		END IF;
+
+		FOR cursor AS custInfo.PersonInfo.IdentityCard[] DO
+			CALL recode(cursor, 'IdType', 'CDIDTP', ctx);
+			CALL recode(cursor, 'IdStatus', 'CDIDSTATUSTP', ctx);
+		END FOR;
+		
+		-- если перекодировка шина -> MDM, то ИНН перекодируем после остальных документов
+		IF toMdm THEN
+			CALL taxIdToIdentityCard(custInfo);
+		END IF;
+
+		FOR cursor AS custInfo.PersonInfo.EmploymentHistory[] DO
+			CALL recodeBool(toMdm, cursor.PrimaryJob);
+			CREATE FIELD cursor.OrgInfo;
+		END FOR;
+	
+		CALL recode(custInfo.PersonInfo, 'MaritalStatus', 'CDMARITALSTTP', ctx);
+		CALL recode(custInfo.PersonInfo, 'BankRel', 'CDSBBANKRELTP', ctx);
+		CALL recode(custInfo.PersonInfo, 'SocialCategory', 'CDSBSOCIALGROUPTP', ctx);
+		CALL recode(custInfo.PersonInfo, 'Gender', 'gender_tp_code', ctx);
+		CALL recode(custInfo.PersonInfo, 'CitizenShip', 'CDCOUNTRYTP', ctx);
+		CALL recode(custInfo.PersonInfo, 'Education', 'CDHIGHESTEDUTP', ctx);
+		-- TODO: выкинуть перекодировку BranchNum, когда будет принято решение о прекращении поддержки справочника
+		CALL recode(custInfo.PersonInfo, 'BranchNum', 'CDSBSUBDIVISIONTP', ctx);
+		CALL recode(custInfo.PersonInfo, 'VIPStatus', 'CDCLIENTIMPTP', ctx);
+		CALL recode(custInfo.CustStatus, 'CustStatusCode', 'CDCLIENTSTTP', ctx);
+
+		IF(custInfo.PersonInfo.Birthday = '1800-01-01' OR 
+		   custInfo.PersonInfo.Birthday = '1900-01-01')
+		THEN
+			SET custInfo.PersonInfo.Birthday = NULL;
+		END IF;
+
+		CALL recodeBool(toMdm, custInfo.PersonInfo.Resident);
+		CALL recodeBool(toMdm, custInfo.PersonInfo.Employee);
+		CALL recodeBool(toMdm, custInfo.PersonInfo.Shareholder);
+		CALL recodeBool(toMdm, custInfo.PersonInfo.Insider);
+		
+		CALL recodeBool(toMdm, custInfo.PersonInfo.Literacy);
+		CALL recodeBool(toMdm, custInfo.PersonInfo.ForeignOfficial);
+		CALL recodeBool(toMdm, custInfo.PersonInfo.CreditHistory);		
+		CALL recodeBool(toMdm, custInfo.PersonInfo.Denials);
+		CALL recodeBool(toMdm, custInfo.PersonInfo.Undesired);
+		CALL recodeBool(toMdm, custInfo.PersonInfo.InStopList);
+
+		CALL recodeBool(toMdm, custInfo.PersonInfo.HighRiskInfo.HighRiskInd);
+	END IF;
+END;
+
+-- перекодирует значение атрибута прямо в сообщении
+/*
+IN entityRef REFERENCE  	- ссылка на сущность
+IN fieldName CHARACTER  	- перекодируемый атрибут
+IN mdmDict CHARACTER    	- справочник МДМ или NULL, если перкодировка не нужна
+IN ctx REFERENCE			- контекст перекодировки, куда складываются сообщения об ошибках
+*/
+CREATE PROCEDURE recode(IN entityRef REFERENCE, IN fldName CHARACTER, IN mdmDict CHARACTER, IN ctx REFERENCE)
+BEGIN
+	DECLARE fieldRef REFERENCE TO entityRef.{fldName};
+	DECLARE oldValue CHARACTER TRIM(FIELDVALUE(fieldRef));
+	DECLARE newValue CHARACTER oldValue;
+
+	-- перекодировка значений
+	IF EXISTS(entityRef.{fldName}[]) AND oldValue <> '' AND mdmDict IS NOT NULL THEN
+		TABLE_CACHE_LOCK : BEGIN ATOMIC
+			CALL InitExtKeyCache(ctx.sysId, ctx.direction);
+			SET newValue = TableCache.EXTKEY.{ctx.sysId}.{ctx.direction}.{mdmDict}.{UPPER(oldValue)};
+		END TABLE_CACHE_LOCK;
+
+		IF ctx.direction = 'tomdm' THEN
+			IF newValue IS NULL THEN
+				SET newValue = oldValue || getRecodingFailedFlag() || '';
+			ELSE
+				SET newValue = oldValue || getRecodingPassedFlag() || newValue;
+			END IF;
+		END IF;
+	END IF;
+
+	SET fieldRef VALUE = newValue;
+END;
+
+-- преобразует TaxId в IdentityCard (ИНН)
+CREATE PROCEDURE taxIdToIdentityCard(IN custInfo REFERENCE)
+BEGIN
+	IF LASTMOVE(custInfo) THEN
+		-- сделаем ИНН одним из документов
+		IF custInfo.PersonInfo.TaxId IS NOT NULL THEN
+			IF CARDINALITY(custInfo.PersonInfo.IdentityCard[]) > 0 THEN
+				CREATE NEXTSIBLING OF custInfo.PersonInfo.IdentityCard[<] TYPE Name NAME 'IdentityCard';
+			ELSE
+				CREATE LASTCHILD OF custInfo.PersonInfo TYPE Name NAME 'IdentityCard';
+			END IF;
+			SET custInfo.PersonInfo.IdentityCard[<].IdNum = custInfo.PersonInfo.TaxId;
+			SET custInfo.PersonInfo.IdentityCard[<].IssueDt = custInfo.PersonInfo.IssueDt;
+			-- Тип и статус проставляются уже перекодированными в MDM
+			SET custInfo.PersonInfo.IdentityCard[<].IdType = '1011';
+			SET custInfo.PersonInfo.IdentityCard[<].IdStatus = '1';
+			SET custInfo.PersonInfo.TaxId = NULL;
+			SET custInfo.PersonInfo.IssueDt = NULL;
+		END IF;		
+	END IF;
+END;
+
+-- преобразует IdentityCard (ИНН) в TaxId
+CREATE PROCEDURE identityCardToTaxId(IN custInfo REFERENCE)
+BEGIN
+	IF LASTMOVE(custInfo) THEN
+		DECLARE taxIdRow ROW;
+		-- скопируем данные об ИНН из блока документов в плоское свойство
+		SET taxIdRow = THE (SELECT ic
+			FROM custInfo.PersonInfo.IdentityCard[] AS ic
+			WHERE ic.IdType = '1011' AND ic.IdStatus = '1');
+
+		IF CARDINALITY(taxIdRow.*[]) > 0 THEN
+			SET custInfo.PersonInfo.TaxId = taxIdRow.IdNum;
+			--SET custInfo.PersonInfo.IssueDt = taxIdRow.IssueDt;
+
+			DECLARE I INTEGER CARDINALITY(custInfo.PersonInfo.IdentityCard[]);
+			WHILE I >= 1 DO
+				IF custInfo.PersonInfo.IdentityCard[I].IdType = '1011' THEN
+					DELETE FIELD custInfo.PersonInfo.IdentityCard[I];
+				END IF;
+				SET I = I - 1;
+			END WHILE;
+		ELSE
+			SET custInfo.PersonInfo.TaxId = NULL;
+			SET custInfo.PersonInfo.IssueDt = NULL;
+		END IF;
+	END IF;
+END;
+
+-- возвращает идентификатор внешней системы (согласно таблице CDADMINSYSTP)
+CREATE FUNCTION getSysId(IN sysName CHARACTER)
+	RETURNS CHARACTER
+BEGIN
+	DECLARE result CHARACTER;
+
+	TABLE_CACHE_LOCK : BEGIN ATOMIC
+		CALL InitAdminSysCache();
+
+		SET result = THE(
+        	SELECT ITEM T.ADMIN_SYS_TP_CD
+       		FROM TableCache.CDADMINSYSTP.rows[] as T
+       		WHERE T.NAME = sysName
+		);
+	END TABLE_CACHE_LOCK;
+
+	IF result IS NULL THEN
+		THROW USER EXCEPTION VALUES('Invalid system name: ' || sysName);
+	END IF;
+
+	RETURN result;
+END;
+
+-- переводит булевы значения из системного представления в мдмное и обратно
+CREATE PROCEDURE recodeBool(IN toMdm BOOLEAN, IN val REFERENCE)
+BEGIN
+	IF LASTMOVE(val) THEN
+		-- Перекодировка из BOOLEAN в Y/N
+		IF toMdm THEN
+		
+			SET val = CASE WHEN UPPER(val) IN ('1', 'TRUE', 'Y') THEN 'Y' ELSE 'N' END;
+				
+		-- Перекодировка из Y/N в BOOLEAN
+		ELSE
+			
+			SET val = CASE val WHEN 'Y' THEN '1' ELSE '0' END;
+			
+		END IF;
+	END IF;
+END;
+
+/*
+переводит булевы значения из системного представления в мдмное и обратно
+направление берётся из контекста
+
+IN ctx REFERENCE			- контекст перекодировки, куда складываются сообщения об ошибках
+IN val REFERENCE  			- ссылка на сущность
+*/
+CREATE PROCEDURE recodeBoolByCtx(IN ctx REFERENCE, IN val REFERENCE)
+BEGIN
+	DECLARE is2MDM BOOLEAN Direction2MDM = ctx.direction; -- признак перекодирования в МДМ
+	CALL recodeBool(is2MDM, val);
+	-- если заданы значения признака, то использую их
+	IF EXISTS(ctx.ValueYes[]) AND EXISTS(ctx.ValueNo[]) THEN
+		SET val = CASE val WHEN '1' THEN ctx.ValueYes ELSE ctx.ValueNo END;
+	END IF;
+END;
+
+-- Возвращает дату/время в формате IFX
+CREATE FUNCTION getIFXDateTime(IN ts CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CAST(CAST(ts AS TIMESTAMP) AS CHARACTER FORMAT 'yyyy-MM-dd''T''HH:mm:ss.SSSSSSZZZ');
+END;
+	
+-- Возвращает дату/время в формате MDM (из формата IFX)
+CREATE FUNCTION getMDMDateTimeFromIFX(IN ts CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CAST(CAST(ts AS TIMESTAMP FORMAT 'yyyy-MM-dd''T''HH:mm:ss.SSSSSSZZZ') AS CHARACTER FORMAT 'yyyy-MM-dd HH:mm:ss.SSS');
+END;
+
+-- Возвращает дату в формате IFX
+CREATE FUNCTION getIFXDate(IN ts CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CAST(CAST(ts AS TIMESTAMP) AS CHARACTER FORMAT 'yyyy-MM-dd');
+END;
+
+
+
+-- Возвращает серию документа из серии/номера в MDM
+CREATE FUNCTION getIdSeriesFromIdentificationNumber(IN idNumber CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE pos INTEGER POSITION(' ' IN idNumber REPEAT -1);
+	IF pos > 0 THEN
+		RETURN TRIM(LEFT(idNumber, pos - 1));
+	ELSE
+		RETURN '';
+	END IF;
+END;
+	
+-- Возвращает номер документа из серии/номера в MDM
+CREATE FUNCTION getIdNumFromIdentificationNumber(IN idNumber CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE pos INTEGER POSITION(' ' IN idNumber REPEAT -1);
+	IF pos > 0 THEN
+		RETURN TRIM(SUBSTRING(idNumber FROM pos + 1));
+	ELSE
+		RETURN TRIM(idNumber);
+	END IF;
+END;
+	
+
+-- Возвращает имя типа связи между контрактами в MDM (согласно таблице CDCONTRACTRELTP)
+CREATE FUNCTION getContractRelationshipValue(IN relType CHARACTER)
+	RETURNS CHARACTER
+BEGIN
+	DECLARE result CHARACTER;
+
+	TABLE_CACHE_LOCK : BEGIN ATOMIC
+		CALL InitContractRelCache();
+
+		SET result = THE(
+        	SELECT ITEM T.TO_FROM_NAME
+       		FROM TableCache.CDCONTRACTRELTP.rows[] as T
+       		WHERE T.CONTR_REL_TP_CD = relType
+		);
+	END TABLE_CACHE_LOCK;
+
+	IF result IS NULL THEN
+		THROW USER EXCEPTION VALUES('Invalid contract RelationshipType: ' || relType);
+	END IF;
+
+	RETURN result;
+END;
+	
+-- Возвращает имя типа связи между клиентами в MDM (согласно таблице CDRELTP)
+CREATE FUNCTION getCustomerRelationshipValue(IN relType CHARACTER)
+	RETURNS CHARACTER
+BEGIN
+	DECLARE result CHARACTER;
+
+	TABLE_CACHE_LOCK : BEGIN ATOMIC
+		CALL InitRelCache();
+
+		SET result = THE(
+        	SELECT ITEM T.TO_FROM_NAME
+       		FROM TableCache.CDRELTP.rows[] as T
+       		WHERE T.REL_TP_CD = relType
+		);
+	END TABLE_CACHE_LOCK;
+
+	IF result IS NULL THEN
+		THROW USER EXCEPTION VALUES('Invalid customer RelationshipType: ' || relType);
+	END IF;
+
+	RETURN result;
+END;
+
+-- Возвращает код категории контакта по его типу в MDM (согласно таблице CDCONTMETHTP)
+CREATE FUNCTION getContactMethodCategory(IN contMethType CHARACTER)
+	RETURNS CHARACTER
+BEGIN
+	DECLARE result CHARACTER;
+
+	TABLE_CACHE_LOCK : BEGIN ATOMIC
+		CALL InitContMethCache();
+
+		SET result = THE(
+        	SELECT ITEM T.CONT_METH_CAT_CD
+       		FROM TableCache.CDCONTMETHTP.rows[] as T
+       		WHERE T.CONT_METH_TP_CD = contMethType
+		);
+	END TABLE_CACHE_LOCK;
+
+	IF result IS NULL THEN
+		THROW USER EXCEPTION VALUES('Invalid contact method type: ' || contMethType);
+	END IF;
+
+	RETURN result;
+END;		
+
+-- Возвращает наименование страны по ее коду в MDM (согласно таблице CDCOUNTRYTP)
+-- Если страна с указанным кодом не найдена или передан пустой код, возвращает пустую строку
+-- Работает с учетом меток перекодировки
+CREATE FUNCTION getCountryName(IN countryType CHARACTER)
+	RETURNS CHARACTER
+BEGIN
+	IF countryType IS NULL OR countryType = '' OR CONTAINS(countryType, getRecodingFailedFlag()) THEN
+		RETURN '';
+	END IF;
+
+	DECLARE result CHARACTER;
+	DECLARE searchType CHARACTER;
+	
+	IF CONTAINS(countryType, getRecodingPassedFlag()) THEN
+		SET searchType = SUBSTRING(countryType AFTER getRecodingPassedFlag());
+	ELSE
+		SET searchType = countryType;
+	END IF;
+
+	TABLE_CACHE_LOCK : BEGIN ATOMIC
+		CALL InitCountryCache();
+
+		SET result = THE(
+        	SELECT ITEM T.NAME
+       		FROM TableCache.CDCOUNTRYTP.rows[] as T
+       		WHERE T.COUNTRY_TP_CD = searchType
+		);
+	END TABLE_CACHE_LOCK;
+
+	IF result IS NULL THEN
+		SET result = '';
+	END IF;
+
+	RETURN result;
+END;
+
+-- возвращает префикс для полей, не прошедших перекодировку
+CREATE FUNCTION getRecodingFailedFlag() RETURNS CHARACTER
+BEGIN
+	RETURN '{RecodingFailed}';
+END;
+
+-- возвращает префикс для полей, прошедших перекодировку
+CREATE FUNCTION getRecodingPassedFlag() RETURNS CHARACTER
+BEGIN
+	RETURN '{RecodingPassed}';
+END;
+
+/*
+перекодирует идентификаторы в MDO сообщении из ИС в формат МДО (для МДМ) 
+или обратно (в зависимости от направления в МДМ или из МДМ)
+сейчас заточено под юридические лица из ИС Гамма. Расширяйте по необходимости.
+
+IN rootRef REFERENCE  		- ссылка на корневой узел типа CustOrgAddRq, CustOrgModRq, AgreemtOrgAddRq, AgreemtOrgModRq
+IN ctx REFERENCE			- контекст перекодировки, куда складываются сообщения об ошибках
+*/
+CREATE PROCEDURE recodeMDO(IN rootRef REFERENCE, IN ctx REFERENCE)
+BEGIN
+	-- информация о клиенте
+	IF EXISTS(rootRef.CustInfo[]) THEN
+		CALL recodeMDOCustInfo(rootRef.CustInfo, ctx);
+	END IF;
+
+	-- то, что касается договоров
+	IF EXISTS(rootRef.AgreemtInfo[]) THEN
+		DECLARE is2MDM BOOLEAN Direction2MDM = ctx.direction; -- признак перекодирования в МДМ
+		-- Статус организации
+		CALL recodeAgreemtInfo(ctx.sysId, is2MDM, rootRef.AgreemtInfo);
+		-- а теперь доделаю то, чего нет в уже существовавшем коде
+		-- дату надо перекодировать
+		IF EXISTS(rootRef.AgreemtInfo.StartDt[]) THEN
+			CALL recodeMDODate(rootRef.AgreemtInfo.StartDt, ctx);
+		END IF;
+		-- дату надо перекодировать
+		IF EXISTS(rootRef.AgreemtInfo.EndDt[]) THEN
+			CALL recodeMDODate(rootRef.AgreemtInfo.EndDt, ctx);
+		END IF;
+	END IF;
+END;
+
+/*
+перекодирует поддерево CustInfo
+
+IN custInfo REFERENCE  		- ссылка на сущность
+IN ctx REFERENCE			- контекст перекодировки, куда складываются сообщения об ошибках
+*/
+CREATE PROCEDURE recodeMDOCustInfo(IN custInfo REFERENCE, IN ctx REFERENCE)
+BEGIN
+	IF LASTMOVE(custInfo) THEN
+		-- Тип клиента
+		CALL recode(custInfo, 'LegalStatus', 'CDSBORGTP', ctx);
+		-- Категория клиента
+		CALL recode(custInfo, 'LegalCategory', 'CDORGCATTP', ctx);
+		-- дату надо перекодировать
+		IF EXISTS(custInfo.RegDt[]) THEN
+			CALL recodeMDODate(custInfo.RegDt, ctx);
+		END IF;
+		-- дату надо перекодировать
+		IF EXISTS(custInfo.EffDt[]) THEN
+			CALL recodeMDODateTime(custInfo.EffDt, ctx);
+		END IF;
+		-- перекодирую OrgRec
+		CALL recodeMDOOrgRec(custInfo.OrgRec, ctx);
+		-- перекодирую PersonInfo
+		CALL recodeMDOPersonInfo(custInfo.PersonInfo, ctx);
+	END IF;
+END;
+
+/*
+перекодирует поддерево OrgRec
+
+IN orgRec REFERENCE  		- ссылка на сущность
+IN ctx REFERENCE			- контекст перекодировки, куда складываются сообщения об ошибках
+*/
+CREATE PROCEDURE recodeMDOOrgRec(IN orgRec REFERENCE, IN ctx REFERENCE)
+BEGIN
+	IF LASTMOVE(orgRec) THEN
+		-- идентификаторы организации
+		FOR cursor AS orgRec.OrgId[] DO
+			-- определю код справочника
+			DECLARE dictionaryCode CHAR;
+			CASE cursor.OrgType
+				-- Типы форм собственности
+				WHEN ClassifierTypeOKFS THEN SET dictionaryCode = 'CDSBOKFS';
+				-- Отрасли
+				WHEN ClassifierTypeSBRFIndustry THEN SET dictionaryCode = 'CDSBINDUSTRYTP';
+				-- Типы организационно-правовых форм
+				WHEN ClassifierTypeKOPF THEN SET dictionaryCode = 'CDORGTP';
+			END CASE;
+			CALL recode(cursor, 'OrgNum', dictionaryCode, ctx);
+		END FOR;
+
+		-- информация об организации
+		FOR cursor AS orgRec.OrgInfo[] DO
+			CALL recodeMDOOrgInfo(orgRec.OrgInfo, ctx);
+		END FOR;
+
+		-- Сведения о государственной регистрации
+		IF EXISTS(orgRec.OrgStateReg.StateRegDate[]) THEN
+			CALL recodeMDODate(orgRec.OrgStateReg.StateRegDate, ctx);
+		END IF;
+		IF EXISTS(orgRec.OrgStateReg.StateRegPrimeDate[]) THEN
+			CALL recodeMDODate(orgRec.OrgStateReg.StateRegPrimeDate, ctx);
+		END IF;
+
+		-- Признак резидента
+		IF EXISTS(orgRec.Resident[]) THEN
+			CALL recodeBoolByCtx(ctx, orgRec.Resident);
+		END IF;
+
+		-- Признак акционера СБРФ
+		IF EXISTS(orgRec.Shareholder[]) THEN
+			CALL recodeBoolByCtx(ctx, orgRec.Shareholder);
+		END IF;
+
+		-- Признак дочерней компании Банка
+		IF EXISTS(orgRec.AffiliatedCompany[]) THEN
+			CALL recodeBoolByCtx(ctx, orgRec.AffiliatedCompany);
+		END IF;
+
+		-- Признак наличия клиента в СТОП-ЛИСТЕ
+		IF EXISTS(orgRec.InStopList[]) THEN
+			CALL recodeBoolByCtx(ctx, orgRec.InStopList);
+		END IF;
+
+		-- Тип СТОП-ЛИСТА
+		IF EXISTS(orgRec.StopListType[]) THEN
+			CALL recode(orgRec, 'StopListType', 'CDSBSTOPLISTCATTP', ctx);
+		END IF;
+
+		-- Сегмент бизнеса
+		IF EXISTS(orgRec.Segment[]) THEN
+			CALL recode(orgRec, 'Segment', 'CDSBORGBUSSEGMENTTP', ctx);
+		END IF;
+
+		-- Категория кредитного риска
+		IF EXISTS(orgRec.RiskCategory[]) THEN
+			CALL recode(orgRec, 'RiskCategory', 'CDSBCREDITRISKTP', ctx);
+		END IF;
+
+		-- Класс кредитоспособности заемщика
+		IF EXISTS(orgRec.SolvencyClass[]) THEN
+			CALL recode(orgRec, 'SolvencyClass', 'CDSBCREDITCAPACITYTP', ctx);
+		END IF;
+
+		-- сотрудники
+		FOR cursor AS orgRec.RelPerson[] DO
+			-- Тип ФЛ, связанного с организацией
+			CALL recode(cursor, 'RelType', 'CDRELTP', ctx);
+			FOR personInfo AS cursor.PersonInfo[] DO
+				CALL recodeMDOPersonInfo(personInfo, ctx);
+			END FOR;
+		END FOR;
+	END IF;
+END;
+
+/*
+перекодирует поддерево OrgInfo
+
+IN orgInfo REFERENCE  		- ссылка на сущность
+IN ctx REFERENCE			- контекст перекодировки, куда складываются сообщения об ошибках
+*/
+CREATE PROCEDURE recodeMDOOrgInfo(IN orgInfo REFERENCE, IN ctx REFERENCE)
+BEGIN
+	IF LASTMOVE(orgInfo) THEN
+		-- ОКВЭД и ОКОНХ
+		FOR cursor AS orgInfo.IndustId[] DO
+			-- тип кода
+			CALL recode(cursor, 'Org', 'CDSBORGCODETP', ctx);
+			-- Признак основного кода
+			IF EXISTS(cursor.IsPrimary[]) THEN
+				-- Перекодировка между Y/N и 0/1
+				IF Direction2MDM = ctx.direction THEN
+					CALL recodeBoolByCtx(ctx, cursor.IsPrimary);
+				ELSE
+					-- если задан признак, что значение надо перекодировать как Boolean, то
+					IF ctx.IsPrimaryAsBoolean THEN
+						CALL recodeBoolByCtx(ctx, cursor.IsPrimary);
+					ELSE
+						-- иначе: надо привести к виду 1/0
+						SET cursor.IsPrimary = CASE cursor.IsPrimary WHEN 'Y' THEN '1' ELSE '0' END;
+					END IF;
+				END IF;
+			END IF;
+		END FOR;
+
+		-- контактная информация
+		FOR cursor AS orgInfo.CompositeContactInfo[] DO
+			CALL recodeMDOContactInfo(cursor.ContactInfo, ctx);
+		END FOR;
+
+		-- Документы, удостоверяющие организацию
+		FOR cursor AS orgInfo.Licenses.LicenseInfo[] DO
+			-- Тип документа
+			CALL recode(cursor, 'LicenseType', 'CDIDTP', ctx);
+			DECLARE is2MDM BOOLEAN Direction2MDM = ctx.direction; -- признак перекодирования в МДМ
+
+			-- Статус документа
+			CALL recode(cursor, 'LicenseStatus', 'CDIDSTATUSTP', ctx);
+
+			-- дату надо перекодировать
+			IF EXISTS(cursor.LicenseIssueDt[]) THEN
+				CALL recodeMDODate(cursor.LicenseIssueDt, ctx);
+			END IF;
+		END FOR;
+	END IF;
+END;
+
+/*
+перекодирует поддерево ContactInfo
+
+IN contactInfo REFERENCE  	- ссылка на сущность
+IN ctx REFERENCE			- контекст перекодировки, куда складываются сообщения об ошибках
+*/
+CREATE PROCEDURE recodeMDOContactInfo(IN contactInfo REFERENCE, IN ctx REFERENCE)
+BEGIN
+	IF LASTMOVE(contactInfo) THEN
+		-- почтовые адреса
+		FOR cursor AS contactInfo.PostAddr[] DO
+			CALL recodeMDOPostAddr(cursor, ctx);
+		END FOR;
+
+		-- контакты
+		FOR cursor AS contactInfo.ContactData[] DO
+			CALL recodeMDOContactData(cursor, ctx);
+		END FOR;
+	END IF;
+END;
+
+/*
+перекодирует поддерево PostAddr
+
+IN postAddr REFERENCE  		- ссылка на сущность
+IN ctx REFERENCE			- контекст перекодировки, куда складываются сообщения об ошибках
+*/
+CREATE PROCEDURE recodeMDOPostAddr(IN postAddr REFERENCE, IN ctx REFERENCE)
+BEGIN
+	IF LASTMOVE(postAddr) THEN
+		-- Код страны 
+		CALL recode(postAddr, 'CountryCode', 'CDCOUNTRYTP', ctx);
+		-- Тип адреса
+		CALL recode(postAddr, 'AddrType', 'CDADDRUSAGETP', ctx);
+		-- дату надо перекодировать
+		IF EXISTS(postAddr.StartDt[]) THEN
+			CALL recodeMDODateTime(postAddr.StartDt, ctx);
+		END IF;
+		-- дату надо перекодировать
+		IF EXISTS(postAddr.EndDt[]) THEN
+			CALL recodeMDODateTime(postAddr.EndDt, ctx);
+		END IF;
+		-- Статус адреса
+		IF EXISTS(postAddr.AddrStatus[]) THEN
+			CALL recodeBoolByCtx(ctx, postAddr.AddrStatus);
+		END IF;
+		-- дату надо перекодировать
+		IF EXISTS(postAddr.EffDt[]) THEN
+			CALL recodeMDODateTime(postAddr.EffDt, ctx);
+		END IF;
+END IF;
+END;
+
+/*
+перекодирует поддерево ContactData
+
+IN contactData REFERENCE  	- ссылка на сущность
+IN ctx REFERENCE			- контекст перекодировки, куда складываются сообщения об ошибках
+*/
+CREATE PROCEDURE recodeMDOContactData(IN contactData REFERENCE, IN ctx REFERENCE)
+BEGIN
+	IF LASTMOVE(contactData) THEN
+		-- Тип контакта
+		CALL recode(contactData, 'ContactType', 'CDCONTMETHTP', ctx);
+
+		-- дату надо перекодировать
+		IF EXISTS(contactData.EffDt[]) THEN
+			CALL recodeMDODateTime(contactData.EffDt, ctx);
+		END IF;
+	END IF;
+END;
+
+/*
+перекодирует поддерево PersonInfo
+
+IN personInfo REFERENCE  	- ссылка на сущность
+IN ctx REFERENCE			- контекст перекодировки, куда складываются сообщения об ошибках
+*/
+CREATE PROCEDURE recodeMDOPersonInfo(IN personInfo REFERENCE, IN ctx REFERENCE)
+BEGIN
+	IF LASTMOVE(personInfo) THEN
+		-- контактная информация
+		FOR cursor AS personInfo.ContactInfo[] DO
+			CALL recodeMDOContactInfo(cursor, ctx);
+		END FOR;
+
+		DECLARE is2MDM BOOLEAN Direction2MDM = ctx.direction; -- признак перекодирования в МДМ
+
+		-- дату надо перекодировать
+		IF(personInfo.BirthDt = '1800-01-01' OR 
+		   personInfo.BirthDt = '1900-01-01')
+		THEN
+			SET personInfo.BirthDt = NULL;
+		END IF;
+		IF EXISTS(personInfo.BirthDt[]) THEN
+			CALL recodeMDODate(personInfo.BirthDt, ctx);
+		END IF;
+
+		-- #region сдёрнуто из recodeCustInfo
+		CALL recode(personInfo, 'Gender', 'gender_tp_code', ctx);
+		CALL recode(personInfo, 'MaritalStatus', 'CDMARITALSTTP', ctx);
+
+		-- ДУЛ 
+		FOR cursor AS personInfo.IdentityCards.IdentityCard[] DO
+			CALL recode(cursor, 'IdType', 'CDIDTP', ctx);
+
+			-- Статус документа
+			CALL recode(cursor, 'IdStatus', 'CDIDSTATUSTP', ctx);
+
+			IF(cursor.IdNum IS NULL OR TRIM(cursor.IdNum) = '') THEN
+				SET cursor.IdNum = cursor.IdSeries;
+				SET cursor.IdSeries = NULL;
+			END IF;
+
+			-- даты надо перекодировать
+			IF EXISTS(cursor.IssueDt[]) THEN
+				CALL recodeMDODate(cursor.IssueDt, ctx);
+			END IF;
+			IF EXISTS(cursor.EffDt[]) THEN
+				CALL recodeMDODateTime(cursor.EffDt, ctx);
+			END IF;
+		END FOR;
+		
+		IF EXISTS(personInfo.Resident[]) THEN
+			CALL recodeBoolByCtx(ctx, personInfo.Resident);
+		END IF;
+		
+		CALL recode(personInfo, 'Citizenship', 'CDCOUNTRYTP', ctx);
+		-- #endregion сдёрнуто из recodeCustInfo
+		
+		-- Признак VIP клиента
+		CALL recode(personInfo, 'VIPStatus', 'CDCLIENTIMPTP', ctx);
+
+		-- Признак инсайдера
+		IF EXISTS(personInfo.Insider[]) THEN
+			CALL recodeBoolByCtx(ctx, personInfo.Insider);
+		END IF;
+
+		-- Признак акционера СБРФ
+		IF EXISTS(personInfo.Shareholder[]) THEN
+			CALL recodeBoolByCtx(ctx, personInfo.Shareholder);
+		END IF;
+
+		-- Признак сотрудника
+		IF EXISTS(personInfo.Employee[]) THEN
+			CALL recodeBoolByCtx(ctx, personInfo.Employee);
+		END IF;
+
+		-- Признак грамотности
+		IF EXISTS(personInfo.LiteracyLevel[]) THEN
+			CALL recodeBoolByCtx(ctx, personInfo.LiteracyLevel);
+		END IF;
+
+		CALL recode(personInfo, 'Education', 'CDHIGHESTEDUTP', ctx);
+		CALL recode(personInfo, 'SocialCategory', 'CDSBSOCIALGROUPTP', ctx);
+
+		-- Признак иностранца
+		IF EXISTS(personInfo.ForeignOfficial[]) THEN
+			CALL recodeBoolByCtx(ctx, personInfo.ForeignOfficial);
+		END IF;
+
+		CALL recode(personInfo, 'BankRel', 'CDSBBANKRELTP', ctx);
+		CALL recode(personInfo, 'CustStatusCode', 'CDCLIENTSTTP', ctx);
+	END IF;
+END;
+
+/*
+преобразует поле типа Date
+Формат:
+	для МДМ = 'yyyy-MM-dd'
+
+IN dateNode REFERENCE  		- ссылка на сущность
+IN ctx REFERENCE			- контекст перекодировки, куда складываются сообщения об ошибках
+*/
+CREATE PROCEDURE recodeMDODate(IN dateNode REFERENCE, IN ctx REFERENCE)
+BEGIN
+	IF LASTMOVE(dateNode) THEN
+		-- если задан формат, то
+		IF EXISTS(ctx.DateFormat[]) THEN
+			DECLARE sourceFormat CHARACTER;	-- исходный формат даты
+			DECLARE targetFormat CHARACTER;	-- целевой формат даты
+			-- задам форматы
+			-- если перекодируем в МДМ, то
+			IF Direction2MDM = ctx.direction THEN
+				SET sourceFormat = ctx.DateFormat;
+				SET targetFormat = MDMDateFormat;
+			ELSE
+				SET sourceFormat = MDMDateFormat;
+				SET targetFormat = ctx.DateFormat;
+			END IF;
+			SET dateNode VALUE = CAST(CAST(dateNode AS DATE FORMAT sourceFormat) AS CHARACTER FORMAT targetFormat);
+		END IF;
+	END IF;
+END;
+
+/*
+преобразует поле типа DateTime
+Формат:
+	для МДМ = 'yyyy-MM-dd HH:mm:ss.SSSSSSZZZ'
+
+IN dateTimeNode REFERENCE  	- ссылка на сущность
+IN ctx REFERENCE			- контекст перекодировки, куда складываются сообщения об ошибках
+*/
+CREATE PROCEDURE recodeMDODateTime(IN dateTimeNode REFERENCE, IN ctx REFERENCE)
+BEGIN
+	IF LASTMOVE(dateTimeNode) THEN
+		-- если задан формат, то
+		IF EXISTS(ctx.DateTimeFormat[]) THEN
+			DECLARE sourceFormat CHARACTER;	-- исходный формат даты
+			DECLARE targetFormat CHARACTER;	-- целевой формат даты
+			-- задам форматы
+			-- если перекодируем в МДМ, то
+			IF Direction2MDM = ctx.direction THEN
+				SET sourceFormat = ctx.DateTimeFormat;
+				SET targetFormat = MDMDateTimeFormatIn;
+			ELSE
+				SET sourceFormat = MDMDateTimeFormatOut;
+				SET targetFormat = ctx.DateTimeFormat;
+			END IF;
+			SET dateTimeNode VALUE = CAST(CAST(dateTimeNode AS TIMESTAMP FORMAT sourceFormat) AS CHARACTER FORMAT targetFormat);
+		END IF;
+	END IF;
+END;

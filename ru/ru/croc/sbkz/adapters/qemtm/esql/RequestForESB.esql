@@ -1,0 +1,85 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.qemtm.esql
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE RequestForESB_FillHeaders
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+
+		-- дальнейшее взаимодействие происходит по MQ, поэтому убираем заголовок HTTP
+		SET OutputRoot.HTTPInputHeader = null;
+		
+		DECLARE outBody REFERENCE TO OutputRoot.XMLNSC.*[<];
+		-- сохраним заголовки в переменных среды, 
+		SET Environment.UserProperties.RqUID			= FIELDVALUE(outBody.RqUID);
+		SET Environment.UserProperties.RqTm				= FIELDVALUE(outBody.RqTm);
+		SET Environment.UserProperties.SPName			= 'QEMTM';
+		SET Environment.UserProperties.OperationName	= FIELDNAME(outBody);
+
+		-- сохраним идентификатор запроса для дальнейшего ответа
+		SET Environment.UserProperties.HTTPRequestIdentifier = CAST(InputLocalEnvironment.Destination.HTTP.RequestIdentifier AS CHARACTER);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);--FIELDNAME(InputRoot.XMLNSC.*:Envelope.*:Body.*:*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'SRUpsertRequest' THEN
+			SET labelName = 'SRUpsertRequest';
+													
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr 
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+
+
+CREATE COMPUTE MODULE RequestForESB_Convert
+CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSRUpsertRequest';		
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq = InpRq;
+		RETURN TRUE;
+	END;
+END MODULE;

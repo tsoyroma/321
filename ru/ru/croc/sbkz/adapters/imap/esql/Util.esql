@@ -1,0 +1,65 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.imap.esql
+
+-- Ошибка связи с Intervale
+DECLARE ERR_CODE CONSTANT INTEGER -106;
+DECLARE ERR_CODE_DESC CONSTANT CHARACTER 'Ошибка соединения HTTP';
+
+/**
+ * Заполнение стандартных полей Transact в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRs(IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	
+END;
+
+/**
+ * Парсит входящий идентификатор вида "sendinfo.SPName.RqUID[.OperUID]"
+ **/
+CREATE PROCEDURE ParseMessageId(IN msgId CHARACTER, OUT rqUID CHARACTER, OUT operUID CHARACTER, OUT spName CHARACTER)
+BEGIN
+	DECLARE processStr CHARACTER msgId;
+	DECLARE I INTEGER 0;
+	DECLARE continueProcessing BOOLEAN TRUE;
+	
+	WHILE continueProcessing AND I <= 3 DO
+		IF I > 0 THEN
+			DECLARE wordPart CHARACTER;
+			IF POSITION('.' IN processStr) <> 0 THEN
+				SET wordPart = LEFT(processStr, POSITION('.' IN processStr)-1);
+			ELSE
+				SET wordPart = processStr;
+				SET continueProcessing = FALSE;
+			END IF;
+			
+			CASE I
+			WHEN 1 THEN
+				SET spName = wordPart;
+			WHEN 2 THEN
+				SET rqUID = wordPart;
+			WHEN 3 THEN
+				SET operUID = wordPart;
+			END CASE;
+		END IF;
+			
+		SET processStr = SUBSTRING(processStr FROM POSITION('.' IN processStr)+1);
+		SET I = I + 1;
+	END WHILE;
+END;
+
+/**
+ * Очистка номера телефона
+ **/
+CREATE FUNCTION cleanupPhoneNum(IN phone CHARACTER) RETURNS CHARACTER
+BEGIN
+	SET phone = REPLACE(phone, '+', '');
+	SET phone = REPLACE(phone, '(', '');
+	SET phone = REPLACE(phone, ')', '');
+	SET phone = REPLACE(phone, ' ', '');
+	SET phone = REPLACE(phone, '-', '');
+	SET phone = REPLACE(phone, '.', '');
+	RETURN phone;
+END; 
+ 

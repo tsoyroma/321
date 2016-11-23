@@ -1,0 +1,56 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pkb.esql
+
+
+/**
+ * Заполнение стандартных полей МДО в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRs (IN inroot REFERENCE, IN statusCode CHARACTER, IN statusDesc CHARACTER, IN outroot REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].UID		= inroot.*:*[<].UID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;
+
+	SET outroot.*:*[<].StatusCodeCAKD	= statusCode; /* u00671 */ 
+	SET outroot.*:*[<].StatusDescCAKD	= statusDesc;
+
+	SET outroot.*:*[<].Status.ifxca:StatusCode VALUE	= statusCode;
+	SET outroot.*:*[<].Status.ifxca:StatusDesc VALUE	= statusDesc;
+	
+END;
+
+/**
+ * Преобразовывает денежную величину из специфичной строки, содержащей пробелы, запятую вместо
+ * десятичной точки и кода валюты путем удаления или замены соответствующих символов.
+ **/
+CREATE FUNCTION FormatMoneyAmount (IN inpStr CHARACTER, IN currencyCode CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF inpStr IS NULL OR inpStr = '' THEN
+		RETURN '0';
+	ELSE
+		RETURN REPLACE(REPLACE(REPLACE(inpStr, currencyCode), ' '), ',', '.');
+	END IF;
+END;
+
+/**
+ * Преобразовывает строку даты вида "dd.MM.yyyy" в строку xsd:date
+ **/
+CREATE FUNCTION ConvertDateToXsdDate(IN dateStr CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE dateVal DATE CAST(dateStr AS DATE FORMAT 'dd.MM.yyyy');
+	RETURN CAST(dateVal AS CHARACTER FORMAT 'yyyy-MM-dd');
+END;
+
+CREATE PROCEDURE removeChar(IN name CHARACTER, OUT output CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.removeString";
+
+/**
+ * Удаляет начальные и конечные пробелы, а также приводит все
+ * символы к нижнему.
+ **/
+CREATE FUNCTION SanitizeText(IN str CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN LOWER(TRIM(str));
+END;

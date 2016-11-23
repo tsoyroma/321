@@ -1,0 +1,27 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.common.esql
+
+/**
+ * Устанавливает параметры для отсылки в нужную очередь,
+ * а также параметры сообщения ответа для корректной корреляции.
+ **/
+CREATE COMPUTE MODULE OperationEndPointSubflow_PrepareResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		-- Укажем название очереди, куда необходимо доставить сообщение
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = 
+			Environment.Variables.InputMQMD.ReplyToQ;
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName = 
+			Environment.Variables.InputMQMD.ReplyToQMgr;
+
+		-- Укажем тип сообщение "ответ на запрос" и идентификатор сообщения, на который отправляем ответ
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+		SET OutputRoot.MQMD.CorrelId	= Environment.Variables.InputMQMD.MsgId;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

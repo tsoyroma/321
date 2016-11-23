@@ -1,0 +1,305 @@
+BROKER SCHEMA ru.croc.sbrf.bp.common.esql
+
+DECLARE EventSourceProp EXTERNAL CHARACTER 'UNKNOWN';
+DECLARE EventReceiverProp EXTERNAL CHARACTER 'UNKNOWN';
+
+-- Параметр отключения логирования в БД КСШ в рамках потока, где размещен данный узел ErrorHandlerSubflow
+-- по умолчанию отключен (логирование ведется)
+-- Для включения в свойствах потока нужно установить значение параметра в '1'
+DECLARE DisableFlowLogging EXTERNAL CHARACTER '0';
+
+-- Функция проверки наличия значения у входного параметра.
+-- Если значение пустое, то возвращаем UNKNOWN
+CREATE FUNCTION CheckStr(IN str CHARACTER) RETURNS CHARACTER BEGIN
+	RETURN CASE WHEN str IS NULL OR str = '' THEN 'UNKNOWN' ELSE str END;
+END;
+	
+CREATE FUNCTION CheckStr2(IN str1 CHARACTER, IN str2 CHARACTER) RETURNS CHARACTER BEGIN
+	DECLARE str CHARACTER COALESCE(CASE WHEN str1 = '' THEN NULL ELSE str1 END, str2);
+	RETURN CASE WHEN str IS NULL OR str = '' THEN 'UNKNOWN' ELSE str END;
+END;
+		
+CREATE COMPUTE MODULE ErrorHandlerSubflow_SetParams
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		-- Хочется хранить признак отключения логирования в Environment.
+		-- Однако, если это делать в UserProperties, то параметры будут наследоваться между потоками,
+		-- потому что UserProperties восстанавливаются из ECHO при агрегации. Соответственно сам ключ храним
+		-- в корне Environment.
+		-- Однако, есть проблема с таймаутами, которая заключается в том, что если происходит таймаут
+		-- агрегации, то содержимое Environment'а обнуляется. Т.е. нужен резерв, откуда бы можно было
+		-- восстановить, поэтому (ФИНТ) еще одну копию все-таки складываем в UserProperties как резерв.
+
+		-- Сохраняем значение признака DisableFlowLogging в переменные среды
+		SET Environment.DisableFlowLogging = CASE WHEN DisableFlowLogging = '1' THEN TRUE ELSE FALSE END;
+
+		-- Сохраняем резервное значение признака DisableFlowLogging в переменные среды
+		SET Environment.UserProperties.DisableFlowLoggingBACKUP = Environment.DisableFlowLogging;
+		
+		-- Если заголовок содержит MQRFH2 фолдер, то берем информацию о кодировке оттуда
+		-- и проставляем в MQMD (т.к. там может быть какая-то левая кодировка)
+		IF InputRoot.MQMD.Format = MQFMT_RF_HEADER_2 THEN
+			SET OutputRoot.MQMD.Encoding       = InputRoot.MQRFH2.Encoding;
+			SET OutputRoot.MQMD.CodedCharSetId = InputRoot.MQRFH2.CodedCharSetId;			
+		END IF;	
+
+		-- Получение имени очереди
+		DECLARE sQueueName CHARACTER;
+		IF Environment.InputQueue IS NOT NULL THEN
+			SET sQueueName = Environment.InputQueue;
+		ELSE
+			SET sQueueName = InputRoot.MQMD.SourceQueue;
+		END IF;
+		
+		-- Записать систему-отправитель в sEventSource
+		DECLARE sEventSource CHAR COALESCE(Environment.Source, EventSourceProp);
+
+		-- Записать систему-получателя в sEventReciever
+		DECLARE sEventReciever CHAR COALESCE(Environment.Reciever, EventReceiverProp);
+		
+		-- Записать операцию в sProcessStatus
+		DECLARE sProcessStatus CHAR 'SUCCESS';	
+		IF Environment.ProcStatus IS NOT NULL THEN
+			SET sProcessStatus = Environment.ProcStatus;	
+		END IF;
+		
+		-- Заполнение информации среды
+		SET Environment.ErrParams.QueueName = sQueueName;
+		SET Environment.ErrParams.EventSource = sEventSource;
+		SET Environment.ErrParams.EventReciever = sEventReciever;
+		SET Environment.ErrParams.ProcStatus = sProcessStatus;
+
+		-- 1 - для структуры тегов МДМ-физ
+		-- 2 - для структуры тегов МДМ-корп и остальных обычных запросов с корневым тегом равным названию операции
+		-- 3 - для структуры тегов МДМ-корп IASK (soap-запросы DoIFXRq)
+		-- 4 - для структуры тегов МДМ-корп IBSO
+		-- 5 - для структуры тегов проекта ББМО
+		-- 6 - для структуры тегов CRM
+		-- 7 - для структуры запросов SAP
+		SET Environment.ErrParams.Operation = COALESCE(
+			FIELDNAME(InputBody.*:IFX.*[<].*[<]),				-- 1 (порядок важен: до InputBody.*[<])
+			FIELDNAME(InputBody.*:DoIFXRq.*:IFX.*:*[<].*:*[<]),	-- 3 (порядок важен: до InputBody.*[<])
+			FIELDNAME(InputBody.*[<].DATA.MSG.IFX.*[<].*[<]),	-- 4 (порядок важен: до InputBody.*[<])
+			FIELDNAME(InputBody.*:Envelope.*:Body.*:*[<]),		-- 5 (порядок важен: до InputBody.*[<])
+			FIELDVALUE(InputBody.*[<].MessageType),				-- 6 (порядок важен: до InputBody.*[<])
+			FIELDVALUE(InputBody.FILE.(XMLNSC.Attribute)TYPE),	-- 7
+			FIELDVALUE(InputBody.*:Envelope.*:Header.*:"operation-name"), -- BPM			
+			FIELDVALUE(InputBody.*[<].ServiceCode),
+			FIELDNAME(InputBody.*[<]),							-- 2
+			 'UNKNOWN');
+
+		-- 1 - для БП, второй и третий для запросов МДМ, 
+		-- 4 - для нотификаций МДМ,
+		-- 5,6 - для ответов из WAY4U,
+		-- 7 - для запросов к ЭСК(переповторы в формате ЭСК), 
+		-- 8 - для ответов ЭСК, 
+		-- 9 - для ИАСК (проверка состояния операции)
+		-- 10 - для АС Таллиман
+		-- 11 - для СББОЛ
+		-- 12 - для РЦК
+		-- 13 - для МДМ-корп IASK (soap-запросы DoIFXRq)
+		-- 14 - для МДМ-корп СРМ (запросы Message)
+		-- 15 - для запросов от CRM-физики
+		-- 16 - для запросов в рамках проекта ББМО
+		-- 17 - для ИБСО (запросы от ИБСО по проекту СББОЛ)
+		-- 18 - для ответов из МДМ (DWLCompositeServiceResponse)
+		-- 19 - для ответов из WAY(WSP)
+		-- 20 - для запросов от новой PRAGMA
+		-- 21 - для ответов от корпоративного CRM 
+		-- 22 - для запросов от BSS 
+		-- 23 - для запросов от SAP
+		-- 24 - для запросов от CAKD
+		-- 25 - для запросов от MB 
+ 		-- 26 - для запросов от SBOLRS
+ 		-- 27 - для запросов от BPM
+ 		-- 28 - для запросов от DBO CBBOL
+
+		SET Environment.ErrParams.RqUID = COALESCE(InputBody.*:*[<].*:RqUID, 									-- 1
+													InputBody.*:*[<].*:*[<].*:RqUID, 							-- 2
+													InputBody.IFX.*[<].*[<].RqUID,								-- 3
+													InputBody.IFX.*[<].*[<].NfUid,								-- 4
+													InputBody.*[<].MsgId,										-- 5
+													InputBody.*[<].*[<].MsgId,									-- 6
+													InputBody.*[<].Head.MessUID.MessageId,						-- 7
+													InputBody.*[<].Head.parentId.MessageId,						-- 8
+													InputRoot.MQRFH2.usr.RqUID,									-- 9
+													InputBody.*:*[<].*:*[<].*:*[<].*:*[<].*:*[<].*:RqUID,		-- 10
+													FIELDVALUE(InputBody.*:Message.*:SimpleReqElem.*:req_GUID),	-- 11
+													FIELDVALUE(InputBody.*:BSSMsg.*:Id_R),						-- 12
+													InputBody.*:DoIFXRq.*:IFX.*:*[<].*:*[<].*:RqUID,			-- 13
+													InputBody.Message.MessageId,								-- 14
+													FIELDVALUE(InputBody.*:*[<].*:HeaderInfo.*:RqUID),			-- 15
+													FIELDVALUE(InputBody.*:Envelope.*:Header.*:AsyncHeader.*:"message-id"),	-- 16
+													FIELDVALUE(InputBody.*:CIT_REQUEST.*:DATA.*:*[<].*:RqUID),  -- 17
+													FIELDVALUE(InputBody.DWLCompositeServiceResponse.TCRMService.ResponseControl.DWLControl.externalCorrelationId), 	-- 18
+													InputBody.*:Envelope.*:Body.*:*[<].*:*[<].*:CorrelationId,	--19
+													InputBody.PragmaEnvelope.MessageUID,						--20
+													InputBody.*[<].RqUID, 										--21
+													InputBody.*[<].(XMLNSC.Attribute)ID,						--22
+													FIELDVALUE(InputBody.FILE.(XMLNSC.Attribute)MSGUID),		--23
+													FIELDVALUE(InputBody.*:*[<].*:UID),							--24
+													FIELDVALUE(InputBody.*:*[<].*:*[<].*:*.*:MsgID),	        --25 FIELDVALUE(InputBody.*:RequestGESV.*:GESVRequest.*:GeneralInfoType.*:MsgID)
+													FIELDVALUE(InputBody.*[<].*[<].RqUID),						--26
+
+													InputBody.*[<].*[<].(XMLNSC.Attribute)ID,                   --28
+													FIELDVALUE(InputBody.*[<].MessageId),
+													FIELDVALUE(InputBody.*:*[<].*:MessageId),
+													FIELDVALUE(InputBody.*:Envelope.*:Header.*:"message-id")    --27
+													);
+		-- Идентификация сообщений ЦФТ
+		IF Environment.ErrParams.RqUID IS NULL OR LENGTH(Environment.ErrParams.RqUID) < 1 THEN
+			SET Environment.ErrParams.RqUID = ru.croc.sbrf.bp.common.esql.GetCftId(InputRoot);
+		END IF;
+
+		-- Сохранение параметров сообщения
+		SET Environment.UserProperties.RqUID   = Environment.ErrParams.RqUID;
+		SET Environment.UserProperties.RqTm    = COALESCE(	InputRoot.XMLNSC.*:*[<].RqTm,
+															InputBody.PragmaEnvelope.MessageDateTime,
+															InputBody.message.MessageDateTime,
+															FIELDVALUE(InputBody.*:Envelope.*:Header.*:"request-time"), -- 27 
+															getLocalTimeStamp());
+		SET Environment.UserProperties.OperUID = InputRoot.XMLNSC.*:*[<].OperUID;
+		-- 1,2 - для структуры тегов МДМ-физ
+		-- 3 - для структуры тегов МДМ-корп
+		-- 4 - для структуры тегов МДМ-корп IASK (soap-запросы DoIFXRq)
+		-- 5 - для структуры тегов МДМ-корп IBSO
+		SET Environment.UserProperties.SPName = COALESCE(
+			InputRoot.XMLNSC.IFX.*[<].SPName,		-- 1
+			InputRoot.XMLNSC.IFX.*[<].*[<].SPName,	-- 2
+			InputRoot.XMLNSC.*[<].SPName,	
+			InputRoot.XMLNSC.*[<].DestinationSystem,		-- 3			
+			InputBody.*:DoIFXRq.*:IFX.*:*[<].*:SPName,		-- 4
+			InputBody.*[<].DATA.MSG.IFX.*[<].SPName);		-- 5
+		-- 1 - так было изначально (и только так)
+		-- 2 - для структуры тегов МДМ-корп IASK (soap-запросы DoIFXRq)
+		-- 3 - для структуры тегов МДМ-корп IBSO
+		SET Environment.UserProperties.Service = COALESCE(
+			FIELDNAME(InputRoot.XMLNSC.IFX.*[<])			-- 1
+			, FIELDNAME(InputBody.*:DoIFXRq.*:IFX.*:*[<])	-- 2
+			, FIELDNAME(InputBody.*[<].DATA.MSG.IFX.*[<])	-- 3
+			);
+		SET Environment.UserProperties.Operation = Environment.ErrParams.Operation;
+		-- наименование операции. Используется при логировании транзакций для идентификации узла
+		SET Environment.UserProperties.OperName = COALESCE(InputRoot.XMLNSC.*[<].OperName, '');
+
+		-- Определим имя текущего менеджера (для логирования)
+		SET Environment.UserProperties.QMgr = QueueManagerName;
+		-- Используется для формирования поля Operation при логировании
+		-- Определим имя очереди и имя менеджера для ответов (для логирования)
+		SET Environment.UserProperties.ReplyToQ = InputRoot.MQMD.ReplyToQ;
+		SET Environment.UserProperties.ReplyToQMgr = InputRoot.MQMD.ReplyToQMgr;
+		
+		-- Сохраним SOAP-идентификатор ответа в случае, если запрос пришел через веб-сервис
+		SET Environment.UserProperties.ReplyIdentifier = InputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier;
+		-- Сохраним MsgId для восстановления в ответе в CorrelId
+		SET Environment.UserProperties.MsgId 	 	= InputRoot.MQMD.MsgId;		
+		-- Записываем входящий заголовок сообщения MQMD
+		SET Environment.Variables.InputMQMD = InputRoot.MQMD;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ErrorHandlerSubflow_CreateMessage
+CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		--Параметры сообщения
+		--в первую очередь анализируем MQRFH (для нотификаций из МДМ), затем MQMD, иначе ставим по умолчанию
+		DECLARE inCCSID    INT COALESCE(InputRoot.MQRFH2.CodedCharSetId, InputRoot.MQMD.CodedCharSetId, InputRoot.Properties.CodedCharSetId,ESB_LOG_CCSID);
+		DECLARE inEncoding INT COALESCE(InputRoot.MQRFH2.Encoding, InputRoot.MQMD.Encoding, InputRoot.Properties.Encoding,ESB_LOG_ENCODING);
+
+		-- Создаем заголовок MQMD
+		CALL CreateMQMDHeaderELMess(OutputRoot,inCCSID,inEncoding);	
+
+		-- Определим имя очереди и имя менеджера назначения (для логирования)
+		DECLARE destQMgr CHARACTER COALESCE(InputLocalEnvironment.WrittenDestination.MQ.DestinationData.queueManagerName,'UNKNOWN');
+		DECLARE destQ	 CHARACTER COALESCE(InputLocalEnvironment.WrittenDestination.MQ.DestinationData.queueName,'UNKNOWN');
+
+		-- Сформируем содержимое usr-заголовок
+		DECLARE usrHeader ROW;
+						
+		SET usrHeader.EventDate     = getLocalTimeStamp();
+		SET usrHeader.EventSource   = CheckStr(COALESCE(Environment.ErrParams.EventSource,EventSourceProp));
+		SET usrHeader.EventReciever = CheckStr(COALESCE(Environment.ErrParams.EventReciever,EventReceiverProp));
+		SET usrHeader.Operation     = CheckStr(Environment.ErrParams.Operation);
+		SET usrHeader.SourceQueue   = CheckStr(Environment.ErrParams.QueueName);
+		SET usrHeader.SourceQM      = CheckStr(Environment.UserProperties.QMgr);
+		SET usrHeader.TargetQueue   = CheckStr(destQ);
+		SET usrHeader.TargetQM	    = CheckStr(destQMgr);
+		SET usrHeader.ReplyQueue    = CheckStr2(Environment.UserProperties.ReplyToQ, 'NONE');
+		-- если очередь ответов не указана, то и менеджер очередей ответов принудительно проставим как не указанный
+		-- т.к. по умолчанию он задается равным текущим
+		IF usrHeader.ReplyQueue   = 'NONE' THEN
+			SET usrHeader.ReplyQM = 'NONE';
+		ELSE
+			SET usrHeader.ReplyQM = CheckStr(Environment.UserProperties.ReplyToQMgr);
+		END IF;
+		SET usrHeader.ProcStatus  = 'ERROR';
+		SET usrHeader.ErrorText   = CreateExceptionString(OutputLocalEnvironment,InputExceptionList);
+		SET usrHeader.RqUID 	  = COALESCE(Environment.ErrParams.RqUID, Environment.UserProperties.RqUID, 'UNKNOWN');
+
+		-- Создаем заголовок MQRFH2.usr
+		CALL CreateMQRFH2usrHeaderELMess(OutputRoot,usrHeader);	
+		
+		-- Добавляем тело сообщения
+		CALL CreateBlobELMess(InputRoot,OutputRoot,inCCSID,inEncoding);
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+END MODULE;
+
+------------------------------------------
+--
+-- Заглушка для обработки возможных исключений
+-- при формировании и попытке отправки сообщение для логирования
+--
+------------------------------------------
+CREATE COMPUTE MODULE ErrorHandlerSubflow_Stub
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ErrorHandlerSubflow_SetDisableFlowLogging
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+
+		-- Хочется хранить признак отключения логирования в Environment.
+		-- Однако, если это делать в UserProperties, то параметры будут наследоваться между потоками,
+		-- потому что UserProperties восстанавливаются из ECHO при агрегации. Соответственно сам ключ храним
+		-- в корне Environment.
+		-- Однако, есть проблема с таймаутами, которая заключается в том, что если происходит таймаут
+		-- агрегации, то содержимое Environment'а обнуляется. Т.е. нужен резерв, откуда бы можно было
+		-- восстановить, поэтому (ФИНТ) еще одну копию все-таки складываем в UserProperties как резерв.
+
+		-- Сохраняем значение признака DisableFlowLogging в переменные среды
+		SET Environment.DisableFlowLogging = CASE WHEN DisableFlowLogging = '1' THEN TRUE ELSE FALSE END;
+
+		-- Сохраняем резервное значение признака DisableFlowLogging в переменные среды
+		SET Environment.UserProperties.DisableFlowLoggingBACKUP = Environment.DisableFlowLogging;
+
+		RETURN TRUE;
+	END;
+END MODULE;

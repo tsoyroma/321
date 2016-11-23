@@ -1,0 +1,878 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.kolibri.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Установка ответных заголовков а также получение ответного сообщения из агрегации
+CREATE COMPUTE MODULE ResponseForESB_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE OrigMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+		SET Environment.UserProperties = OrigMsg.UserProperties;
+
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+
+		SET OutputRoot.XMLNSC = InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC;
+
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(OrigMsg, OutputLocalEnvironment);
+
+		IF Environment.UserProperties.Operation = '' THEN
+		   SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = 'unchanged';
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE ResponseForESB_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		--DECLARE Operation CHARACTER Environment.UserProperties.Operation;
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		 
+		CASE Operation
+		WHEN 'SvcCodeInqRs' THEN
+			SET labelName = 'KZSvcCodeInqRs';
+		WHEN 'FIXferAddRs' THEN
+			SET labelName = 'KZFIXferAddRs';
+		WHEN 'FIXferRcvRs' THEN
+			SET labelName = 'KZFIXferRcvRs';
+		WHEN 'FIXferRevRs' THEN 
+			SET labelName = 'KZFIXferRevRs';
+		WHEN 'FIXferAdviseRs' THEN 
+			SET labelName = 'KZFIXferAdviseRs';			
+		WHEN 'FIXferModLockRs' THEN 
+			SET labelName = 'KZFIXferModLockRs';			
+		WHEN 'FIXferModRs' THEN 
+			SET labelName = 'KZFIXferModRs';			
+		WHEN 'FIXferLockCanRs' THEN 
+			SET labelName = 'KZFIXferLockCanRs';			
+		WHEN 'FIXferAdviseCanRs' THEN 
+			SET labelName = 'KZFIXferAdviseCanRs';			
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown message format', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Получение контрольного номера перевода Колибри 04.05.2014 u06068
+ */
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO_SvcCodeInqRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE verMemo CHARACTER;
+		DECLARE verStatusDesc CHARACTER;		
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:SvcCodeInqRs;	
+		
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZSvcCodeInqRs AS outRef;
+		
+		SET outRef.RqUID			= inRef.*:RqUID;
+		SET outRef.RqTm				= inRef.*:RqTm;
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'status';
+		
+		SET oRef.StatusCode 		= inRef.*:Status.*:StatusCode;
+		SET oRef.Severity			= inRef.*:Status.*:Severity;
+		
+		IF inRef.*:Status.*:ServerStatusDesc <> '' THEN		
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc || ' '|| inRef.*:Status.*:ServerStatusDesc;
+		ELSE
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc;
+		END IF;	
+		
+        SET verStatusDesc = REPLACE(oRef.StatusDesc, '«', '"');
+		SET oRef.StatusDesc	        = REPLACE(verStatusDesc, '»', '"'); 
+		
+        SET oRef.StatusDesc = REPLACE(oRef.StatusDesc, '&#34', '"');
+		
+		SET oRef.SPName				= inRef.*:Status.*:SPName;
+		
+		SET outRef.FIXferId.QPSvcCodeInqRs.FIXferIdInfo.FIXferId		= inRef.*:FIXferId;		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Оформление перевода денег Колибри 04.05.2014 u06068
+ */
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO_FIXferAddRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE verMemo CHARACTER;
+		DECLARE verStatusDesc CHARACTER;		
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:FIXferAddRs;	
+							
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZFIXferAddRs AS outRef;
+		
+		SET outRef.RqUID			= inRef.*:RqUID;
+		SET outRef.RqTm				= inRef.*:RqTm;
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'status';
+		
+		SET oRef.StatusCode 		= inRef.*:Status.*:StatusCode;
+		SET oRef.Severity			= inRef.*:Status.*:Severity;
+		
+		IF inRef.*:Status.*:ServerStatusDesc <> '' THEN		
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc || ' '|| inRef.*:Status.*:ServerStatusDesc;
+		ELSE
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc;
+		END IF;	
+		
+        SET verStatusDesc = REPLACE(oRef.StatusDesc, '«', '"');
+		SET oRef.StatusDesc	        = REPLACE(verStatusDesc, '»', '"'); 
+		
+        SET oRef.StatusDesc = REPLACE(oRef.StatusDesc, '&#34', '"');
+		
+		SET oRef.SPName				= inRef.*:Status.*:SPName;	
+		
+		DECLARE fixRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef	AS fixRef NAME 'FIXferRec';
+		
+		SET fixRef.QPFIXferAddRs.FIXferRec.FIXferId		                = inRef.*:FIXferRec.*:FIXferInfo.*:FIXferId; 
+		SET fixRef.QPFIXferAddRs.FIXferRec.FIXferOperInfo.OperType		= inRef.*:FIXferRec.*:FIXferOperInfo.*:OperType; 
+		SET fixRef.QPFIXferAddRs.FIXferRec.FIXferOperInfo.OperUID		= inRef.*:FIXferRec.*:FIXferOperInfo.*:OperUID; 
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Оформление выплаты перевода денег Колибри 04.05.2014 u06068 
+ */
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO_KZFIXferRcvRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE verMemo CHARACTER;
+		DECLARE verStatusDesc CHARACTER;		
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:FIXferRcvRs;	
+							
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZFIXferRcvRs AS outRef;	
+		
+		SET outRef.RqUID			= inRef.*:RqUID;
+		SET outRef.RqTm				= inRef.*:RqTm;
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'status';
+		
+		SET oRef.StatusCode 		= inRef.*:Status.*:StatusCode;
+		SET oRef.Severity			= inRef.*:Status.*:Severity;
+		
+		IF inRef.*:Status.*:ServerStatusDesc <> '' THEN		
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc || ' '|| inRef.*:Status.*:ServerStatusDesc;
+		ELSE
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc;
+		END IF;	
+		
+        SET verStatusDesc = REPLACE(oRef.StatusDesc, '«', '"');
+		SET oRef.StatusDesc	        = REPLACE(verStatusDesc, '»', '"'); 
+		
+        SET oRef.StatusDesc = REPLACE(oRef.StatusDesc, '&#34', '"');
+		
+		SET oRef.SPName				= inRef.*:Status.*:SPName;
+		
+		DECLARE fixRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef	AS fixRef NAME 'FIXferRec';
+		
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.BankInfo.BankId		         								= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:BankInfo.*:BankId;
+		------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.NameAddrType		            					= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:NameAddrType;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.FullName		            						= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:FullName;
+        -- 24/04/2015  
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PhoneNum.PhoneType		           		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:PhoneType;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PhoneNum.Phone		            		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:Phone;
+		
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PostAddr.Addr1		            		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PostAddr.*:Addr1;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IdType		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IdNum		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IssueDt		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssueDt;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IssuedBy		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssuedBy;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.Citizenship		            						= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:Citizenship;
+
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Owner.BankInfo.BankId		   			         						= inRef.*:FIXferRec.*:FIXferInfo.*:Owner.*:BankInfo.*:BankId;
+
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.NameAddrType		   			         			= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:NameAddrType;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.FullName		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:FullName;
+        -- 24/04/2015  
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PhoneNum.PhoneType		           		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:PhoneType;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PhoneNum.Phone		            		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:Phone;
+
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.OrigDt		   			         									= inRef.*:FIXferRec.*:FIXferInfo.*:OrigDt;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.FIXferId		   			         									= inRef.*:FIXferRec.*:FIXferInfo.*:FIXferId;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.FIXferMethod		   			         								= inRef.*:FIXferRec.*:FIXferInfo.*:FIXferMethod;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Purpose		   			         									= inRef.*:FIXferRec.*:FIXferInfo.*:Purpose;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.SettlementInfo.ReceiveCurCode		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:SettlementInfo.*:ReceiveCurCode;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.SettlementInfo.ReceiveAmtEst		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:SettlementInfo.*:ReceiveAmtEst;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.FeeChargeAlloc.Fee.FeeType		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:FeeChargeAlloc.*:Fee.*:FeeType;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.FeeChargeAlloc.Fee.CurAmt.Amt		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:FeeChargeAlloc.*:Fee.*:CurAmt.*:Amt;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.FeeChargeAlloc.Fee.CurAmt.CurCode		   			         			= inRef.*:FIXferRec.*:FIXferInfo.*:FeeChargeAlloc.*:Fee.*:CurAmt.*:CurCode;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Confirmation.Confirmed		   			         					= inRef.*:FIXferRec.*:FIXferInfo.*:Confirmation.*:Confirmed;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferInfo.Confirmation.ConfDt	   			         						    = inRef.*:FIXferRec.*:FIXferInfo.*:Confirmation.*:ConfDt;		
+		------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferOperInfo.OperType	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperType;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferOperInfo.OperDt	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperDt;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferOperInfo.OperId	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperId;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferOperInfo.OperUID	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperUID;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferOperInfo.OperStatus	= inRef.*:FIXferRec.*:FIXferOperInfo.*:OperStatus;
+
+--      SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferOperInfo.*:Memo, '«', '"');
+--		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferOperInfo.Memo	        = REPLACE(verMemo, '»', '"'); 
+
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferOperInfo.*:Memo, '&#34', '"');
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferOperInfo.Memo	        = REPLACE(verMemo, '&#34', '"'); 
+		
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferOperInfo.*:Memo, '«', '"');
+		SET fixRef.QPFIXferRcvRs.FIXferRec.FIXferOperInfo.Memo	        = REPLACE(verMemo, '»', '"'); 
+		
+		SET fixRef.QPFIXferRcvRs.FIXferRec.Signature.SignatureValue 						   	    = inRef.*:FIXferRec.*:Signature.*:SignatureValue;
+
+		SET fixRef.QPFIXferRcvRs.FIXferRec.Signature.KeyInfo.X509SubjectName 						= inRef.*:FIXferRec.*:Signature.*:KeyInfo.*:X509SubjectName;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.Signature.KeyInfo.KeyName 						   	    = inRef.*:FIXferRec.*:Signature.*:KeyInfo.*:KeyName;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.Signature.KeyInfo.UserRole 						 	  	= inRef.*:FIXferRec.*:Signature.*:KeyInfo.*:UserRole;
+
+		SET fixRef.QPFIXferRcvRs.FIXferRec.Signature.UserInfo.UserId 						       	= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:UserId;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.Signature.UserInfo.FullName 						   		= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:FullName;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.Signature.UserInfo.OrgId 				    		   	= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:OrgId;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.Signature.UserInfo.OrgName 						   		= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:OrgUnitName;
+		SET fixRef.QPFIXferRcvRs.FIXferRec.Signature.UserInfo.EmployeeId 						   	= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:EmployeeId;
+
+		DECLARE outUserInfo REFERENCE TO fixRef.QPFIXferRcvRs.FIXferRec.Signature.UserInfo;
+		DECLARE outCertInfo REFERENCE TO outUserInfo;
+		
+		FOR certFor AS inRef.*:FIXferRec.*:Signature.*:UserInfo.*:CertInfo[] DO
+		        CREATE LASTCHILD OF outUserInfo	AS outCertInfo NAME 'CertInfo';
+					
+				SET outCertInfo.X509SubjectName       =  certFor.*:X509SubjectName;
+				SET outCertInfo.KeyName		          =  certFor.*:KeyName;	
+				SET outCertInfo.UserRole		      =  certFor.*:UserRole;
+				SET outCertInfo.KeyValue		      =  certFor.*:KeyValue;
+        		SET outCertInfo.X509SerialNumber      =  certFor.*:X509SerialNumber;
+        		SET outCertInfo.X509IssuerName        =  certFor.*:X509IssuerName; 			
+				SET outCertInfo.X509IssuerSerial      =  certFor.*:X509IssuerSerial;
+				SET outCertInfo.Version		          =  certFor.*:Version;
+				SET outCertInfo.NotBefore		      =  certFor.*:NotBefore;
+				SET outCertInfo.NotAfter			  =  certFor.*:NotAfter;
+				SET outCertInfo.SigAlgName			  =  certFor.*:SigAlgName;
+				SET outCertInfo.SigValue			  =  certFor.*:SigValue;			
+		END FOR;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Реверсал (отмена оформления перевода) денег Колибри 04.05.2014 u06068
+ */
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO_KZFIXferRevRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE verMemo CHARACTER;
+		DECLARE verStatusDesc CHARACTER;		
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:FIXferRevRs;	
+
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZFIXferRevRs AS outRef;	
+		
+		SET outRef.RqUID			= inRef.*:RqUID;
+		SET outRef.RqTm				= inRef.*:RqTm;
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'status';
+		
+		SET oRef.StatusCode 		= inRef.*:Status.*:StatusCode;
+		SET oRef.Severity			= inRef.*:Status.*:Severity;
+		
+		IF inRef.*:Status.*:ServerStatusDesc <> '' THEN		
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc || ' '|| inRef.*:Status.*:ServerStatusDesc;
+		ELSE
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc;
+		END IF;	
+		
+        SET verStatusDesc = REPLACE(oRef.StatusDesc, '«', '"');
+		SET oRef.StatusDesc	        = REPLACE(verStatusDesc, '»', '"'); 
+		
+        SET oRef.StatusDesc = REPLACE(oRef.StatusDesc, '&#34', '"');
+		
+		SET oRef.SPName				= inRef.*:Status.*:SPName;
+		
+		DECLARE fixRef REFERENCE TO outRef;		
+		CREATE LASTCHILD OF outRef	AS fixRef NAME 'FIXferRec';
+
+		------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Sender.BankInfo.BankId		            							= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:BankInfo.*:BankId;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Sender.PersonInfo.NameAddrType		            					= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:NameAddrType;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Sender.PersonInfo.FullName		            						= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:FullName;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PhoneNum.PhoneType		           		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:PhoneType;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PhoneNum.Phone		            		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:Phone;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PostAddr.Addr1		            		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PostAddr.*:Addr1;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Sender.PersonInfo.TINInfo.TaxId		            					= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:TINInfo.*:TaxId;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IdType		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IdNum		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IssueDt		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssueDt;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IssuedBy		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssuedBy;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Sender.PersonInfo.Citizenship		            						= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:Citizenship;
+
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Owner.BankInfo.BankId		   			         						= inRef.*:FIXferRec.*:FIXferInfo.*:Owner.*:BankInfo.*:BankId;
+
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Receiver.BankInfo.BankId		   			         					= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:BankInfo.*:BankId;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Receiver.BankInfo.City		   			         					= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:BankInfo.*:City;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.NameAddrType		   			         			= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:NameAddrType;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.FullName		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:FullName;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.ContactInfo.PhoneNum.PhoneType			   		= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:PhoneType;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.ContactInfo.PhoneNum.Phone		   				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:Phone;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.IdentityCards.IdentityCard.IdType		   			= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.IdentityCards.IdentityCard.IdNum				   	= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.IdentityCards.IdentityCard.IssueDt				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssueDt;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.IdentityCards.IdentityCard.IssuedBy				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssuedBy;
+
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.Citizenship		   							    = inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:Citizenship;
+
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.OrigDt		   			         									= inRef.*:FIXferRec.*:FIXferInfo.*:OrigDt;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.FIXferId		   			         									= inRef.*:FIXferRec.*:FIXferInfo.*:FIXferId;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.FIXferMethod		   			         								= inRef.*:FIXferRec.*:FIXferInfo.*:FIXferMethod;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Purpose		   			         									= inRef.*:FIXferRec.*:FIXferInfo.*:Purpose;
+
+--		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Memo		   			         										= COALESCE(inRef.*:FIXferRec.*:FIXferInfo.*:Memo, ' ');
+		
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferInfo.*:Memo, '&#34', '"');
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Memo	        = REPLACE(verMemo, '&#34', '"');		
+		
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferInfo.*:Memo, '«', '"');
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Memo	        = REPLACE(verMemo, '»', '"'); 
+		
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.SettlementInfo.ReceiveCurCode		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:SettlementInfo.*:ReceiveCurCode;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.SettlementInfo.ReceiveAmtEst		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:SettlementInfo.*:ReceiveAmtEst;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.FeeChargeAlloc.Fee.FeeType		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:FeeChargeAlloc.*:Fee.*:FeeType;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.FeeChargeAlloc.Fee.CurAmt.Amt		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:FeeChargeAlloc.*:Fee.*:CurAmt.*:Amt;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.FeeChargeAlloc.Fee.CurAmt.CurCode		   			         			= inRef.*:FIXferRec.*:FIXferInfo.*:FeeChargeAlloc.*:Fee.*:CurAmt.*:CurCode;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Confirmation.Confirmed		   			         					= inRef.*:FIXferRec.*:FIXferInfo.*:Confirmation.*:Confirmed;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferInfo.Confirmation.ConfDt	   			         						    = inRef.*:FIXferRec.*:FIXferInfo.*:Confirmation.*:ConfDt;		
+		------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferOperInfo.OperType	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperType;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferOperInfo.OperDt	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperDt;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferOperInfo.OperId	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperId;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferOperInfo.OperUID	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperUID;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferOperInfo.OperStatus	= inRef.*:FIXferRec.*:FIXferOperInfo.*:OperStatus;
+
+---		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferOperInfo.Memo	        = inRef.*:FIXferRec.*:FIXferOperInfo.*:Memo;
+		
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferOperInfo.*:Memo, '&#34', '"');
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferOperInfo.Memo	        = REPLACE(verMemo, '&#34', '"');
+
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferOperInfo.*:Memo, '«', '"');
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferOperInfo.Memo	        = REPLACE(verMemo, '»', '"'); 
+		
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferOperInfo.OperatorInfo.FullName	        = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:FullName;
+		
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferOperInfo.Confirmation.Confirmed	    = inRef.*:FIXferRec.*:FIXferInfo.*:Confirmation.*:Confirmed;
+		SET fixRef.QPFIXferRevRs.FIXferRec.FIXferOperInfo.Confirmation.ConfDt    	    = inRef.*:FIXferRec.*:FIXferInfo.*:Confirmation.*:ConfDt;
+
+		SET fixRef.QPFIXferRevRs.FIXferRec.Signature.SignatureValue 					= inRef.*:FIXferRec.*:Signature.*:SignatureValue;
+
+		SET fixRef.QPFIXferRevRs.FIXferRec.Signature.KeyInfo.X509SubjectName 			= inRef.*:FIXferRec.*:Signature.*:KeyInfo.*:X509SubjectName;
+		SET fixRef.QPFIXferRevRs.FIXferRec.Signature.KeyInfo.KeyName 					= inRef.*:FIXferRec.*:Signature.*:KeyInfo.*:KeyName;
+		SET fixRef.QPFIXferRevRs.FIXferRec.Signature.KeyInfo.UserRole 					= inRef.*:FIXferRec.*:Signature.*:KeyInfo.*:UserRole;
+
+		SET fixRef.QPFIXferRevRs.FIXferRec.Signature.UserInfo.UserId 					= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:UserId;
+		SET fixRef.QPFIXferRevRs.FIXferRec.Signature.UserInfo.FullName 					= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:FullName;
+		SET fixRef.QPFIXferRevRs.FIXferRec.Signature.UserInfo.OrgId 				    = inRef.*:FIXferRec.*:Signature.*:UserInfo.*:OrgId;
+		SET fixRef.QPFIXferRevRs.FIXferRec.Signature.UserInfo.OrgName 					= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:OrgUnitName;
+		SET fixRef.QPFIXferRevRs.FIXferRec.Signature.UserInfo.EmployeeId 				= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:EmployeeId;
+		
+		DECLARE outUserInfo REFERENCE TO fixRef.QPFIXferRevRs.FIXferRec.Signature.UserInfo;
+		DECLARE outCertInfo REFERENCE TO outUserInfo;
+		
+		FOR certFor AS inRef.*:FIXferRec.*:Signature.*:UserInfo.*:CertInfo[] DO
+		        CREATE LASTCHILD OF outUserInfo	AS outCertInfo NAME 'CertInfo';
+					
+				SET outCertInfo.X509SubjectName       =  certFor.*:X509SubjectName;
+				SET outCertInfo.KeyName		          =  certFor.*:KeyName;	
+				SET outCertInfo.UserRole		      =  certFor.*:UserRole;
+				SET outCertInfo.KeyValue		      =  certFor.*:KeyValue;
+        		SET outCertInfo.X509SerialNumber      =  certFor.*:X509SerialNumber;
+        		SET outCertInfo.X509IssuerName        =  certFor.*:X509IssuerName; 			
+				SET outCertInfo.X509IssuerSerial      =  certFor.*:X509IssuerSerial;
+				SET outCertInfo.Version		          =  certFor.*:Version;
+				SET outCertInfo.NotBefore		      =  certFor.*:NotBefore;
+				SET outCertInfo.NotAfter			  =  certFor.*:NotAfter;
+				SET outCertInfo.SigAlgName			  =  certFor.*:SigAlgName;
+				SET outCertInfo.SigValue			  =  certFor.*:SigValue;			
+		END FOR;	
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Подтверждение операции с переводом денег Колибри 04.05.2014 u06068
+ */
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO_KZFIXferAdviseRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE verMemo CHARACTER;
+		DECLARE verStatusDesc CHARACTER;		
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:FIXferAdviseRs;	
+		
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZFIXferAdviseRs AS outRef;	
+		
+		SET outRef.RqUID			= inRef.*:RqUID;
+		SET outRef.RqTm				= inRef.*:RqTm;
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'status';
+		
+		SET oRef.StatusCode 		= inRef.*:Status.*:StatusCode;
+		SET oRef.Severity			= inRef.*:Status.*:Severity;
+		
+		IF inRef.*:Status.*:ServerStatusDesc <> '' THEN		
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc || ' '|| inRef.*:Status.*:ServerStatusDesc;
+		ELSE
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc;
+		END IF;	
+		
+        SET verStatusDesc = REPLACE(oRef.StatusDesc, '«', '"');
+		SET oRef.StatusDesc	        = REPLACE(verStatusDesc, '»', '"'); 
+		
+        SET oRef.StatusDesc = REPLACE(oRef.StatusDesc, '&#34', '"');
+		
+		SET oRef.SPName				= inRef.*:Status.*:SPName;
+		
+		DECLARE fixRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef	AS fixRef NAME 'FIXferRec';
+		
+		SET fixRef.QPFIXferAdviseRs.FIXferRec.FIXferInfo.FIXferId		    = inRef.*:FIXferRec.*:FIXferInfo.*:FIXferId;
+		SET fixRef.QPFIXferAdviseRs.FIXferRec.FIXferOperInfo.OperType		= inRef.*:FIXferRec.*:FIXferOperInfo.*:OperType;
+		SET fixRef.QPFIXferAdviseRs.FIXferRec.FIXferOperInfo.OperUID		= inRef.*:FIXferRec.*:FIXferOperInfo.*:OperUID;
+		SET fixRef.QPFIXferAdviseRs.FIXferRec.FIXferOperInfo.SignedData		= REPLACE(inRef.*:FIXferRec.*:FIXferOperInfo.*:SignedData, '&#34', '"');
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Блокировка перевода для модификации денег Колибри u06068  */
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO_KZFIXferModLockRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE verMemo CHARACTER;
+		DECLARE verStatusDesc CHARACTER;		
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:FIXferModLockRs;	
+							
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZFIXferModLockRs AS outRef;	
+		
+		SET outRef.RqUID			= inRef.*:RqUID;
+		SET outRef.RqTm				= inRef.*:RqTm;
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'status';
+		
+		SET oRef.StatusCode 		= inRef.*:Status.*:StatusCode;
+		SET oRef.Severity			= inRef.*:Status.*:Severity;
+		
+		IF inRef.*:Status.*:ServerStatusDesc <> '' THEN		
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc || ' '|| inRef.*:Status.*:ServerStatusDesc;
+		ELSE
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc;
+		END IF;	
+
+        SET verStatusDesc = REPLACE(oRef.StatusDesc, '«', '"');
+		SET oRef.StatusDesc	        = REPLACE(verStatusDesc, '»', '"'); 
+		
+        SET oRef.StatusDesc = REPLACE(oRef.StatusDesc, '&#34', '"');
+		
+		SET oRef.SPName				= inRef.*:Status.*:SPName;
+		
+		DECLARE fixRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef	AS fixRef NAME 'FIXferRec';
+
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Sender.BankInfo.BankId		         								= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:BankInfo.*:BankId;
+		------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Sender.PersonInfo.NameAddrType		            					= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:NameAddrType;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Sender.PersonInfo.FullName		            						= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:FullName;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PhoneNum.PhoneType		           		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:PhoneType;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PhoneNum.Phone		            		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:Phone;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PostAddr.Addr1		            		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PostAddr.*:Addr1;
+
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IdType		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IdNum		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IssueDt		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssueDt;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IssuedBy		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssuedBy;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Sender.PersonInfo.Citizenship		            						= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:Citizenship;
+
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Owner.BankInfo.BankId		   			         						= inRef.*:FIXferRec.*:FIXferInfo.*:Owner.*:BankInfo.*:BankId;
+
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Receiver.BankInfo.BankId		   			         					= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:BankInfo.*:BankId;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Receiver.BankInfo.City		   			         					= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:BankInfo.*:City;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.NameAddrType		   			         			= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:NameAddrType;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.FullName		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:FullName;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.ContactInfo.PhoneNum.PhoneType			   		= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:PhoneType;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.ContactInfo.PhoneNum.Phone		   				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:Phone;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.IdentityCards.IdentityCard.IdType		   			= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.IdentityCards.IdentityCard.IdNum				   	= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.IdentityCards.IdentityCard.IssueDt				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssueDt;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.IdentityCards.IdentityCard.IssuedBy				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssuedBy;
+
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.Citizenship		   							    = inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:Citizenship;
+
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.OrigDt		   			         									= inRef.*:FIXferRec.*:FIXferInfo.*:OrigDt;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.FIXferId		   			         									= inRef.*:FIXferRec.*:FIXferInfo.*:FIXferId;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.FIXferMethod		   			         								= inRef.*:FIXferRec.*:FIXferInfo.*:FIXferMethod;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Purpose		   			         									= inRef.*:FIXferRec.*:FIXferInfo.*:Purpose;
+--		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Memo		   			         										= COALESCE(inRef.*:FIXferRec.*:FIXferInfo.*:Memo, ' ');
+		
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferInfo.*:Memo, '&#34', '"');
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Memo	        = REPLACE(verMemo, '&#34', '"');
+		
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferInfo.*:Memo, '«', '"');
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Memo	        = REPLACE(verMemo, '»', '"');
+
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.SettlementInfo.ReceiveCurCode		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:SettlementInfo.*:ReceiveCurCode;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.SettlementInfo.ReceiveAmtEst		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:SettlementInfo.*:ReceiveAmtEst;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.FeeChargeAlloc.Fee.FeeType		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:FeeChargeAlloc.*:Fee.*:FeeType;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.FeeChargeAlloc.Fee.CurAmt.Amt		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:FeeChargeAlloc.*:Fee.*:CurAmt.*:Amt;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.FeeChargeAlloc.Fee.CurAmt.CurCode		   			         			= inRef.*:FIXferRec.*:FIXferInfo.*:FeeChargeAlloc.*:Fee.*:CurAmt.*:CurCode;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Confirmation.Confirmed		   			         					= inRef.*:FIXferRec.*:FIXferInfo.*:Confirmation.*:Confirmed;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferInfo.Confirmation.ConfDt	   			         						    = inRef.*:FIXferRec.*:FIXferInfo.*:Confirmation.*:ConfDt;		
+		------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferOperInfo.OperType	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperType;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferOperInfo.OperDt	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperDt;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferOperInfo.OperId	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperId;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferOperInfo.OperUID	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperUID;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferOperInfo.OperStatus	= inRef.*:FIXferRec.*:FIXferOperInfo.*:OperStatus;
+
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferOperInfo.*:Memo, '&#34', '"');
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferOperInfo.Memo	        = REPLACE(verMemo, '&#34', '"'); 
+
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferOperInfo.*:Memo, '«', '"');
+		SET fixRef.QPFIXferModLockRs.FIXferRec.FIXferOperInfo.Memo	        = REPLACE(verMemo, '»', '"'); 
+		
+		SET fixRef.QPFIXferModLockRs.FIXferRec.Signature.SignatureValue 						   	    = inRef.*:FIXferRec.*:Signature.*:SignatureValue;
+
+		SET fixRef.QPFIXferModLockRs.FIXferRec.Signature.KeyInfo.X509SubjectName 						= inRef.*:FIXferRec.*:Signature.*:KeyInfo.*:X509SubjectName;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.Signature.KeyInfo.KeyName 						   	    = inRef.*:FIXferRec.*:Signature.*:KeyInfo.*:KeyName;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.Signature.KeyInfo.UserRole 							   	= inRef.*:FIXferRec.*:Signature.*:KeyInfo.*:UserRole;
+
+		SET fixRef.QPFIXferModLockRs.FIXferRec.Signature.UserInfo.UserId 						       	= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:UserId;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.Signature.UserInfo.FullName 							   	= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:FullName;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.Signature.UserInfo.OrgId 				    		   	= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:OrgId;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.Signature.UserInfo.OrgName 							   	= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:OrgUnitName;
+		SET fixRef.QPFIXferModLockRs.FIXferRec.Signature.UserInfo.EmployeeId 						   	= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:EmployeeId;
+
+		DECLARE outUserInfo REFERENCE TO fixRef.QPFIXferModLockRs.FIXferRec.Signature.UserInfo;
+		DECLARE outCertInfo REFERENCE TO outUserInfo;
+		
+		FOR certFor AS inRef.*:FIXferRec.*:Signature.*:UserInfo.*:CertInfo[] DO
+		        CREATE LASTCHILD OF outUserInfo	AS outCertInfo NAME 'CertInfo';
+					
+				SET outCertInfo.X509SubjectName       =  certFor.*:X509SubjectName;
+				SET outCertInfo.KeyName		          =  certFor.*:KeyName;	
+				SET outCertInfo.UserRole		      =  certFor.*:UserRole;
+				SET outCertInfo.KeyValue		      =  certFor.*:KeyValue;
+        		SET outCertInfo.X509SerialNumber      =  certFor.*:X509SerialNumber;
+        		SET outCertInfo.X509IssuerName        =  certFor.*:X509IssuerName; 			
+				SET outCertInfo.X509IssuerSerial      =  certFor.*:X509IssuerSerial;
+				SET outCertInfo.Version		          =  certFor.*:Version;
+				SET outCertInfo.NotBefore		      =  certFor.*:NotBefore;
+				SET outCertInfo.NotAfter			  =  certFor.*:NotAfter;
+				SET outCertInfo.SigAlgName			  =  certFor.*:SigAlgName;
+				SET outCertInfo.SigValue			  =  certFor.*:SigValue;			
+		END FOR;	
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/* Корректировка перевода Колибри u06068 */
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO_KZFIXferModRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE verMemo CHARACTER;
+		DECLARE verStatusDesc CHARACTER;		
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:FIXferModRs;	
+							
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZFIXferModRs AS outRef;	
+		
+		SET outRef.RqUID			= inRef.*:RqUID;
+		SET outRef.RqTm				= inRef.*:RqTm;
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'status';
+		
+		SET oRef.StatusCode 		= inRef.*:Status.*:StatusCode;
+		SET oRef.Severity			= inRef.*:Status.*:Severity;
+		
+		IF inRef.*:Status.*:ServerStatusDesc <> '' THEN		
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc || ' '|| inRef.*:Status.*:ServerStatusDesc;
+		ELSE
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc;
+		END IF;	
+		
+        SET verStatusDesc = REPLACE(oRef.StatusDesc, '«', '"');
+		SET oRef.StatusDesc	        = REPLACE(verStatusDesc, '»', '"'); 
+
+        SET oRef.StatusDesc = REPLACE(oRef.StatusDesc, '&#34', '"');
+
+		SET oRef.SPName				= inRef.*:Status.*:SPName;
+		
+		DECLARE fixRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef	AS fixRef NAME 'FIXferRec';
+		
+		SET fixRef.FIXferModRs.FIXferRec		= inRef.*:FIXferRec;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Отмена блокировки Колибри u06068 */
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO_KZFIXferLockCanRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE verMemo CHARACTER;
+		DECLARE verStatusDesc CHARACTER;		
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:FIXferLockCanRs;	
+							
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZFIXferLockCanRs AS outRef;	
+		
+		SET outRef.RqUID			= inRef.*:RqUID;
+		SET outRef.RqTm				= inRef.*:RqTm;
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'status';
+		
+		SET oRef.StatusCode 		= inRef.*:Status.*:StatusCode;
+		SET oRef.Severity			= inRef.*:Status.*:Severity;
+		
+		IF inRef.*:Status.*:ServerStatusDesc <> '' THEN		
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc || ' '|| inRef.*:Status.*:ServerStatusDesc;
+		ELSE
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc;
+		END IF;	
+		
+        SET verStatusDesc = REPLACE(oRef.StatusDesc, '«', '"');
+		SET oRef.StatusDesc	        = REPLACE(verStatusDesc, '»', '"'); 
+		
+        SET oRef.StatusDesc = REPLACE(oRef.StatusDesc, '&#34', '"');
+		
+		SET oRef.SPName				= inRef.*:Status.*:SPName;
+		
+		DECLARE fixRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef	AS fixRef NAME 'FIXferRec';
+		
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Sender.BankInfo.BankId		         								= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:BankInfo.*:BankId;
+		------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Sender.PersonInfo.NameAddrType		            					= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:NameAddrType;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Sender.PersonInfo.FullName		            						= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:FullName;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PhoneNum.PhoneType		           		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:PhoneType;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PhoneNum.Phone		            		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:Phone;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Sender.PersonInfo.ContactInfo.PostAddr.Addr1		            		= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:ContactInfo.*:PostAddr.*:Addr1;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Sender.PersonInfo.TINInfo.TaxId		            					= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:TINInfo.*:TaxId;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IdType		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IdNum		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IssueDt		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssueDt;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Sender.PersonInfo.IdentityCards.IdentityCard.IssuedBy		            = inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssuedBy;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Sender.PersonInfo.Citizenship		            						= inRef.*:FIXferRec.*:FIXferInfo.*:Sender.*:PersonInfo.*:Citizenship;
+
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Owner.BankInfo.BankId		   			         						= inRef.*:FIXferRec.*:FIXferInfo.*:Owner.*:BankInfo.*:BankId;
+
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Receiver.BankInfo.BankId		   			         					= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:BankInfo.*:BankId;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Receiver.BankInfo.City		   			         					= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:BankInfo.*:City;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.NameAddrType		   			         			= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:NameAddrType;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.FullName		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:FullName;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.ContactInfo.PhoneNum.PhoneType			   		= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:PhoneType;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.ContactInfo.PhoneNum.Phone		   				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:ContactInfo.*:PhoneNum.*:Phone;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.IdentityCards.IdentityCard.IdType		   			= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.IdentityCards.IdentityCard.IdNum				   	= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.IdentityCards.IdentityCard.IssueDt				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssueDt;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.IdentityCards.IdentityCard.IssuedBy				= inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:IdentityCards.*:IdentityCard.*:IssuedBy;
+
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Receiver.PersonInfo.Citizenship		   							    = inRef.*:FIXferRec.*:FIXferInfo.*:Receiver.*:PersonInfo.*:Citizenship;
+
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.OrigDt		   			         									= inRef.*:FIXferRec.*:FIXferInfo.*:OrigDt;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.FIXferId		   			         									= inRef.*:FIXferRec.*:FIXferInfo.*:FIXferId;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.FIXferMethod		   			         								= inRef.*:FIXferRec.*:FIXferInfo.*:FIXferMethod;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Purpose		   			         									= inRef.*:FIXferRec.*:FIXferInfo.*:Purpose;
+--		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Memo		   			         										= COALESCE(inRef.*:FIXferRec.*:FIXferInfo.*:Memo, ' ');
+		
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferInfo.*:Memo, '&#34', '"');
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Memo	        = REPLACE(verMemo, '&#34', '"');
+		
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferInfo.*:Memo, '«', '"');
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Memo	        = REPLACE(verMemo, '»', '"');
+
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.SettlementInfo.ReceiveCurCode		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:SettlementInfo.*:ReceiveCurCode;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.SettlementInfo.ReceiveAmtEst		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:SettlementInfo.*:ReceiveAmtEst;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.FeeChargeAlloc.Fee.FeeType		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:FeeChargeAlloc.*:Fee.*:FeeType;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.FeeChargeAlloc.Fee.CurAmt.Amt		   			         				= inRef.*:FIXferRec.*:FIXferInfo.*:FeeChargeAlloc.*:Fee.*:CurAmt.*:Amt;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.FeeChargeAlloc.Fee.CurAmt.CurCode		   			         			= inRef.*:FIXferRec.*:FIXferInfo.*:FeeChargeAlloc.*:Fee.*:CurAmt.*:CurCode;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Confirmation.Confirmed		   			         					= inRef.*:FIXferRec.*:FIXferInfo.*:Confirmation.*:Confirmed;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferInfo.Confirmation.ConfDt	   			         						    = inRef.*:FIXferRec.*:FIXferInfo.*:Confirmation.*:ConfDt;		
+		------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferOperInfo.OperDt	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperDt;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferOperInfo.OperId	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperId;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferOperInfo.OperUID	    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperUID;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferOperInfo.OperStatus	= inRef.*:FIXferRec.*:FIXferOperInfo.*:OperStatus;
+
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferOperInfo.*:Memo, '&#34', '"');
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferOperInfo.Memo	        = REPLACE(verMemo, '&#34', '"'); 
+
+        SET verMemo = REPLACE(inRef.*:FIXferRec.*:FIXferOperInfo.*:Memo, '«', '"');
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.FIXferOperInfo.Memo	        = REPLACE(verMemo, '»', '"'); 
+		
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.Signature.SignatureValue 						   	    = inRef.*:FIXferRec.*:Signature.*:SignatureValue;
+
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.Signature.KeyInfo.X509SubjectName 						= inRef.*:FIXferRec.*:Signature.*:KeyInfo.*:X509SubjectName;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.Signature.KeyInfo.KeyName 						   	    = inRef.*:FIXferRec.*:Signature.*:KeyInfo.*:KeyName;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.Signature.KeyInfo.UserRole 						   		= inRef.*:FIXferRec.*:Signature.*:KeyInfo.*:UserRole;
+
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.Signature.UserInfo.UserId 						       	= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:UserId;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.Signature.UserInfo.FullName 						   		= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:FullName;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.Signature.UserInfo.OrgId 				    		   	= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:OrgId;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.Signature.UserInfo.OrgName 						   		= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:OrgUnitName;
+		SET fixRef.QPFIXferLockCanRs.FIXferRec.Signature.UserInfo.EmployeeId 						   	= inRef.*:FIXferRec.*:Signature.*:UserInfo.*:EmployeeId;
+
+		DECLARE outUserInfo REFERENCE TO fixRef.QPFIXferLockCanRs.FIXferRec.Signature.UserInfo;
+		DECLARE outCertInfo REFERENCE TO outUserInfo;
+		
+		FOR certFor AS inRef.*:FIXferRec.*:Signature.*:UserInfo.*:CertInfo[] DO
+		        CREATE LASTCHILD OF outUserInfo	AS outCertInfo NAME 'CertInfo';
+					
+				SET outCertInfo.X509SubjectName       =  certFor.*:X509SubjectName;
+				SET outCertInfo.KeyName		          =  certFor.*:KeyName;	
+				SET outCertInfo.UserRole		      =  certFor.*:UserRole;
+				SET outCertInfo.KeyValue		      =  certFor.*:KeyValue;
+        		SET outCertInfo.X509SerialNumber      =  certFor.*:X509SerialNumber;
+        		SET outCertInfo.X509IssuerName        =  certFor.*:X509IssuerName; 			
+				SET outCertInfo.X509IssuerSerial      =  certFor.*:X509IssuerSerial;
+				SET outCertInfo.Version		          =  certFor.*:Version;
+				SET outCertInfo.NotBefore		      =  certFor.*:NotBefore;
+				SET outCertInfo.NotAfter			  =  certFor.*:NotAfter;
+				SET outCertInfo.SigAlgName			  =  certFor.*:SigAlgName;
+				SET outCertInfo.SigValue			  =  certFor.*:SigValue;			
+		END FOR;	
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Аннулирование(отмена выплаты) Колибри u06068 */
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO_KZFIXferAdviseCanRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE verMemo CHARACTER;
+		DECLARE verStatusDesc CHARACTER;		
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:FIXferAdviseCanRs;	
+
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+	
+		CREATE FIELD OutputRoot.XMLNSC.KZFIXferAdviseCanRs AS outRef;	
+		
+		SET outRef.RqUID			= inRef.*:RqUID;
+		SET outRef.RqTm				= inRef.*:RqTm;
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'status';
+		
+		SET oRef.StatusCode 		= inRef.*:Status.*:StatusCode;
+		SET oRef.Severity			= inRef.*:Status.*:Severity;
+		
+		IF inRef.*:Status.*:ServerStatusDesc <> '' THEN		
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc || ' '|| inRef.*:Status.*:ServerStatusDesc;
+		ELSE
+			SET oRef.StatusDesc			= inRef.*:Status.*:StatusDesc;
+		END IF;			
+		
+        SET verStatusDesc = REPLACE(oRef.StatusDesc, '«', '"');
+		SET oRef.StatusDesc	        = REPLACE(verStatusDesc, '»', '"'); 
+		
+        SET oRef.StatusDesc = REPLACE(oRef.StatusDesc, '&#34', '"');
+		
+		SET oRef.SPName				= inRef.*:Status.*:SPName;
+		
+		DECLARE fixRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef	AS fixRef NAME 'FIXferRec';
+		
+		SET fixRef.QPFIXferAdviseCanRs.FIXferRec.FIXferInfo.FIXferId		    = inRef.*:FIXferRec.*:FIXferInfo.*:FIXferId; 
+		SET fixRef.QPFIXferAdviseCanRs.FIXferRec.FIXferOperInfo.OperType		= inRef.*:FIXferRec.*:FIXferOperInfo.*:OperType; 
+		SET fixRef.QPFIXferAdviseCanRs.FIXferRec.FIXferOperInfo.OperUID		    = inRef.*:FIXferRec.*:FIXferOperInfo.*:OperUID; 
+		
+		RETURN TRUE;
+	END;
+END MODULE;

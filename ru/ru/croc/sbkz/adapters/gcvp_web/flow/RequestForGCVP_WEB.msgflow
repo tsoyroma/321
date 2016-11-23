@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmLabel.msgnode="ComIbmLabel.msgnode" xmlns:ComIbmMQInput.msgnode="ComIbmMQInput.msgnode" xmlns:ComIbmMQOutput.msgnode="ComIbmMQOutput.msgnode" xmlns:ComIbmRouteToLabel.msgnode="ComIbmRouteToLabel.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow" xmlns:ru_croc_sbkz_adapters_gcvp_web_flow_SOAPreqresp_gcvp_web.msgflow="ru/croc/sbkz/adapters/gcvp_web/flow/SOAPreqresp_gcvp_web.msgflow"
+    xmlns:ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow="ru/croc/sbrf/bp/common/flow/ErrorHandlerSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow" xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbkz/adapters/gcvp_web/flow/RequestForGCVP_WEB.msgflow"
+    nsPrefix="ru_croc_sbkz_adapters_gcvp_web_flow_RequestForGCVP_WEB.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.HttpProxyAddress" name="HttpProxyAddress" lowerBound="1" defaultValueLiteral="192.168.2.4:3128">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.HttpWebServiceUrl" name="HttpWebServiceUrl" lowerBound="1" defaultValueLiteral="https://213.157.38.60/billing-ws/ws/BillingWS">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.HttpWebServiceTimeout" name="HttpWebServiceTimeout" lowerBound="1" defaultValueLiteral="60">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="RequestForGCVP_WEB" bundleName="ru/croc/sbkz/adapters/gcvp_web/flow/RequestForGCVP_WEB" pluginId="AdaptersKZ"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/AdaptersKZ/icons/full/obj16/RequestForGCVP_WEB.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/AdaptersKZ/icons/full/obj30/RequestForGCVP_WEB.gif"/>
+    <composition>
+      <nodes xmi:type="ComIbmMQInput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="21,41" queueName="ESB.GCVPWEB.REQUEST" messageDomainProperty="XMLNSC" componentLevel="node" additionalInstances="1">
+        <translation xmi:type="utility:ConstantString" string="ESB.GCVPWEB.REQUEST"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_2" location="512,38" computeExpression="esql://routine/ru.croc.sbkz.adapters.gcvp_web.esql#RequestForGCVP_WEB_DetectOperation.Main" computeMode="destination">
+        <translation xmi:type="utility:ConstantString" string="DetectOperation"/>
+      </nodes>
+      <nodes xmi:type="ComIbmRouteToLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_3" location="636,39">
+        <translation xmi:type="utility:ConstantString" string="Route To Label"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_4" location="286,37" CurrentOperation="Сообщение передано в адаптер GCVP_WEB" CurrentEventSource="ESB" CurrentEventReceiver="A_GCVP_WEB">
+        <translation xmi:type="utility:ConstantString" string="ESB -> A_GCVP_WEB"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_5" location="165,41" EventReceiverProp="A_GCVP_WEB" EventSourceProp="ESB">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflow"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_6" location="416,38" computeExpression="esql://routine/ru.croc.sbkz.adapters.gcvp_web.esql#RequestForGCVP_WEB_SaveOrigMess.Main">
+        <translation xmi:type="utility:ConstantString" string="SaveOrigMess"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_7" location="544,198" computeExpression="esql://routine/ru.croc.sbkz.adapters.gcvp_web.esql#RequestForGCVP_WEB_RetrieveHeader.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="RetrieveHeaderList"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_9" location="655,199" computeExpression="esql://routine/ru.croc.sbkz.adapters.gcvp_web.esql#RequestForGCVP_WEB_ConvertList2MDO.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertList2MDO"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_13" location="887,203" CurrentOperation="Сообщение обработано адаптером ГЦВП и передано в интеграционную логику для дальнейшей обработки" CurrentEventSource="A_GCVP" CurrentEventReceiver="ESB">
+        <translation xmi:type="utility:ConstantString" string="A_GCVP-> ESB"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_14" location="25,190" labelName="KZGetPensionRq">
+        <translation xmi:type="utility:ConstantString" string="KZGetPensionRq"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_15" location="464,110" EventReceiverProp="A_GCVP_WEB" EventSourceProp="GCVP">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflowFailure"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_23" location="137,190" computeExpression="esql://routine/ru.croc.sbkz.adapters.gcvp_web.esql#RequestForGCVP_WEB_SaveSOAPHeader.Main">
+        <translation xmi:type="utility:ConstantString" string="SaveSOAPHeader"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_24" location="777,200" destinationMode="list">
+        <translation xmi:type="utility:ConstantString" string="QRESPONSE"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_26" location="466,284" EventReceiverProp="A_GCVP_WEB" EventSourceProp="GCVP">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflowFault"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_28" location="267,190" computeExpression="esql://routine/ru.croc.sbkz.adapters.gcvp_web.esql#RequestForGCVP_WEB_ConvertToGCVP.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertToGCVP"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbkz_adapters_gcvp_web_flow_SOAPreqresp_gcvp_web.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_11" location="392,190">
+        <translation xmi:type="utility:ConstantString" string="SOAPreqresp_gcvp_web"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.catch" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_6" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_19" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_24" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_22" targetNode="FCMComposite_1_28" sourceNode="FCMComposite_1_23" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_25" targetNode="FCMComposite_1_24" sourceNode="FCMComposite_1_9" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_27" targetNode="FCMComposite_1_9" sourceNode="FCMComposite_1_7" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_34" targetNode="FCMComposite_1_23" sourceNode="FCMComposite_1_14" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_23" targetNode="FCMComposite_1_11" sourceNode="FCMComposite_1_28" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_8" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_11" sourceTerminalName="OutTerminal.Out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_11" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_11" sourceTerminalName="OutTerminal.Failure" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_12" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_11" sourceTerminalName="OutTerminal.Fault" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.Basic" configurable="true" userDefined="true" describedAttribute="Property.HttpProxyAddress">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.HttpProxyAddress" bundleName="ru/croc/sbkz/adapters/gcvp_web/flow/RequestForGCVP_WEB" pluginId="AdaptersKZ"/>
+        <propertyDescriptor groupName="Group.Basic" configurable="true" userDefined="true" describedAttribute="Property.HttpWebServiceUrl">
+          <propertyName xmi:type="utility:TranslatableString" key="Property.HttpWebServiceUrl" bundleName="ru/croc/sbkz/adapters/gcvp_web/flow/RequestForGCVP_WEB" pluginId="AdaptersKZ"/>
+          <propertyDescriptor groupName="Group.Basic" configurable="true" userDefined="true" describedAttribute="Property.HttpWebServiceTimeout">
+            <propertyName xmi:type="utility:TranslatableString" key="Property.HttpWebServiceTimeout" bundleName="ru/croc/sbkz/adapters/gcvp_web/flow/RequestForGCVP_WEB" pluginId="AdaptersKZ"/>
+          </propertyDescriptor>
+        </propertyDescriptor>
+      </propertyDescriptor>
+    </propertyOrganizer>
+    <stickyBoard/>
+    <patternAnnotations/>
+  </eClassifiers>
+</ecore:EPackage>

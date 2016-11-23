@@ -1,0 +1,236 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.credit.esql
+
+
+/**
+ * Определяет систему, которая используется для получения
+ * кредитной истории по клиенту. Выбор производится на основании
+ * значения поля BKI для входящего сообщения.
+ **/
+CREATE COMPUTE MODULE CreditHistoryRequest_DetectSystem
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE bkiValue CHARACTER UPPER(InputRoot.XMLNSC.KZGetCreditHistoryRq.BKI);
+		DECLARE labelName CHARACTER;
+		
+		CASE bkiValue
+		WHEN BKI_PRAGMA_VALUE THEN
+			SET labelName = 'Pragma';
+		WHEN BKI_PKB_VALUE THEN
+			SET labelName = 'PKB';
+		WHEN BKI_PRAGMA_CORP_VALUE THEN
+			SET labelName = 'Pragma_Corp';
+		WHEN BKI_PKB_CORP_VALUE THEN
+			SET labelName = 'PKB_Corp';		
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown BKI value', bkiValue);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Заполнение полей заголовка MQRFH2 для
+ * маршрутизации в систему Прагма.
+ **/
+CREATE COMPUTE MODULE CreditHistoryRequest_CreateRequests
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+		
+		SET systemId 	= 'urn:sbkzsystems:pragma';
+		SET adapterType = 'urn:sbkztypes:esb:adapter';
+		-- Константа для указания, что ищем адаптер системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	-- Идентификатор системы, в адаптер которой необходимо отправить запрос
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;	 	
+	 	PROPAGATE TO TERMINAL 'out' DELETE NONE;
+	 	
+	 	SET systemId 	= 'urn:sbkzsystems:newpragma';
+		SET adapterType = 'urn:sbkztypes:esb:adapter';		
+		-- Константа для указания, что ищем адаптер системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	-- Идентификатор системы, в адаптер которой необходимо отправить запрос
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;	 	
+	 	PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+
+		RETURN FALSE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+/**
+ * Заполнение полей заголовка MQRFH2 для
+ * маршрутизации в систему ПКБ.
+ **/
+CREATE COMPUTE MODULE CreditHistoryRequest_FillMqRfh2usrForPKB
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		SET systemId 	= 'urn:sbkzsystems:pkb';
+		SET adapterType = 'urn:sbkztypes:esb:adapter';
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Константа для указания, что ищем адаптер системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	-- Идентификатор системы, в адаптер которой необходимо отправить запрос
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+/**
+ * Подготовка запроса для системы PKB на список форматов отчетов.
+ */
+CREATE COMPUTE MODULE CreditHistoryRequest_MakeReportListRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetPKBReportListRq';
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetCreditHistoryRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetPKBReportListRq;
+		
+		CALL FillSOAPHeaderFields(OutputRoot.XMLNSC);
+		
+		SET OutRq.PersonInfo.PersonIdType 	= InpRq.PersonInfo.PersonIdType;
+		SET OutRq.PersonInfo.PersonId 		= InpRq.PersonInfo.PersonId;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE CreditHistoryRequest_CreateRequests_Corp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyEntireMessage();
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+		
+		SET systemId 	= 'urn:sbkzsystems:pragma';
+		SET adapterType = 'urn:sbkztypes:esb:adapter';
+		-- Константа для указания, что ищем адаптер системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	-- Идентификатор системы, в адаптер которой необходимо отправить запрос
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;	 	
+	 	PROPAGATE TO TERMINAL 'out' DELETE NONE;
+	 	
+	 	SET systemId 	= 'urn:sbkzsystems:newpragma';
+		SET adapterType = 'urn:sbkztypes:esb:adapter';		
+		-- Константа для указания, что ищем адаптер системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	-- Идентификатор системы, в адаптер которой необходимо отправить запрос
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;	 	
+	 	PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+
+		RETURN FALSE;
+		
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE CreditHistoryRequest_ModifyMDO2Pragma
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders();  
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetCreditHistoryCorpRq';
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetCreditHistoryCorpRq;	
+		
+		--SET OutRq.RqUID					        = InpRq.RqUID;
+		--SET OutRq.RqTm						    = InpRq.RqTm;
+		 
+		DECLARE debtors REFERENCE TO OutRq;
+		DECLARE debtor REFERENCE TO OutRq; 
+		
+		CREATE LASTCHILD OF OutRq AS debtors NAME 'DebtorsID';		
+		CREATE LASTCHILD OF debtors AS debtor NAME 'DebtorID';
+		 
+		SET debtor.Uid			=	InpRq.DebtorsID.DebtorID.Uid;
+		SET debtor.KOD			=   InpRq.DebtorsID.DebtorID.MsgFrom;	
+		SET debtor.DateReq		=   InpRq.DebtorsID.DebtorID.DateReq;
+		SET debtor.NumQuest		=	InpRq.DebtorsID.DebtorID.NumQuest;
+		SET debtor.IdBki		=	InpRq.DebtorsID.DebtorID.IdBki;
+		 
+		SET debtor.TypeID			=	InpRq.DebtorsID.DebtorID.TypeID;
+		SET debtor.ID				= 	InpRq.DebtorsID.DebtorID.ID;
+		SET debtor.LastName			=	InpRq.DebtorsID.DebtorID.LastName;
+		SET debtor.FirstName		=	InpRq.DebtorsID.DebtorID.FirstName;
+		SET debtor.MiddleName		=	InpRq.DebtorsID.DebtorID.MiddleName;	
+		SET debtor.OldLastName		=	InpRq.DebtorsID.DebtorID.OldLastName;
+		
+		SET OutRq.DealMemberType	    = 	InpRq.DealMemberType;
+		SET OutRq.CompanyName    	=	InpRq.CompanyName;
+		
+		RETURN TRUE;
+	END;
+	 
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+	
+END MODULE;
+

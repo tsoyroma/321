@@ -1,0 +1,746 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sbol.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+
+/**
+ * Восстановление служебной информации для ответа
+ **/
+CREATE COMPUTE MODULE HTTPResponseForSBOL_AddOrigHead
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body.*[<]);
+		IF Operation IN ('KZGetPrivateClientAccountListRq') THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC.*:*[<] NAME 'OrigMess';
+			SET OutputRoot.XMLNSC.OrigMess = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body;
+		END IF;
+		
+		-- восстанавливаем исходное сообщение в формате UFX
+		IF Operation IN ('KZPrivateMoneyTransferRq', 'KZGetCrossCurrRateRq', 'KZPrivateMoneyTransferCanRq', 'KZMngSMSInfoServiceRq') THEN
+			CREATE FIRSTCHILD OF OutputRoot.XMLNSC 
+			PARSE ( 
+				CAST(
+					Environment.UserProperties.Source.Body AS BLOB CCSID OutputRoot.MQMD.CodedCharSetId
+				)
+				CCSID OutputRoot.MQMD.CodedCharSetId
+				OPTIONS FolderBitStream + ValidateNone); 
+		END IF;
+		
+		SET Environment.UserProperties = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier = CAST(Environment.UserProperties.HTTPRequestIdentifier AS BLOB);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Маршрутизирует поток в соответствие с
+ * обрабатываемой операцией.
+ **/
+CREATE COMPUTE MODULE HTTPResponseForSBOL_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZGetPrivateClientAccountListRs' THEN
+			SET labelName = 'KZGetPrivateClientAccountList';
+		WHEN 'KZPrivateMoneyTransferRs' THEN
+			SET labelName = 'KZPrivateMoneyTransfer';
+		WHEN 'KZGetTransactionsInfoRs' THEN
+			SET labelName = 'KZGetTransactionsInfo';
+		WHEN 'KZGetCrossCurrRateRs' THEN
+			SET labelName = 'KZGetCrossCurrRate';
+		WHEN 'KZPrivateMoneyTransferCanRs' THEN
+			SET labelName = 'KZPrivateMoneyTransferCan';
+		WHEN 'KZGetPrivateClientPayScheduleRs' THEN
+			SET labelName = 'KZGetPrivateClientPaySchedule';
+		WHEN 'KZMngSMSInfoServiceRs' THEN
+			SET labelName = 'KZMngSMSInfoService';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+	END;
+END MODULE;
+
+/**
+ * Преобразование ответа из формата МДО в UFX для
+ * операции KZGetPrivateClientAccountList
+ **/
+CREATE COMPUTE MODULE HTTPResponseForSBOL_ConvertMDO2UFX_AcctList
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetPrivateClientAccountListRs;
+		DECLARE origMess REFERENCE TO InputRoot.XMLNSC.OrigMess.KZGetPrivateClientAccountListRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		DECLARE phoneNumber CHARACTER '';
+		DECLARE convertPhone CHARACTER '';
+		
+		CALL FillStandardUFXFieldsResp2(InputRoot.XMLNSC, OutputRoot.XMLNSC, Environment.UserProperties, 'Information', 'WAY4Appl');
+		SET outRoot.MsgData.Information.RegNumber = inRoot.RegNumber;
+		SET outRoot.MsgData.Information.ObjectType = 'Contract';
+		SET outRoot.MsgData.Information.ActionType = 'Inquiry';
+		CREATE FIELD outRoot.MsgData.Information.ResultDtls;
+		DECLARE resultDtls REFERENCE TO outRoot.MsgData.Information.ResultDtls;
+		CREATE LASTCHILD OF resultDtls AS curElm NAME 'Parm';
+		SET curElm.ParmCode = 'Contract';
+		SET curElm.Value = 'Y';
+		CREATE LASTCHILD OF resultDtls AS curElm NAME 'Parm';
+		SET curElm.ParmCode = 'Client';
+		SET curElm.Value = 'Y';
+		CREATE LASTCHILD OF resultDtls AS curElm NAME 'Parm';
+		SET curElm.ParmCode = 'Product';
+		SET curElm.Value = 'Y';
+		CREATE LASTCHILD OF resultDtls AS curElm NAME 'Parm';
+		SET curElm.ParmCode = 'Balance';
+		SET curElm.Value = 'Y';
+		SET resultDtls.Filter.Type = 'Contract';
+		SET resultDtls.Filter.Code = 'CONTRACT_LIST';
+		
+		CREATE LASTCHILD OF resultDtls.Filter NAME 'ParmsInfo';
+		FOR acctKind AS origMess.AccountKind[] DO
+			CREATE LASTCHILD OF resultDtls.Filter.ParmsInfo AS curElm Name 'Parm';
+			SET curElm.ParmCode = 'ACC_TYPE';
+			SET curElm.Value = acctKind;
+		END FOR;
+		
+		IF EXISTS(inRoot.PersonInfo.PersonIdExt[]) THEN
+			SET outRoot.MsgData.Information.ObjectFor.ClientIDT.CustomIDT 
+					= THE(SELECT ITEM P.Value FROM inRoot.PersonInfo.PersonIdExt[] AS P WHERE P.Key='IIN');
+			SET outRoot.MsgData.Information.ObjectFor.ClientIDT.CustomCode 
+					= THE(SELECT ITEM P.Value FROM inRoot.PersonInfo.PersonIdExt[] AS P WHERE P.Key='CUSTCODE');
+		END IF;
+		
+		DECLARE status CHARACTER COALESCE(FIELDVALUE(inRoot.Status.ifxca:StatusCode),'');
+		IF status IN ('', '0') THEN
+			CREATE FIELD outRoot.MsgData.Information.DataRs;
+			DECLARE dataRs REFERENCE TO outRoot.MsgData.Information.DataRs;
+			FOR acctInfo AS inRoot.AcctList.AcctInfo[] DO
+				CREATE LASTCHILD OF dataRs AS curElm NAME 'ContractRs';
+				--IF acctInfo.AcctType = 'ABS_CREDIT' THEN
+				--	SET curElm.Contract.ContractIDT.ContractNumber = acctInfo.AcctExtAttr.LoanAttr.DocNum;
+				--ELSE 
+				SET curElm.Contract.ContractIDT.ContractNumber = acctInfo.AcctId;
+				--END IF;
+				SET curElm.Contract.ContractIDT.Client.ClientInfo.FirstName = acctInfo.ClientInfo.PersonInfo.PersonName.FirstName;
+				SET curElm.Contract.ContractIDT.Client.ClientInfo.LastName = acctInfo.ClientInfo.PersonInfo.PersonName.LastName;
+				IF NOT EXISTS(curElm.Contract.ContractIDT.Client.ClientInfo.*[]) THEN
+					SET curElm.Contract.ContractIDT.Client = NULL;
+				END IF;
+				SET curElm.Contract.ContractIDT.MemberId = COALESCE(acctInfo.AcctInfo.ClientInfo.BankInfo.banks:BankId, '');
+				SET curElm.Contract.Currency = COALESCE(acctInfo.AcctCur, '');
+				IF acctInfo.AcctName <> '' THEN
+					SET curElm.Contract.ContractName = acctInfo.AcctName;
+				ELSE
+					SET curElm.Contract.ContractName = curElm.Contract.ContractIDT.ContractNumber;
+				END IF;
+				
+				IF acctInfo.AcctType = 'ABS_CREDIT' AND acctInfo.AcctExtAttr.LoanAttr.ProductName <> '' THEN
+					SET curElm.Contract.Product.ProductName = acctInfo.AcctExtAttr.LoanAttr.ProductName;
+				ELSEIF acctInfo.AcctType <> 'ABS_CREDIT' AND acctInfo.AcctName <> '' THEN
+					SET curElm.Contract.Product.ProductName = acctInfo.AcctName;
+				ELSE
+					SET curElm.Contract.Product.ProductName = curElm.Contract.ContractIDT.ContractNumber;
+				END IF;
+				
+				SET curElm.Contract.Product.AddInfo.Parm.ParmCode = 'ContractCategory';
+				IF acctInfo.AcctType = 'ABS_CREDIT' THEN
+					SET curElm.Contract.Product.AddInfo.Parm.Value = 'Credit';
+				ELSEIF acctInfo.AcctType = 'ABS_DEPOSIT' THEN
+					SET curElm.Contract.Product.AddInfo.Parm.Value = 'Deposit';
+				ELSEIF acctInfo.AcctType = 'ABS_ACCOUNT' THEN
+					SET curElm.Contract.Product.AddInfo.Parm.Value = 'Current';
+				END IF;
+					
+				SET curElm.Contract.DateOpen = FIELDVALUE(acctInfo.StartDate);
+				IF FIELDVALUE(acctInfo.EndDate) <> '' THEN
+					SET curElm.Contract.DateExpiry = FIELDVALUE(acctInfo.EndDate);
+				ELSE
+					SET curElm.Contract.DateExpiry = '1970-01-01';
+				END IF;
+				
+				SET phoneNumber = acctInfo.SMSNotifyPhone;
+				SET convertPhone = REPLACE(phoneNumber,'+','');
+				SET convertPhone = REPLACE(convertPhone,'-','');
+				
+				
+				IF acctInfo.AcctType = 'ABS_ACCOUNT' THEN
+					
+					/*
+					 * 17/07/2014 u06068 Это решение было придумано для отдельной выборки поля ответа от Qpragma. К примеру если от QPragma не придет одно из этих поле, то ответ
+					 * в SBOL должен не содержать поля в ExtraRs вообще. Это задумка для текущих счетов.
+					 */
+					DECLARE Parameters_account CHARACTER '';
+					
+					SET Parameters_account = CASE WHEN acctInfo.AcctBalInfo.BalanceRec.Amount IS NOT NULL THEN
+										'CTOTAL_AMOUNT=' || COALESCE(acctInfo.AcctBalInfo.BalanceRec.Amount,'') || ';'
+										ELSE ''
+									END;
+					SET Parameters_account = Parameters_account || CASE WHEN acctInfo.AcctCur IS NOT NULL THEN
+										'CTOTAL_CURRENCY=' || COALESCE(acctInfo.AcctCur,'') || ';'
+										ELSE ''
+									END;
+					SET Parameters_account = Parameters_account || CASE WHEN acctInfo.IsSmsNotify IS NOT NULL THEN
+										'SP_SMS_AUTH_STATUS=' || COALESCE(acctInfo.IsSmsNotify,'') || ';'
+										ELSE ''
+									END;
+					SET Parameters_account = Parameters_account || CASE WHEN convertPhone IS NOT NULL THEN
+										'SP_SMS_AUTH_PARM_MOBILE_N=' || COALESCE(convertPhone,'') || ';'
+										ELSE ''
+									END;
+					
+					SET curElm.Contract.AddContractInfo.ExtraRs = Parameters_account;
+					
+					/* -- Это старая версия распределение полей 
+					SET curElm.Contract.AddContractInfo.ExtraRs = 
+						'CTOTAL_AMOUNT=' || COALESCE(acctInfo.AcctBalInfo.BalanceRec.Amount,'') || ';' ||
+						'CTOTAL_CURRENCY=' || COALESCE(acctInfo.AcctCur,'') || ';' ||
+						'SP_SMS_AUTH_STATUS=' || COALESCE(acctInfo.IsSmsNotify,'') || ';' ||
+						'SP_SMS_AUTH_PARM_MOBILE_N=' || COALESCE(convertPhone,'') || ';';
+					    -- Конец --*/
+					
+					/*
+					 *  Конец 
+					 */
+					
+				END IF;
+				
+				
+				IF acctInfo.AcctType = 'ABS_CREDIT' THEN
+					
+					/*
+					 * 17/07/2014 u06068 Это решение было придумано для отдельной выборки поля ответа от Qpragma. К примеру если от QPragma не придет одно из этих поле, то ответ
+					 * в SBOL должен не содержать поля в ExtraRs вообще. Это задумка для кредитов
+					 */
+					
+					DECLARE Parameters_credit CHARACTER '';
+					
+					SET Parameters_credit = CASE WHEN acctInfo.AcctExtAttr.LoanAttr.LoanAmount IS NOT NULL THEN
+										'AMOUNT=' || acctInfo.AcctExtAttr.LoanAttr.LoanAmount || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN acctInfo.AcctExtAttr.LoanAttr.LoanTerm IS NOT NULL THEN
+										'SROK=' || acctInfo.AcctExtAttr.LoanAttr.LoanTerm || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN acctInfo.AcctExtAttr.LoanAttr.ProductName IS NOT NULL THEN
+										'PRODUCT_NAME=' || acctInfo.AcctExtAttr.LoanAttr.ProductName || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN acctInfo.AcctCur IS NOT NULL THEN
+										'CURR_CURRENCY=' || acctInfo.AcctCur || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='LOANBAL'),NULL) IS NOT NULL THEN
+										'BALANCE=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='LOANBAL'),'') || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN acctInfo.AcctExtAttr.LoanAttr.LoanRate IS NOT NULL THEN
+										'CREDIT_RATE=' || acctInfo.AcctExtAttr.LoanAttr.LoanRate || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN acctInfo.AcctExtAttr.LoanAttr.EffRate IS NOT NULL THEN
+										'EFF_CREDIT_RATE=' || acctInfo.AcctExtAttr.LoanAttr.EffRate || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN acctInfo.AcctExtAttr.LoanAttr.DocNum IS NOT NULL THEN
+										'DOC_NUM=' || acctInfo.AcctExtAttr.LoanAttr.DocNum || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN acctInfo.StartDate IS NOT NULL THEN
+										'DATE_OPEN=' || acctInfo.StartDate || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN acctInfo.EndDate IS NOT NULL THEN
+										'DATE_CLOSE=' || acctInfo.EndDate || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='FEESET'),NULL) IS NOT NULL THEN
+										'OFCRDC=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='FEESET'),'') || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='FEEGET'),NULL) IS NOT NULL THEN
+										'PREDCR=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='FEEGET'),'') || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='FEELONG'),NULL) IS NOT NULL THEN
+										'PRODLS=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='FEELONG'),'') || ';'
+										ELSE ''
+									END;
+					SET Parameters_credit = Parameters_credit || CASE WHEN acctInfo.AcctExtAttr.LoanAttr.CurrentAcctId IS NOT NULL THEN 
+										'CURRENT_ACC=' || acctInfo.AcctExtAttr.LoanAttr.CurrentAcctId || ';'
+										ELSE ''
+									END;
+					
+					SET curElm.Contract.AddContractInfo.ExtraRs = Parameters_credit;
+					/* -- Это старая версия распределения полей --
+					SET curElm.Contract.AddContractInfo.ExtraRs = 
+						'AMOUNT=' || acctInfo.AcctExtAttr.LoanAttr.LoanAmount || ';' ||
+						'SROK=' || acctInfo.AcctExtAttr.LoanAttr.LoanTerm || ';' ||
+						'PRODUCT_NAME=' || acctInfo.AcctExtAttr.LoanAttr.ProductName || ';' ||
+						'CURR_CURRENCY=' || acctInfo.AcctCur || ';' || 
+						'BALANCE=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='LOANBAL'),'') || ';' || 
+						'CREDIT_RATE=' || acctInfo.AcctExtAttr.LoanAttr.LoanRate || ';' ||
+						'EFF_CREDIT_RATE=' || acctInfo.AcctExtAttr.LoanAttr.EffRate || ';' || 
+						'DOC_NUM=' || acctInfo.AcctExtAttr.LoanAttr.DocNum || ';' ||
+						'DATE_OPEN=' || acctInfo.StartDate || ';' ||
+						'DATE_CLOSE=' || acctInfo.EndDate || ';' ||
+						'OFCRDC=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='FEESET'),'') || ';' ||
+						'PREDCR=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='FEEGET'),'') || ';' ||
+						'PRODLS=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='FEELONG'),'') || ';' ||
+						'CURRENT_ACC=' || acctInfo.AcctExtAttr.LoanAttr.CurrentAcctId || ';';
+						-- Конец -- */
+						
+						/*
+						 * Конец 
+						 */
+										
+				END IF;
+				
+				IF acctInfo.AcctType = 'ABS_DEPOSIT' THEN
+					
+					SET phoneNumber = acctInfo.AcctExtAttr.DepAttr.SMSNotifyPhone;
+					SET convertPhone = REPLACE(phoneNumber,'+','');
+					SET convertPhone = REPLACE(convertPhone,'-','');
+					
+					/*
+					 * 17/07/2014 u06068 Это решение было придумано для отдельной выборки поля ответа от Qpragma. К примеру если от QPragma не придет одно из этих поле, то ответ
+					 * в SBOL должен не содержать поля в ExtraRs вообще. Это задумка для депозитов
+					 */
+					
+					DECLARE Parameters_deposit CHARACTER '';
+					
+					SET Parameters_deposit = CASE WHEN acctInfo.AcctExtAttr.DepAttr.DepType IS NOT NULL THEN
+										'DEPOSIT_TYPE=' || acctInfo.AcctExtAttr.DepAttr.DepType || ';'
+										ELSE ''
+									END;					
+					SET Parameters_deposit = Parameters_deposit || CASE WHEN COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='INITAMT'),NULL) IS NOT NULL THEN
+										'INITIAL_AMOUNT=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='INITAMT'),'') || ';'
+										ELSE ''
+									END;					
+					SET Parameters_deposit = Parameters_deposit || CASE WHEN COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='TOTINT'),NULL) IS NOT NULL THEN
+										'INTEREST_TOTAL=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='TOTINT'),'') || ';'
+										ELSE ''
+									END;					
+					SET Parameters_deposit = Parameters_deposit || CASE WHEN COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='AVAILINT'),NULL) IS NOT NULL THEN
+										'INTEREST_AVAILABLE=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='AVAILINT'),'') || ';'
+										ELSE ''
+									END;					
+					SET Parameters_deposit = Parameters_deposit || CASE WHEN acctInfo.AcctExtAttr.DepAttr.DepRate IS NOT NULL THEN
+										'DEPOSIT_RATE=' || acctInfo.AcctExtAttr.DepAttr.DepRate || ';'
+										ELSE ''
+									END;					
+					SET Parameters_deposit = Parameters_deposit || CASE WHEN acctInfo.AcctExtAttr.DepAttr.EffRate IS NOT NULL THEN
+										'EFF_DEPOSIT_RATE=' || acctInfo.AcctExtAttr.DepAttr.EffRate || ';'
+										ELSE ''
+									END;					
+					SET Parameters_deposit = Parameters_deposit || CASE WHEN recodeYesNoForSBOL(acctInfo.AcctExtAttr.DepAttr.CanAdd) IS NOT NULL THEN
+										'CAN_REPLENISH=' || recodeYesNoForSBOL(acctInfo.AcctExtAttr.DepAttr.CanAdd) || ';'
+										ELSE ''
+									END;
+					SET Parameters_deposit = Parameters_deposit || CASE WHEN acctInfo.StartDate IS NOT NULL THEN
+										'DATE_OPEN=' || acctInfo.StartDate || ';'
+										ELSE ''
+									END;
+					SET Parameters_deposit = Parameters_deposit || CASE WHEN acctInfo.EndDate IS NOT NULL THEN
+										'DATE_CLOSE=' || acctInfo.EndDate || ';'
+										ELSE ''
+									END;
+					SET Parameters_deposit = Parameters_deposit || CASE WHEN acctInfo.AcctExtAttr.DepAttr.StartProlDate IS NOT NULL THEN
+										'DT_PROL1=' || acctInfo.AcctExtAttr.DepAttr.StartProlDate || ';'
+										ELSE ''
+									END;
+					SET Parameters_deposit = Parameters_deposit || CASE WHEN acctInfo.AcctExtAttr.DepAttr.EndProlDate IS NOT NULL THEN
+										'DT_PROL2=' || acctInfo.AcctExtAttr.DepAttr.EndProlDate || ';'
+										ELSE ''
+									END;								
+					SET Parameters_deposit = Parameters_deposit || CASE WHEN acctInfo.AcctExtAttr.DepAttr.IsSmsNotify IS NOT NULL THEN  
+							 	 		'SP_SMS_AUTH_STATUS=' || COALESCE(acctInfo.AcctExtAttr.DepAttr.IsSmsNotify,'') || ';'
+							 			ELSE ''	 
+									END;
+					SET Parameters_deposit = Parameters_deposit || CASE WHEN convertPhone IS NOT NULL THEN  
+							 	 		'SP_SMS_AUTH_PARM_MOBILE_N=' || COALESCE(convertPhone,'') || ';'
+							 			ELSE ''	 
+									 END;					
+					
+					SET curElm.Contract.AddContractInfo.ExtraRs = Parameters_deposit;	
+					/* -- Это старая версия распределения полей --
+					SET curElm.Contract.AddContractInfo.ExtraRs = 
+						'DEPOSIT_TYPE=' || acctInfo.AcctExtAttr.DepAttr.DepType || ';' || 
+						'INITIAL_AMOUNT=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='INITAMT'),'') || ';' ||
+						'INTEREST_TOTAL=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='TOTINT'),'') || ';' ||
+						'INTEREST_AVAILABLE=' || COALESCE(THE(SELECT ITEM B.Amount FROM acctInfo.AcctBalInfo.BalanceRec[] AS B WHERE B.BalType='AVAILINT'),'') || ';' ||
+						'DEPOSIT_RATE=' || acctInfo.AcctExtAttr.DepAttr.DepRate || ';' ||
+						'EFF_DEPOSIT_RATE=' || acctInfo.AcctExtAttr.DepAttr.EffRate || ';' ||
+						'CAN_REPLENISH=' || recodeYesNoForSBOL(acctInfo.AcctExtAttr.DepAttr.CanAdd) || ';' ||
+						'DATE_OPEN=' || acctInfo.StartDate || ';' ||
+						'DATE_CLOSE=' || acctInfo.EndDate || ';' ||
+						'DT_PROL1=' || acctInfo.AcctExtAttr.DepAttr.StartProlDate || ';' ||
+						'DT_PROL2=' || acctInfo.AcctExtAttr.DepAttr.EndProlDate || ';' || 
+						'SP_SMS_AUTH_STATUS=' || COALESCE(acctInfo.AcctExtAttr.DepAttr.IsSmsNotify,'') || ';' ||
+						'SP_SMS_AUTH_PARM_MOBILE_N=' || COALESCE(convertPhone,'') || ';'; 
+						-- конец -- 
+					*/
+					
+					/*
+					 * Конец
+					 */
+						
+						
+				END IF;
+				
+				IF acctInfo.AcctStatus.StatusCode = 'OPEN' THEN 
+					SET curElm.Info.Status.StatusClass 			= 'Valid';
+					SET curElm.Info.Status.StatusCode 			= '00';
+					SET curElm.Info.Status.StatusDetails 		= 'Account OK';
+				ELSEIF acctInfo.AcctStatus.StatusCode = 'CLOSE' THEN
+					SET curElm.Info.Status.StatusClass 			= 'Invalid';
+					SET curElm.Info.Status.StatusCode 			= '14';
+					SET curElm.Info.Status.StatusDetails 		= 'Account Closed';
+				ELSEIF acctInfo.AcctStatus.StatusCode = 'BLOCKED' THEN
+					SET curElm.Info.Status.StatusClass 			= 'Block';
+					SET curElm.Info.Status.StatusCode 			= '05';
+					SET curElm.Info.Status.StatusDetails 		= 'Account Blocked';
+				END IF;
+				
+				CREATE FIELD curElm.Info.Balances;
+				DECLARE balance REFERENCE TO curElm.Info.Balances;
+				DECLARE balanceSrc ROW;
+				SET balanceSrc.isFilled = 'N';				
+				
+				FOR balanceRec AS acctInfo.AcctBalInfo.BalanceRec[] DO
+					IF balanceRec.BalType IN ('MAINDEBT', 'INITAMT') OR (balanceRec.BalType='CURR' AND balanceSrc.isFilled='N') THEN						
+						SET balanceSrc.isFilled 		= 'Y';
+						SET balanceSrc.Name 			= COALESCE(balanceRec.BalName, '');
+						SET balanceSrc.Amount 			= balanceRec.Amount;
+					END IF;
+				END FOR;
+				
+				IF balanceSrc.isFilled='Y' THEN
+					CREATE LASTCHILD OF curElm.Info.Balances AS balance NAME 'Balance';
+					SET balance.Name 		= balanceSrc.Name;
+					SET balance.Type 		= 'AVAILABLE';
+					SET balance.Amount 		= balanceSrc.Amount;
+					SET balance.Currency 	= acctInfo.AcctCur;
+				END IF;
+				
+			END FOR;
+			
+			IF NOT EXISTS(dataRs.*[]) THEN
+				SET outRoot.MsgData.Information.DataRs = NULL;
+			END IF;
+		END IF;
+		
+		CALL UFXCreateStatusFields(InputRoot.XMLNSC, OutputRoot.XMLNSC);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Преобразование ответа из формата МДО в UFX для
+ * операции KZGetPrivateClientCreditPeriods
+ * "Получение списка отчётных периодов".
+ **/
+CREATE COMPUTE MODULE HTTPResponseForSBOL_ConvertMDO2UFX3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetPrivateClientCreditPeriodsRs;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		CALL FillStandardUFXFieldsResp2(InputRoot.XMLNSC, OutputRoot.XMLNSC, Environment.UserProperties, 'CustomerProfile', 'WAY4Profile');
+		
+		SET outRoot.Target.(XMLNSC.Attribute)app 
+				= THE(SELECT ITEM s.AttrValue FROM inRoot.SeviceAttr[] AS s WHERE s.AttrId = 'TAPP');
+		SET outRoot.Target.(XMLNSC.Attribute)role 
+				= THE(SELECT ITEM s.AttrValue FROM inRoot.SeviceAttr[] AS s WHERE s.AttrId = 'TROLE');
+		SET outRoot.MsgData.CustomerProfile.RegNumber = inRoot.RegNumber;
+		SET outRoot.MsgData.CustomerProfile.Requestor.ContractNumber 	= inRoot.AcctReq.AcctId;
+		SET outRoot.MsgData.CustomerProfile.Source.ContractNumber 		= inRoot.AcctSource.AcctId;
+		SET outRoot.MsgData.CustomerProfile.ObjectType = 'HandBook';
+		SET outRoot.MsgData.CustomerProfile.ActionType = 'Inquiry';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.Type = 'HandBook';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.Code = 'PERIOD_FOR_CREDIT';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.ParmsInfo.Parm.ParmCode 	= 'CREDIT';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.ParmsInfo.Parm.Value 	= inRoot.ContractInfo.ContarctNumber;
+		SET outRoot.MsgData.CustomerProfile.ObjectFor.HandBookIDT.Code = 'PERIOD_FOR_ACCOUNT';
+		SET outRoot.MsgData.CustomerProfile.DataRs.HandBook.Code = 'PERIOD_FOR_ACCOUNT';
+		FOR periodRec AS inRoot.PeriodList.PeriodRec[] DO
+			CREATE LASTCHILD OF outRoot.MsgData.CustomerProfile.DataRs.HandBook.HandBookItems NAME 'HandBookItem';
+			SET outRoot.MsgData.CustomerProfile.DataRs.HandBook.HandBookItems.HandBookItem[<].Code = periodRec.PeriodCode;
+			SET outRoot.MsgData.CustomerProfile.DataRs.HandBook.HandBookItems.HandBookItem[<].Value = periodRec.PeriodName;
+		END FOR;
+		
+		CALL UFXCreateStatusFields(InputRoot.XMLNSC, OutputRoot.XMLNSC);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Преобразование ответа из формата МДО в UFX для
+ * операции KZGetCrossCurrRateRq (получение кросс-курса валюты).
+ **/
+CREATE COMPUTE MODULE HTTPResponseForSBOL_ConvertMDO2UFX_CrossCurrRate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE sourceMsg REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetCrossCurrRateRs;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		CALL FillStandardUFXFieldsResp2(InputRoot.XMLNSC, OutputRoot.XMLNSC, Environment.UserProperties, 'CustomerProfile', 'WAY4Profile');
+		
+		SET outRoot.MsgId 							= sourceMsg.MsgId;
+		SET outRoot.Source 							= sourceMsg.Source;
+		SET outRoot.Target 							= sourceMsg.Target;
+		CREATE FIELD outRoot.MsgData.CustomerProfile;
+		DECLARE profileOut REFERENCE TO outRoot.MsgData.CustomerProfile;
+		DECLARE profileIn REFERENCE TO sourceMsg.MsgData.CustomerProfile;
+		SET profileOut.RegNumber					= profileIn.RegNumber;
+		SET profileOut.Requestor					= profileIn.Requestor;
+		SET profileOut.Source						= profileIn.Source;
+		SET profileOut.ObjectType					= profileIn.ObjectType;
+		SET profileOut.ActionType					= profileIn.ActionType;
+		SET profileOut.ResultDtls					= profileIn.ResultDtls;
+		SET profileOut.ObjectFor					= profileIn.ObjectFor;		
+				
+		SET profileOut.DataRs.HandBook.Code 		= 'FX_RATE_ABS';
+		DECLARE items REFERENCE TO outRoot;
+		DECLARE oneItem REFERENCE TO outRoot;
+		CREATE FIELD profileOut.ObjectFor.HandBookIDT.Code.HandBookItems AS items;
+		FOR currRec AS inRoot.CurrList.CurrRec[] DO
+			CREATE LASTCHILD OF items AS oneItem NAME 'HandBookItem';
+			SET oneItem.Code 				= currRec.Code;
+			SET oneItem.Value	 			= currRec.Code;
+			DECLARE addData REFERENCE TO outRoot;
+			DECLARE parm REFERENCE TO outRoot;
+			CREATE FIELD oneItem.Extra.AddData AS addData;			
+			CREATE LASTCHILD OF addData AS parm NAME 'Parm';
+			SET parm.ParmCode 				= 'SOURCE_CURR';
+			SET parm.Value 					= currRec.SourceCurr;
+			CREATE LASTCHILD OF addData AS parm NAME 'Parm';
+			SET parm.ParmCode 				= 'TARGET_CURR';
+			SET parm.Value 					= currRec.TargetCurr;
+			CREATE LASTCHILD OF addData AS parm NAME 'Parm';
+			SET parm.ParmCode 				= 'FX_RATE';
+			SET parm.Value 					= currRec.CurrRate;
+			CREATE LASTCHILD OF addData AS parm NAME 'Parm';
+			SET parm.ParmCode 				= 'DISPLAY_VALUE';
+			SET parm.Value 					= currRec.CurrRate;
+		END FOR;	
+			
+		CALL UFXCreateStatusFields(InputRoot.XMLNSC, OutputRoot.XMLNSC);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Преобразование ответа из формата МДО в UFX для
+ * операции KZGetTransactionsInfo "Получение выписки по счёту".
+ * операции KZGetPrivateClientPaySchedule "Получение графика платежей по кредиту".
+ **/
+CREATE COMPUTE MODULE HTTPResponseForSBOL_ConvertMDO2UFX5
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetTransactionsInfoRs;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE userProps REFERENCE TO Environment.UserProperties;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		CALL FillStandardUFXFieldsResp2(InputRoot.XMLNSC, OutputRoot.XMLNSC, Environment.UserProperties, 'Doc', 'WAY4Doc');
+		
+		SET outRoot.Target			= NULL;
+		
+		SET outRoot.MsgData.Doc.TransType.TransCode.MsgCode	= userProps.MsgData.Doc.TransType.TransCode.MsgCode;
+		SET outRoot.MsgData.Doc.DocRefSet.Parm[]			= userProps.MsgData.Doc.DocRefSet.Parm[];
+		SET outRoot.MsgData.Doc.LocalDt						= userProps.MsgData.Doc.LocalDt;
+		SET outRoot.MsgData.Doc.Requestor.ContractNumber	= userProps.MsgData.Doc.Requestor.ContractNumber;
+		SET outRoot.MsgData.Doc.Requestor.MemberId			= userProps.MsgData.Doc.Requestor.MemberId;
+		SET outRoot.MsgData.Doc.Source.ContractNumber		= userProps.MsgData.Doc.Source.ContractNumber;
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[]			= userProps.MsgData.Doc.ResultDtls.Parm[];
+		SET outRoot.MsgData.Doc.DataRs.Stmt.CustomStmt.html.(XMLNSC.CDataField)text	= FIELDVALUE(userProps.html);
+			
+		CALL UFXCreateStatusFields2(InputRoot.XMLNSC, outRoot.MsgData.Doc);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Преобразование ответа из формата МДО в UFX для
+ * операции KZPrivateMoneyTransferRq "Перевод средств между счетами".
+ **/
+CREATE COMPUTE MODULE HTTPResponseForSBOL_ConvertMDO2UFX_Transfer
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE sourceMsg REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZPrivateMoneyTransferRs;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		CALL FillStandardUFXFieldsResp2(InputRoot.XMLNSC, OutputRoot.XMLNSC, Environment.UserProperties, 'Doc', 'WAY4Doc');
+		
+		SET outRoot.MsgData = sourceMsg.MsgData;
+		DECLARE parm REFERENCE TO outRoot;
+		FOR parm AS outRoot.MsgData.Doc.DocRefSet.Parm[] DO
+			IF parm.ParmCode='AuthCode' THEN 
+				DELETE FIELD parm;
+			END IF;
+		END FOR;
+		IF inRoot.AuthorizationCode <> '' THEN
+			CREATE LASTCHILD OF outRoot.MsgData.Doc.DocRefSet AS parm NAME 'Parm';
+			SET parm.ParmCode 				= 'AuthCode';
+			SET parm.Value					= inRoot.AuthorizationCode;
+		END IF;
+				
+		CALL UFXCreateStatusFields2(InputRoot.XMLNSC, outRoot.MsgData.Doc);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Отмена операции перевода средств (KZPrivateMoneyTransferCanRq)
+ **/
+CREATE COMPUTE MODULE HTTPResponseForSBOL_ConvertMDO2UFX_TransferCancel
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE sourceMsg REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZPrivateMoneyTransferCanRs;
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef FROM sourceMsg;
+		
+		CALL FillStandardUFXFieldsResp2(InputRoot.XMLNSC, OutputRoot.XMLNSC, Environment.UserProperties, 'Doc', 'WAY4Doc');
+		
+		DECLARE authCodeFound BOOLEAN FALSE;
+		DECLARE authParm REFERENCE TO outRef;
+		DECLARE status CHARACTER FIELDVALUE(inRef.Status.*:StatusCode);
+		FOR parm AS outRef.MsgData.Doc.DocRefSet.Parm[] DO
+			IF parm.ParmCode='AuthCode' THEN
+				SET authCodeFound = TRUE;
+				MOVE authParm TO parm; 
+			END IF;
+		END FOR;
+		
+		IF status='0' THEN
+			IF authCodeFound=FALSE  THEN 
+				CREATE LASTCHILD OF outRef.MsgData.Doc.DocRefSet AS authParm NAME 'Parm';
+				SET authParm.ParmCode 		= 'AuthCode';
+			END IF;
+			SET authParm.Value 		= inRef.AuthorizationCode;
+		ELSE 
+			IF authCodeFound=TRUE THEN
+				DETACH authParm;
+			END IF;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Подключение к SMS информированию по продуктам АБС
+ **/
+CREATE COMPUTE MODULE HTTPResponseForSBOL_ConvertMDO2UFX_SMS
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE sourceMsg REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZMngSMSInfoServiceRs;
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef FROM sourceMsg;
+		
+		CALL FillStandardUFXFieldsResp2(InputRoot.XMLNSC, OutputRoot.XMLNSC, Environment.UserProperties, 'Doc', 'WAY4Doc');
+		
+		SET outRef.MsgData = sourceMsg.MsgData;
+		DECLARE parm REFERENCE TO outRef;
+		FOR parm AS outRef.MsgData.Doc.DocRefSet.Parm[] DO
+			IF parm.ParmCode='AuthCode' THEN 
+				DELETE FIELD parm;
+			END IF;
+		END FOR;
+		IF inRef.AuthorizationCode <> '' THEN
+			CREATE LASTCHILD OF outRef.MsgData.Doc.DocRefSet AS parm NAME 'Parm';
+			SET parm.ParmCode 				= 'AuthCode';
+			SET parm.Value					= inRef.AuthorizationCode;
+		END IF;
+				
+		CALL UFXCreateStatusFields2(InputRoot.XMLNSC, outRef.MsgData.Doc);		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Достает идентификатор ответа для HTTP Reply ноды
+ * из UserProperties.
+ **/
+CREATE COMPUTE MODULE HTTPResponseForSBOL_RetrieveReplyId
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier 
+				= CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.RequestIdentifier AS BLOB);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Удаляет заголовки MQ
+ **/
+CREATE COMPUTE MODULE HTTPResponseForSBOL_ClearMqHeaders
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+-- сохраняет результат XSLT-преобразования в переменных среды в строковом виде
+CREATE COMPUTE MODULE HTTPResponseForSBOL_StoreHTMLasBLOB
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.UserProperties.html = CAST(InputRoot.BLOB.BLOB AS CHARACTER CCSID 1208);
+	END;
+END MODULE;
+
+
+

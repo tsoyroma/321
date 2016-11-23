@@ -1,0 +1,2173 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.ipt.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+/**
+ * Восстановление MQ-заголовка исходного сообщения
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_AddOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+		 /*
+		DECLARE Operation  CHARACTER FIELDVALUE(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.OperationName);
+	
+		IF Operation IN ('BillingXTX04') THEN
+			  
+			--SET Environment.UserProperties.Billing       	= InputRoot.ComIbmAggregateReplyBody.REQUEST_FOR_BILLING.XMLNSC.Billing;
+			SET Environment.UserProperties.Pragmanew		= InputRoot.ComIbmAggregateReplyBody.REQUEST_FOR_QP.XMLNSC.KZPaymentProviderRs;			
+			
+			DECLARE outRoot REFERENCE TO OutputRoot;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing'; 
+			
+			DECLARE inRoot REFERENCE TO InputRoot.ComIbmAggregateReplyBody.REQUEST_FOR_BILLING.XMLNSC.Billing;
+			SET outRoot = inRoot;
+			SET Environment.UserProperties.HTTPRequestIdentifier = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.HTTPRequestIdentifier;-- Environment.UserProperties.HTTPIdent;
+		END IF;*/
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+ 
+
+/**
+ * Перенаправление на нужную ветку в соответствии с операцией
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.UserProperties.OperationName;
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'XTX001' THEN
+			SET labelName = 'XTX001';
+		WHEN 'XTX002' THEN
+			SET labelName = 'XTX002';
+		WHEN 'XTX003' THEN
+			SET labelName = 'XTX003';
+		WHEN 'XTX004' THEN
+			SET labelName = 'XTX004';
+		WHEN 'XTX008' THEN
+			SET labelName = 'XTX008';
+		WHEN 'XTX009' THEN
+			SET labelName = 'XTX009';
+		WHEN 'XTX010' THEN
+			SET labelName = 'XTX010';
+		WHEN 'XTX011' THEN
+			SET labelName = 'XTX011';
+		WHEN 'XTX012' THEN
+			SET labelName = 'XTX012';
+		WHEN 'XTX013' THEN
+			SET labelName = 'XTX013';
+		WHEN 'XTX014' THEN
+			SET labelName = 'XTX014';
+		WHEN 'XTX016' THEN
+			SET labelName = 'XTX016';
+		WHEN 'XTX017' THEN
+			SET labelName = 'XTX017';
+		WHEN 'XTX018' THEN
+			SET labelName = 'XTX018';
+		WHEN 'XTX019' THEN
+			SET labelName = 'XTX019';
+		WHEN 'XTX023' THEN
+			SET labelName = 'XTX023';
+		WHEN 'XTX024' THEN
+			SET labelName = 'XTX024';
+		WHEN 'XTX025' THEN
+			SET labelName = 'XTX025';
+		WHEN 'XTX026' THEN
+			SET labelName = 'XTX026';
+		WHEN 'XTX027' THEN
+			SET labelName = 'XTX027';
+		WHEN 'XTX028' THEN
+			SET labelName = 'XTX028';
+		WHEN 'XTX029' THEN
+			SET labelName = 'XTX029';
+		WHEN 'XTX030' THEN
+			SET labelName = 'XTX030';
+		WHEN 'XTX042' THEN
+			SET labelName = 'XTX042';
+		WHEN 'XTX043' THEN
+			SET labelName = 'XTX043';		
+		WHEN 'XTX044' THEN
+			SET labelName = 'XTX044';
+		WHEN 'XTX045' THEN
+			SET labelName = 'XTX045';		
+		WHEN 'XTX046' THEN
+			SET labelName = 'XTX046';
+		WHEN 'XTX047' THEN
+			SET labelName = 'XTX047';
+		WHEN 'XTX048' THEN
+			SET labelName = 'XTX048';
+		WHEN 'XTX049' THEN
+			SET labelName = 'XTX049';		
+		WHEN 'XTX050' THEN
+			SET labelName = 'XTX050';
+		WHEN 'XTX051' THEN
+			SET labelName = 'XTX051';				
+		WHEN 'XTX052' THEN
+			SET labelName = 'XTX052';
+		WHEN 'XTX053' THEN
+			SET labelName = 'XTX053';
+		WHEN 'XTX054' THEN
+			SET labelName = 'XTX054';
+		WHEN 'XTX055' THEN
+			SET labelName = 'XTX055';		
+		WHEN 'XTX056' THEN
+			SET labelName = 'XTX056';
+		WHEN 'XTX057' THEN
+			SET labelName = 'XTX057';	
+		WHEN 'XTX060' THEN
+			SET labelName = 'XTX060';
+		WHEN 'XTX061' THEN
+			SET labelName = 'XTX061';
+		WHEN 'XTX062' THEN
+			SET labelName = 'XTX062';
+		WHEN 'XTX063' THEN
+			SET labelName = 'XTX063';
+		WHEN 'BillingXTX01' THEN
+			SET labelName = 'BillingXTX01';
+		WHEN 'BillingXTX02' THEN
+			SET labelName = 'BillingXTX02';
+		WHEN 'BillingXTX03' THEN
+			SET labelName = 'BillingXTX03';
+		WHEN 'BillingXTX04' THEN
+			SET labelName = 'BillingXTX04';
+		WHEN 'BillingXTX05' THEN
+			SET labelName = 'BillingXTX05';
+		WHEN 'KZPaymentProviderRs' THEN
+			SET labelName = 'BillingXTX04';																	
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		--SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response.status		= fillStatusCode(inRef.Status.*:StatusCode);
+		SET outRef.response."bank-comm"	= inRef.BankCommission;
+		SET outRef.response.err			= FIELDVALUE(inRef.Status.*:StatusDesc);
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response.status			= fillStatusCode(inRef.Status.*:StatusCode);
+		SET outRef.response."bank-comm"		= inRef.BankCommission;
+		SET outRef.response."trx-datetime"	= convertDateForIPT(inRef.TransDT);
+		SET outRef.response.err				= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * XTX008
+*/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response.status		= fillStatusCode(inRef.Status.*:StatusCode);
+		SET outRef.response.ptype		= FIELDVALUE(Environment.UserProperties.ptype);
+		
+		DECLARE vinFound BOOLEAN FALSE;
+		
+        DECLARE outZZZ REFERENCE TO outRef;
+		CREATE FIELD outRef.response.VinCodinfo;
+		FOR inDocumentVIN AS inRef.DocumentVINs.DocumentVIN[] DO
+		    CREATE LASTCHILD OF outRef.response.VinCodinfo AS outZZZ NAME 'VinCods'; 
+
+			SET outZZZ.VinCode         = inDocumentVIN.VINCode;
+			SET outZZZ.CarTransportRid = inDocumentVIN.CarTransportRid;
+			   
+			SET outZZZ.SumCalc         = inDocumentVIN.SumCalc;
+			SET outZZZ.SumSaldo        = inDocumentVIN.SumSaldo;
+			   
+			SET outZZZ.SumPeni         = inDocumentVIN.SumPeni;
+			SET outZZZ.SumTotal        = inDocumentVIN.SumTotal;
+			SET outZZZ.TaxRID          = inDocumentVIN.TaxRID;
+			   
+			SET vinFound = TRUE;
+		END FOR;
+		IF NOT EXISTS(outRef.response.VinCods.*[]) THEN
+			SET outRef.response.VinCods = NULL;
+		END IF;
+		
+		DECLARE gRegistrationNumber CHARACTER;				
+		SET gRegistrationNumber	= FIELDVALUE(Environment.UserProperties.RegistrationNumber);
+
+		DECLARE gIIN CHARACTER;				
+		SET gIIN	= FIELDVALUE(Environment.UserProperties.IIN);
+		
+        DECLARE outASD REFERENCE TO outRef;
+		CREATE FIELD outRef.response.PenaltyInfoAll;
+		FOR inPenaltyInfoAll AS inRef.PenaltyInfoAlls.PenaltyInfoAll[] DO
+		    CREATE LASTCHILD OF outRef.response.PenaltyInfoAll AS outASD NAME 'PenaltyInfo'; 
+
+			SET outASD.PenaltyId          = inPenaltyInfoAll.PenaltyId;
+			SET outASD.CarTransportRid    = inPenaltyInfoAll.CarTransportRid;
+			   
+			SET outASD.AbonentName        = FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+			SET outASD.RegistrationNumber = gRegistrationNumber;
+			   
+			SET outASD.PenaltySum         = inPenaltyInfoAll.PenaltySum;
+			SET outASD.TaxRID             = inPenaltyInfoAll.TaxRID;
+			SET outASD.PenaltyDate        = inPenaltyInfoAll.PenaltyDate;
+			SET outASD.PenaltyReason      = inPenaltyInfoAll.PenaltyReason;
+			SET outASD.ProtocolNumber     = inPenaltyInfoAll.ProtocolNumber;
+		END FOR;
+
+		SET outRef.response."rnn-number"	= gIIN;
+		SET outRef.response.fio				= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+		SET outRef.response."bank-comm"		= inRef.BankCommission;
+		SET outRef.response.err				= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		IF FIELDVALUE(outRef.response.status)='1' AND 
+		   FIELDVALUE(Environment.UserProperties.PaymentCBC) IN ('104401', '104402') AND 
+		   vinFound = FALSE 
+		   THEN
+			SET outRef.response.status		= '0';
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response.status			= fillStatusCode(inRef.Status.*:StatusCode);
+		SET outRef.response."bank-comm"		= inRef.BankCommission;
+		SET outRef.response."trx-datetime"	= convertDateForIPT(inRef.TransDT);
+		SET outRef.response.err				= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT5
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		DECLARE rnn CHARACTER;
+		FOR inPersonIdExt AS inRef.PayerInfo.PersonInfo.PersonIdExt[] DO
+			IF inPersonIdExt.Key = 'RNN' THEN
+				SET rnn = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+
+		SET outRef.response.status			= fillStatusCode(inRef.Status.*:StatusCode);
+		SET outRef.response."rnn-number"	= rnn;
+		SET outRef.response.fio				= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+		SET outRef.response."bank-comm"		= inRef.BankCommission;
+		SET outRef.response."trx-amount"	= inRef.Amount;
+		SET outRef.response.err				= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT6
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response.status			= fillStatusCode(inRef.Status.*:StatusCode);
+		SET outRef.response."bank-comm"		= inRef.BankCommission;
+		SET outRef.response."trx-datetime"	= convertDateForIPT(inRef.TransDT);
+		SET outRef.response.err				= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT7
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response."trx-amount"	= inRef.Amount;
+		SET outRef.response.fio				= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+		SET outRef.response."bank-comm"		= inRef.BankCommission;
+		SET outRef.response.status			= fillStatusCode(inRef.Status.*:StatusCode);
+		SET outRef.response.err				= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT8
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response.status			= fillStatusCode(inRef.Status.*:StatusCode);
+		SET outRef.response."bank-comm"		= inRef.BankCommission;
+		SET outRef.response."trx-datetime"	= convertDateForIPT(inRef.TransDT);
+		SET outRef.response.err				= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_PrepareResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+		
+		-- Проставляем HTTP-идентификатор ответа
+		SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier = CAST(Environment.UserProperties.HTTPRequestIdentifier AS BLOB);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT9
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response.status			= fillStatusCode(inRef.Status.*:StatusCode);
+		SET outRef.response."trx-datetime"	= convertDateForIPT(inRef.TransDT);
+		SET outRef.response.err				= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ на запрос погашения кредита
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX018
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp.(XMLNSC.Attribute)"response-time"			= inRef.RqTm;
+		SET resp.status										= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		DECLARE attrCDB CHARACTER;
+		DECLARE attrCCR CHARACTER;
+		DECLARE attrCR CHARACTER;
+		DECLARE attrDD CHARACTER;
+		DECLARE attrTYPER CHARACTER;
+		FOR extAttr AS inRef.PaymentExtAttr[] DO 
+			IF extAttr.Key = 'CDB' THEN
+				SET attrCDB = extAttr.Value;
+			ELSEIF extAttr.Key = 'CCR' THEN
+				SET attrCCR = extAttr.Value;
+			ELSEIF extAttr.Key = 'CR' THEN
+				SET attrCR = extAttr.ValueD;
+			ELSEIF extAttr.Key = 'DD' THEN
+				SET attrDD = extAttr.Value;
+			ELSEIF extAttr.Key = 'TYPER' THEN
+				SET attrTYPER = extAttr.Value;
+			END IF;
+		END FOR;		
+		
+		IF attrTYPER = '1' THEN
+			-- информационный запрос
+			SET resp.fio										= inRef.PayerInfo.PersonInfo.*:FullName;
+			
+			DECLARE program REFERENCE TO outRef;
+			FOR contract AS inRef.LoanContracts.LoanContract[] DO
+				CREATE LASTCHILD OF resp AS program NAME 'credit-program';
+				SET program.(XMLNSC.Attribute)"name"			= contract.ContractName;
+				SET program."loan-contract"						= contract.ContractNum;
+				SET program."open-date"							= convertDateForIPT(contract.DateOpen);
+				SET program.bal_account							= THE(SELECT ITEM balRec.Amount FROM contract.BalInfo.BalanceRec[] AS balRec WHERE balRec.BalType='BAL');
+				SET program."first-debt"						= THE(SELECT ITEM balRec.Amount FROM contract.BalInfo.BalanceRec[] AS balRec WHERE balRec.BalType='FD');
+				SET program.reward_amt							= THE(SELECT ITEM balRec.Amount FROM contract.BalInfo.BalanceRec[] AS balRec WHERE balRec.BalType='RA');
+				SET program."overdue-first-debt"				= THE(SELECT ITEM balRec.Amount FROM contract.BalInfo.BalanceRec[] AS balRec WHERE balRec.BalType='OFD');
+				SET program.overdue_reward_amt					= THE(SELECT ITEM balRec.Amount FROM contract.BalInfo.BalanceRec[] AS balRec WHERE balRec.BalType='ORA');
+				SET program.peny								= THE(SELECT ITEM balRec.Amount FROM contract.BalInfo.BalanceRec[] AS balRec WHERE balRec.BalType='PENY');
+				SET program."total-amount"						= THE(SELECT ITEM balRec.Amount FROM contract.BalInfo.BalanceRec[] AS balRec WHERE balRec.BalType='TA');
+				SET program.crc_lon								= CodToIsoCur(contract.LoanCurr);
+				SET program.client_account						= contract.AcctId;
+				SET program.cif_account							= contract.CurrentAcctId;
+				SET program."next-date"							= convertDateForIPT(contract.NextPayDate);
+			END FOR;
+			
+			SET resp."bank-comm"								= inRef.BankCommission;
+			
+		ELSEIF attrTYPER = '2' THEN
+			-- расчетный запрос
+			SET resp.crc_card					= CodToIsoCur(attrCDB);
+			SET resp.crc_lon					= CodToIsoCur(attrCCR);
+			SET resp."trx-amount"				= inRef.Amount;			
+			SET resp.kros_kurs					= attrCR;
+			SET resp."next-date"				= attrDD;
+			
+		END IF;
+		
+		SET resp.type_req									= attrTYPER;
+		SET resp.MeterBegin									= FIELDVALUE(inRef.MeterBegin);--Доработка поля по лиминту в 500 000 тг. 05.08.2015 u07357
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ на "Технический запрос ICON, AlmaTV"
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX013
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp.(XMLNSC.Attribute)"response-time"			= inRef.RqTm;
+		SET resp.status										= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."trx-amount"								= inRef.Amount;
+		SET resp.fio										= THE(SELECT ITEM extAttr.Value FROM inRef.PaymentExtAttr[] AS extAttr WHERE extAttr.Key='PRFIO');
+		SET resp."bank-comm"								= inRef.BankCommission;
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ на "Финансовый запрос на оплату ICON, AlmaTV"
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX014
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp.(XMLNSC.Attribute)"response-time"			= inRef.RqTm;
+		SET resp.status										= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."trx-datetime"								= convertDateForIPT(inRef.TransDT);	
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ на "Технический запрос ДДУ по Атырау (и ДДУ по Петропавловску)"
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX025
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp.(XMLNSC.Attribute)"response-time"			= inRef.RqTm;
+		SET resp."trx-amount"								= inRef.Amount;
+		SET resp.fio										= THE(SELECT ITEM extAttr.Value FROM inRef.PaymentExtAttr[] AS extAttr WHERE extAttr.Key='FIO');
+		SET resp."bank-comm"								= inRef.BankCommission;
+		SET resp.status										= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ на "Финансовый запрос погашения кредита"
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX019
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp.(XMLNSC.Attribute)"response-time"			= inRef.RqTm;
+		SET resp.status										= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."trx-datetime"								= convertDateForIPT(inRef.TransDT);		
+		SET resp."trx-num"									= inRef.TransID;
+		--SET resp."bank-comm"								= inRef.BankCommission;		
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ на "Финансовый запрос ДДУ по Атырау (и ДДУ по Петропавловску)"
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX026
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp.(XMLNSC.Attribute)"response-time"			= inRef.RqTm;
+		SET resp.status										= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."bank-comm"								= inRef.BankCommission;		
+		SET resp."trx-num"									= inRef.TransID;
+		SET resp."trx-datetime"								= convertDateForIPT(inRef.TransDT);		
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Технический запрос пополнение текущего счета
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX003
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."bank-comm"								= inRef.BankCommission;
+		SET resp.MeterBegin									= FIELDVALUE(inRef.MeterBegin);--Доработка поля по лиминту в 500 000 тг. 05.08.2015 u07357
+		SET resp.status										= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp.fio										= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."bank-comm"								= inRef.BankCommission;
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос пополнение текущего счета
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX004
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp.status										= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."trx-datetime"								= convertDateForIPT(inRef.TransDT);		
+		SET resp."trx-num"									= inRef.TransID;
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."bank-comm"								= inRef.BankCommission;
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Технический запрос пополнение депозита
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX016
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."account-currency"							= THE(SELECT ITEM extAttr.Value FROM inRef.PaymentExtAttr[] AS extAttr WHERE extAttr.Key='CURR');
+		SET resp.fio										= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+		SET resp."client-rnn"								= THE(SELECT ITEM idExt.Value FROM inRef.PayerInfo.PersonInfo.PersonIdExt[] AS idExt 
+																  WHERE idExt.Key='RNN');
+		SET resp.MeterBegin									= FIELDVALUE(inRef.MeterBegin);--Доработка поля по лиминту в 500 000 тг. 05.08.2015 u07357													
+		SET resp."conversation-rate"						= THE(SELECT ITEM extAttr.ValueD FROM inRef.PaymentExtAttr[] AS extAttr WHERE extAttr.Key='RATE');
+		SET resp.status										= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."trx-amount"								= inRef.Amount;
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос пополнение депозита
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX017
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp.status										= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."trx-datetime"								= convertDateForIPT(inRef.TransDT);		
+		SET resp."trx-num"									= inRef.TransID;
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp.MeterBegin									= FIELDVALUE(inRef.MeterBegin);--Доработка поля по лиминту в 500 000 тг. 05.08.2015 u07357			
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Технический запрос пополнение карт-счета 
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX023
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."status"									= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');	
+		SET resp."bank-comm"								= inRef.BankCommission;
+		SET resp."bank-comm-crc"							= THE(SELECT ITEM extAttr.ValueD FROM inRef.PaymentExtAttr[] AS extAttr WHERE extAttr.Key='BCCURR');
+		SET resp.rate										= THE(SELECT ITEM extAttr.ValueD FROM inRef.PaymentExtAttr[] AS extAttr WHERE extAttr.Key='RATE');
+		SET resp."account-currency"							= THE(SELECT ITEM extAttr.Value FROM inRef.PaymentExtAttr[] AS extAttr WHERE extAttr.Key='CURR');
+		SET resp.account_number								= inRef.ReceiverInfo.AcctInfo.AcctId;
+		SET resp.short_name									= FIELDVALUE(inRef.ReceiverInfo.PersonInfo.*:FullName);
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Финансовый запрос пополнение карт-счета 
+ **/
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX024
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response	 AS resp;
+		
+		SET resp.status										= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."trx-datetime"								= convertDateForIPT(inRef.TransDT);		
+		SET resp."trx-num"									= inRef.TransID;
+		SET resp."bank-comm"								= inRef.BankCommission;				
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+ * Технический запрос по платежу в посольство Литвы
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX052
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+
+		SET resp."status"									= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');	
+		SET resp."type-payment"	                            = inRef.IPTPayType;
+		SET resp."card-number"     							= inRef.CardNumber;
+		SET resp."fio"										= inRef.ReceiverInfo.PersonInfo.inds:FullName;
+		SET resp."trx-amount"								= inRef.AmountDB;
+		SET resp."bank-comm"								= inRef.BankCommission;
+		
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+ 
+/*
+ * Финансовый запрос по платежу в посольство Литвы
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX053
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+
+		SET resp."status"									= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');	
+		SET resp."trx-datetime"	                            = inRef.DateTime;
+		SET resp."trx-num"									= inRef.Id;
+		SET resp."type-payment"	                            = inRef.IPTPayType;
+		SET resp."card-number"     							= inRef.CardNumber;		
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Технический запрос по платежу ТНК "Казхром"
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX046
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+
+		SET resp."status"									= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');	
+		SET resp."type-payment"	                            = inRef.IPTPayType;
+		SET resp."card-number"     							= inRef.CardNumber;
+		SET resp."fio"										= inRef.ReceiverInfo.PersonInfo.inds:FullName;
+		SET resp."bank-comm"								= inRef.BankCommission;
+		SET resp."trx-amount"								= inRef.Amount;
+		
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+/*
+ * Финансовый запрос по платежу ТНК "Казхром"
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX047
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."status"									= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');	
+		SET resp."trx-num"        							= inRef.Id;	
+		SET resp."trx-datetime"								= convertDateForIPT(inRef.DateTime);
+		SET resp."type-payment"	                            = inRef.IPTPayType;
+		SET resp."card-number"     							= inRef.CardNumber;
+		
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+/*
+ * Технический запрос по платежу ТОО "Батыс Энергоресурс" г.Уральск
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX044
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."status"							= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"								= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."trx-amount"           			= inRef.AmountDB;
+		SET resp."type-payment"						= inRef.IPTPayType;
+		SET resp."card-number"						= inRef.CardNumber;
+		SET resp."bank-comm"                        = inRef.BankCommission;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Финансовый запрос по платежу ТОО "Батыс Энергоресурс" г.Уральск
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX045
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."status"									= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');	
+		SET resp."trx-datetime"								= convertDateForIPT(inRef.DateTime);
+		SET resp."trx-num"        							= inRef.Id;	
+		SET resp."type-payment"	                            = inRef.IPTPayType;
+		SET resp."card-number"     							= inRef.CardNumber;
+		
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Технический запрос по платежу ТОО "Оралтехосмотр" г.Уральск
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX050
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."status"							= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"								= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."trx-amount"           			= inRef.AmountDB;
+		SET resp."type-payment"						= inRef.IPTPayType;
+		SET resp."card-number"						= inRef.CardNumber;
+		SET resp."bank-comm"                        = inRef.BankCommission;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Финансовый запрос по платежу ТОО "Оралтехосмотр" г.Уральск
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX051
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."status"									= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');	
+		SET resp."trx-datetime"								= convertDateForIPT(inRef.DateTime);
+		SET resp."trx-num"        							= inRef.Id;	
+		SET resp."type-payment"	                            = inRef.IPTPayType;
+		SET resp."card-number"     							= inRef.CardNumber;
+				
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Технический запрос по платежу МИРАС
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX056
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response."trx-amount"	= inRef.Amount;
+		SET outRef.response.fio				= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+		SET outRef.response."bank-comm"		= inRef.BankCommission;
+		SET outRef.response.status			= fillStatusCode(inRef.Status.*:StatusCode);
+		SET outRef.response.err				= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Финансовый запрос по платежу МИРАС
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX057
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+
+		SET resp."status"							= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"								= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."trx-datetime"						= convertDateForIPT(inRef.DateTime);
+		SET resp."trx-num"							= inRef.Id;
+		SET resp."type-payment"						= inRef.IPTPayType;
+		SET resp."card-number"						= inRef.CardNumber;
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Технический запрос по платежу МАБ
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX048
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."status"							= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"								= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."type-payment"						= inRef.IPTPayType;
+		SET resp."card-number"						= inRef.CardNumber;
+		SET resp."fio"								= inRef.ReceiverInfo.PersonInfo.inds:FullName;
+		SET resp."trx-amount"           			= inRef.AmountDB;
+		SET resp."bank-comm"                        = inRef.BankCommission;
+		
+		RETURN TRUE;
+		
+	END;
+END MODULE;
+
+/*
+ * Финансовый запрос по платежу МАБ
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX049
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."status"							= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"								= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."trx-datetime"						= convertDateForIPT(inRef.DateTime);
+		SET resp."trx-num"							= inRef.Id;
+		SET resp."type-payment"						= inRef.IPTPayType;
+		SET resp."card-number"						= inRef.CardNumber;
+				
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Технический запрос по платежу ТОО "Аксайжылукуат" г.Аксай ЗКО
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX042
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."status"							= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"								= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."type-payment"						= inRef.IPTPayType;
+		SET resp."card-number"						= inRef.CardNumber;
+		SET resp."fio"								= inRef.ReceiverInfo.PersonInfo.inds:FullName;
+		SET resp."bank-comm"                        = inRef.BankCommission;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Финансовый запрос по платежу ТОО "Аксайжылукуат" г.Аксай ЗКО
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX043
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."status"							= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"								= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."trx-datetime"						= convertDateForIPT(inRef.DateTime);
+		SET resp."trx-num"							= inRef.Id;
+		SET resp."type-payment"						= inRef.IPTPayType;
+		SET resp."card-number"						= inRef.CardNumber;
+		SET resp."bank-comm"						= inRef.BankCommission;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Технический запрос по платежу РГКП "Центр по недвижимости по ЗКО" г.Уральск
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX054
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+
+		SET resp."status"									= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');	
+		SET resp."type-payment"	                            = inRef.IPTPayType;
+		SET resp."card-number"     							= inRef.CardNumber;
+		SET resp."fio"										= inRef.ReceiverInfo.PersonInfo.inds:FullName;
+		SET resp."trx-amount"								= inRef.AmountDB;
+		SET resp."bank-comm"								= inRef.BankCommission;
+		
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Финансовый запрос по платежу РГКП "Центр по недвижимости по ЗКО" г.Уральск
+ */
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX055
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+		
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+		
+		SET resp."status"									= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp.err										= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');	
+		SET resp."trx-num"        							= inRef.Id;	
+		SET resp."trx-datetime"								= convertDateForIPT(inRef.DateTime);
+		SET resp."type-payment"	                            = inRef.IPTPayType;
+		SET resp."card-number"     							= inRef.CardNumber;
+		SET resp."bank-comm"								= inRef.BankCommission;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX060
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response."trx-amount"	= inRef.Amount;
+		SET outRef.response."Details"		= inRef.PaymentTarget;
+		SET outRef.response.fio				= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+		SET outRef.response."bank-comm"		= inRef.BankCommission;
+		SET outRef.response.status			= fillStatusCode(inRef.Status.*:StatusCode);
+		SET outRef.response.err				= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX061
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+
+		SET resp."status"							= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"								= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."trx-datetime"						= convertDateForIPT(inRef.DateTime);
+		SET resp."trx-num"							= inRef.Id;
+		SET resp."type-payment"						= inRef.IPTPayType;
+		SET resp."card-number"						= inRef.CardNumber;
+		SET resp."Details"						= inRef.PaymentTarget;
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_BillingXTX01
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		  
+		CALL CopyMessageHeaders(InputRoot, OutputRoot); 
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC'; 
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing'; 
+		
+		SET outRoot	=	inRoot;
+		
+		SET outRoot.(XMLNSC.Attribute)"xtype" = 'BillingXTX01';
+		SET outRoot.Body.objects = null;
+		
+		FOR inobj AS inRoot.Body.objects.object[] DO
+		DECLARE outobject REFERENCE TO outRoot; 
+		CREATE LASTCHILD OF outRoot.Body.objects AS outobject NAME 'object';
+		SET outobject.(XMLNSC.Attribute)"name" = inobj."name";
+		SET outobject.(XMLNSC.Attribute)"title" = inobj."title";
+		SET outobject.(XMLNSC.Attribute)"type" = inobj."type";
+		SET outobject.(XMLNSC.Attribute)"value" = inobj."value";
+		IF EXISTS(inobj.objects[]) THEN
+		FOR insubobj AS inobj.objects.object[] DO
+		DECLARE outsubobj REFERENCE TO outobject;
+		CREATE LASTCHILD OF outobject AS outsubobj NAME 'subobject';
+		SET outsubobj.(XMLNSC.Attribute)"name" =  insubobj."name";
+		SET outsubobj.(XMLNSC.Attribute)"title" =  insubobj."title";
+		SET outsubobj.(XMLNSC.Attribute)"type" =  insubobj."type";
+		SET outsubobj.(XMLNSC.Attribute)"value" =  insubobj."value";
+		END FOR;
+		END IF;
+		END FOR; 
+				
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_BillingXTX02
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		IF Environment.UserProperties.RepeatRq = 'ResponseFromQP' THEN
+			IF InputRoot.XMLNSC.*[<].Status.*:StatusCode = '0' THEN
+				CALL CopyMessageHeaders(InputRoot, OutputRoot); 
+		
+				DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+				DECLARE outRoot REFERENCE TO OutputRoot;
+				DECLARE inRequest REFERENCE TO Environment.UserProperties.RepeatRqForBilling;
+				CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+				CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE); 
+				CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'message'; 
+		
+				SET outRoot.(XMLNSC.Attribute)"reference" = inRequest.reference;
+				SET outRoot.(XMLNSC.Attribute)"uid" = inRequest.uid;
+				SET outRoot.(XMLNSC.Attribute)"datetime" = inRequest.datetime;
+				SET outRoot.(XMLNSC.Attribute)"xtype" = inRequest.xtype;
+				--SET outRoot	=	inRequest;
+				DECLARE req REFERENCE TO outRoot;
+				CREATE LASTCHILD OF outRoot AS req NAME 'request';
+				DECLARE bil REFERENCE TO req;
+				CREATE LASTCHILD OF req AS bil NAME 'Billing';
+				SET bil.(XMLNSC.Attribute)"UID" =  inRequest.request.Billing.UID;
+				SET bil.(XMLNSC.Attribute)"SystemId" =  inRequest.request.Billing.SystemId;
+				SET bil.GroupId = inRequest.request.Billing.GroupId;
+				SET bil.Source = inRequest.request.Billing.Source;
+				SET bil.TID = inRequest.request.Billing.TID;
+				
+				
+				IF EXISTS(inRequest.request.Billing.Pay[]) THEN
+					DECLARE pay REFERENCE TO bil;
+					CREATE LASTCHILD OF bil AS pay NAME 'Pay';
+					SET pay.(XMLNSC.Attribute)"Ref" =  inRequest.request.Billing.Pay.Ref;
+					SET pay.(XMLNSC.Attribute)"Sign" =  inRequest.request.Billing.Pay.Sign;
+					SET pay.(XMLNSC.Attribute)"Online" =  inRequest.request.Billing.Pay.Online;
+					SET pay.(XMLNSC.Attribute)"Type" =  inRequest.request.Billing.Pay.Type;
+					SET pay.(XMLNSC.Attribute)"Mode" =  inRequest.request.Billing.Pay.Mode;
+					
+					SET pay.Target = inRequest.request.Billing.Pay.Target;
+					SET pay.Amount = inRequest.request.Billing.Pay.Amount;
+					SET pay.Currency = inRequest.request.Billing.Pay.Currency;
+					SET pay.DateTime = inRequest.request.Billing.Pay.DateTime;
+					SET pay.Description = inRequest.request.Billing.Pay.Description;
+					
+				END IF;
+				
+				SET bil.Code = inRequest.request.Billing.Code;
+				
+				DECLARE body REFERENCE TO bil;
+				CREATE LASTCHILD OF bil AS body NAME 'Body';
+				DECLARE objs REFERENCE TO body;
+				CREATE LASTCHILD OF body AS objs NAME 'objects';
+				DECLARE objit REFERENCE TO objs;
+				DECLARE subobjit REFERENCE TO objs;
+				FOR inobj AS inRequest.request.Billing.Body.objects.object[] DO					
+					CREATE LASTCHILD OF objs AS objit NAME 'object';
+					SET objit.(XMLNSC.Attribute)"name"	= inobj.name;
+					SET objit.(XMLNSC.Attribute)"title"	= inobj.title;
+					SET objit.(XMLNSC.Attribute)"type"	= inobj.type;
+					SET objit.(XMLNSC.Attribute)"value" = inobj.value;					
+				END FOR;
+				FOR insubobj AS inRequest.request.Billing.Body.objects.subobject[] DO
+					CREATE LASTCHILD OF objs AS subobjit NAME 'subobject';
+					SET subobjit.(XMLNSC.Attribute)"name"	= insubobj.name;
+					SET subobjit.(XMLNSC.Attribute)"title"	= insubobj.title;
+					SET subobjit.(XMLNSC.Attribute)"type"	= insubobj.type;
+					SET subobjit.(XMLNSC.Attribute)"value" 	= insubobj.value;
+				END FOR;
+				
+				CREATE LASTCHILD OF objs AS objit NAME 'object';
+					SET objit.(XMLNSC.Attribute)"name"	= 'FIO';
+					SET objit.(XMLNSC.Attribute)"title"	= 'ФИО';
+					SET objit.(XMLNSC.Attribute)"type"	= 'string';
+					SET objit.(XMLNSC.Attribute)"value" = InputRoot.XMLNSC.*[<].FIO;	
+				--SET outRoot.(XMLNSC.Attribute)"xtype" = 'BillingXTX02';
+			
+				SET outRoot.HTTPRequestIdentifier 	=	Environment.UserProperties.HTTPRequestIdentifier;
+				SET outRoot.OperUID 			=	Environment.UserProperties.OperUID;
+				PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+				RETURN FALSE;
+			ELSE
+			
+			CALL CopyMessageHeaders(InputRoot, OutputRoot); 
+		
+			DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+			DECLARE outRoot REFERENCE TO OutputRoot;
+		
+			CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+			CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE); 
+			CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing'; 
+		
+			SET outRoot	=	inRoot;
+		
+			SET outRoot.(XMLNSC.Attribute)"xtype" = 'BillingXTX02';
+			
+				
+			SET outRoot.Body.objects = null;
+			DECLARE subobject REFERENCE TO outRoot;		
+			DECLARE subobject_detail REFERENCE TO outRoot;	
+			DECLARE result REFERENCE TO outRoot;
+			CREATE LASTCHILD OF outRoot AS result NAME 'Result';
+			SET result.Status = inRoot.Status.*:StatusDesc;
+			SET result.Status.(XMLNSC.Attribute)"Id" =  inRoot.Status.*:StatusCode;
+			FOR items AS inRoot.Body.objects.object[] DO
+			
+			--IF FIELDVALUE(items.(XMLNSC.Attribute)"name") <> 'Regions' THEN
+			
+				IF NOT EXISTS(items.objects[]) THEN	
+					CREATE LASTCHILD OF outRoot.Body.objects AS subobject NAME 'object';
+				
+					SET subobject.(XMLNSC.Attribute)"name" = FIELDVALUE(items.(XMLNSC.Attribute)"name");
+					SET subobject.(XMLNSC.Attribute)"title" = FIELDVALUE(items.(XMLNSC.Attribute)"title");
+					SET subobject.(XMLNSC.Attribute)"type" = FIELDVALUE(items.(XMLNSC.Attribute)"type");
+					SET subobject.(XMLNSC.Attribute)"value" = FIELDVALUE(items.(XMLNSC.Attribute)"value");
+				
+				ELSE
+				
+					CREATE LASTCHILD OF outRoot.Body.objects AS subobject NAME 'object';
+				
+					SET subobject.(XMLNSC.Attribute)"name" = FIELDVALUE(items.(XMLNSC.Attribute)"name");--'Regions';
+					SET subobject.(XMLNSC.Attribute)"title" = FIELDVALUE(items.(XMLNSC.Attribute)"title");
+					SET subobject.(XMLNSC.Attribute)"type" = FIELDVALUE(items.(XMLNSC.Attribute)"type");
+					SET subobject.(XMLNSC.Attribute)"value" = FIELDVALUE(items.(XMLNSC.Attribute)"value");
+				
+					FOR subitems AS items.objects.object[] DO
+					
+						CREATE LASTCHILD OF subobject AS subobject_detail NAME 'subobject';
+					
+						SET subobject_detail.(XMLNSC.Attribute)"name" = FIELDVALUE(subitems.(XMLNSC.Attribute)"name");
+						IF FIELDVALUE(subitems.(XMLNSC.Attribute)"title") <> '' THEN
+							SET subobject_detail.(XMLNSC.Attribute)"title" = FIELDVALUE(subitems.(XMLNSC.Attribute)"title");
+						END IF;
+					
+						IF FIELDVALUE(subitems.(XMLNSC.Attribute)"type") <> '' THEN	
+							SET subobject_detail.(XMLNSC.Attribute)"type" = FIELDVALUE(subitems.(XMLNSC.Attribute)"type");
+						END IF;
+						
+						SET subobject_detail.(XMLNSC.Attribute)"value" = FIELDVALUE(subitems.(XMLNSC.Attribute)"value"); 		
+						END FOR;		
+					END IF;					
+				END FOR;	
+				--PROPAGATE TO TERMINAL 'out' DELETE NONE;
+				RETURN TRUE;			
+			END IF;
+			
+			
+
+		ELSE
+			
+		CALL CopyMessageHeaders(InputRoot, OutputRoot); 
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE); 
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing'; 
+		
+		SET outRoot	=	inRoot;
+		
+		SET outRoot.(XMLNSC.Attribute)"xtype" = 'BillingXTX02';
+			
+		SET outRoot.Body.objects = null;
+		DECLARE subobject REFERENCE TO outRoot;		
+		DECLARE subobject_detail REFERENCE TO outRoot;	
+				----------
+				/*
+		FOR items AS inRoot.Body.objects.object[] DO
+			IF FIELDVALUE(items.(XMLNSC.Attribute)"name") = 'FIO' THEN
+				CREATE LASTCHILD OF outRoot.Body.objects AS subobject NAME 'object';
+				
+				SET subobject.(XMLNSC.Attribute)"name" = FIELDVALUE(items.(XMLNSC.Attribute)"name");
+				SET subobject.(XMLNSC.Attribute)"title" = FIELDVALUE(items.(XMLNSC.Attribute)"title");
+				SET subobject.(XMLNSC.Attribute)"type" = FIELDVALUE(items.(XMLNSC.Attribute)"type");
+				SET subobject.(XMLNSC.Attribute)"value" = FIELDVALUE(items.(XMLNSC.Attribute)"value");
+			END IF;
+		END FOR;
+		FOR items AS inRoot.Body.objects.object[] DO
+			IF FIELDVALUE(items.(XMLNSC.Attribute)"name") = 'STDID' THEN
+				CREATE LASTCHILD OF outRoot.Body.objects AS subobject NAME 'object';
+				
+				SET subobject.(XMLNSC.Attribute)"name" = FIELDVALUE(items.(XMLNSC.Attribute)"name");
+				SET subobject.(XMLNSC.Attribute)"title" = FIELDVALUE(items.(XMLNSC.Attribute)"title");
+				SET subobject.(XMLNSC.Attribute)"type" = FIELDVALUE(items.(XMLNSC.Attribute)"type");
+				SET subobject.(XMLNSC.Attribute)"value" = FIELDVALUE(items.(XMLNSC.Attribute)"value");
+			END IF;
+		END FOR;
+		FOR items AS inRoot.Body.objects.object[] DO
+			IF FIELDVALUE(items.(XMLNSC.Attribute)"name") = 'STDGRPID' THEN
+				CREATE LASTCHILD OF outRoot.Body.objects AS subobject NAME 'object';
+				
+				SET subobject.(XMLNSC.Attribute)"name" = FIELDVALUE(items.(XMLNSC.Attribute)"name");
+				SET subobject.(XMLNSC.Attribute)"title" = FIELDVALUE(items.(XMLNSC.Attribute)"title");
+				SET subobject.(XMLNSC.Attribute)"type" = FIELDVALUE(items.(XMLNSC.Attribute)"type");
+				SET subobject.(XMLNSC.Attribute)"value" = FIELDVALUE(items.(XMLNSC.Attribute)"value");
+			END IF;
+		END FOR;
+		FOR items AS inRoot.Body.objects.object[] DO
+			IF FIELDVALUE(items.(XMLNSC.Attribute)"name") = 'TARGET' THEN
+				CREATE LASTCHILD OF outRoot.Body.objects AS subobject NAME 'object';
+				
+				SET subobject.(XMLNSC.Attribute)"name" = FIELDVALUE(items.(XMLNSC.Attribute)"name");
+				SET subobject.(XMLNSC.Attribute)"title" = FIELDVALUE(items.(XMLNSC.Attribute)"title");
+				SET subobject.(XMLNSC.Attribute)"type" = FIELDVALUE(items.(XMLNSC.Attribute)"type");
+				SET subobject.(XMLNSC.Attribute)"value" = FIELDVALUE(items.(XMLNSC.Attribute)"value");
+			END IF;
+		END FOR;
+		FOR items AS inRoot.Body.objects.object[] DO
+			IF FIELDVALUE(items.(XMLNSC.Attribute)"name") = 'SRVNAME' THEN
+				CREATE LASTCHILD OF outRoot.Body.objects AS subobject NAME 'object';
+				
+				SET subobject.(XMLNSC.Attribute)"name" = FIELDVALUE(items.(XMLNSC.Attribute)"name");
+				SET subobject.(XMLNSC.Attribute)"title" = FIELDVALUE(items.(XMLNSC.Attribute)"title");
+				SET subobject.(XMLNSC.Attribute)"type" = FIELDVALUE(items.(XMLNSC.Attribute)"type");
+				SET subobject.(XMLNSC.Attribute)"value" = FIELDVALUE(items.(XMLNSC.Attribute)"value");
+			END IF;
+		END FOR;
+		FOR items AS inRoot.Body.objects.object[] DO
+			IF FIELDVALUE(items.(XMLNSC.Attribute)"name") = 'Srvcode' THEN
+				CREATE LASTCHILD OF outRoot.Body.objects AS subobject NAME 'object';
+				
+				SET subobject.(XMLNSC.Attribute)"name" = FIELDVALUE(items.(XMLNSC.Attribute)"name");
+				SET subobject.(XMLNSC.Attribute)"title" = FIELDVALUE(items.(XMLNSC.Attribute)"title");
+				SET subobject.(XMLNSC.Attribute)"type" = FIELDVALUE(items.(XMLNSC.Attribute)"type");
+				SET subobject.(XMLNSC.Attribute)"value" = FIELDVALUE(items.(XMLNSC.Attribute)"value");
+			END IF;	
+		END FOR;		
+		*/
+			
+		FOR items AS inRoot.Body.objects.object[] DO
+			
+			--IF FIELDVALUE(items.(XMLNSC.Attribute)"name") <> 'Regions' THEN
+			
+			IF NOT EXISTS(items.objects[]) THEN	
+				CREATE LASTCHILD OF outRoot.Body.objects AS subobject NAME 'object';
+				
+				SET subobject.(XMLNSC.Attribute)"name" = FIELDVALUE(items.(XMLNSC.Attribute)"name");
+				SET subobject.(XMLNSC.Attribute)"title" = FIELDVALUE(items.(XMLNSC.Attribute)"title");
+				SET subobject.(XMLNSC.Attribute)"type" = FIELDVALUE(items.(XMLNSC.Attribute)"type");
+				SET subobject.(XMLNSC.Attribute)"value" = FIELDVALUE(items.(XMLNSC.Attribute)"value");
+				
+			ELSE
+				
+				CREATE LASTCHILD OF outRoot.Body.objects AS subobject NAME 'object';
+				
+				SET subobject.(XMLNSC.Attribute)"name" = FIELDVALUE(items.(XMLNSC.Attribute)"name");--'Regions';
+				SET subobject.(XMLNSC.Attribute)"title" = FIELDVALUE(items.(XMLNSC.Attribute)"title");
+				SET subobject.(XMLNSC.Attribute)"type" = FIELDVALUE(items.(XMLNSC.Attribute)"type");
+				SET subobject.(XMLNSC.Attribute)"value" = FIELDVALUE(items.(XMLNSC.Attribute)"value");
+				
+				FOR subitems AS items.objects.object[] DO
+					
+					CREATE LASTCHILD OF subobject AS subobject_detail NAME 'subobject';
+					
+					SET subobject_detail.(XMLNSC.Attribute)"name" = FIELDVALUE(subitems.(XMLNSC.Attribute)"name");
+					IF FIELDVALUE(subitems.(XMLNSC.Attribute)"title") <> '' THEN
+						SET subobject_detail.(XMLNSC.Attribute)"title" = FIELDVALUE(subitems.(XMLNSC.Attribute)"title");
+					END IF;
+					
+					IF FIELDVALUE(subitems.(XMLNSC.Attribute)"type") <> '' THEN	
+						SET subobject_detail.(XMLNSC.Attribute)"type" = FIELDVALUE(subitems.(XMLNSC.Attribute)"type");
+					END IF;
+						
+					SET subobject_detail.(XMLNSC.Attribute)"value" = FIELDVALUE(subitems.(XMLNSC.Attribute)"value"); 		
+				END FOR;		
+			END IF;					
+		END FOR;
+		
+		--PROPAGATE TO TERMINAL 'out' DELETE NONE; 
+		RETURN TRUE;
+		END IF;
+		
+		
+		--RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_BillingXTX03
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot); 
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE); 
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing'; 
+		
+		SET outRoot	=	inRoot;
+		
+		SET outRoot.(XMLNSC.Attribute)"xtype" = 'BillingXTX03';
+		SET outRoot.Body.objects = null;
+		
+		FOR inobj AS inRoot.Body.objects.object[] DO
+		DECLARE outobject REFERENCE TO outRoot; 
+		CREATE LASTCHILD OF outRoot.Body.objects AS outobject NAME 'object';
+		SET outobject.(XMLNSC.Attribute)"name" = inobj."name";
+		SET outobject.(XMLNSC.Attribute)"title" = inobj."title";
+		SET outobject.(XMLNSC.Attribute)"type" = inobj."type";
+		IF EXISTS(inobj.objects[]) THEN
+		FOR insubobj AS inobj.objects.object[] DO
+		DECLARE outsubobj REFERENCE TO outobject;
+		CREATE LASTCHILD OF outobject AS outsubobj NAME 'subobject';
+		SET outsubobj.(XMLNSC.Attribute)"name" =  insubobj."name";
+		SET outsubobj.(XMLNSC.Attribute)"title" =  insubobj."title";
+		SET outsubobj.(XMLNSC.Attribute)"type" =  insubobj."type";
+		END FOR;
+		END IF;
+		END FOR; 
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_BillingXTX04
+	CREATE FUNCTION Main() RETURNS BOOLEAN  
+	BEGIN
+		IF Environment.UserProperties.RepeatRq = 'ResponseFromQP' THEN
+			IF InputRoot.XMLNSC.*[<].Status.*:StatusCode = '0' OR CONTAINS(InputRoot.XMLNSC.*[<].Status.*:StatusDesc, FIELDVALUE(Environment.UserProperties.RqUID)) THEN
+				CALL CopyMessageHeaders(InputRoot, OutputRoot); 
+		
+				DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+				DECLARE outRoot REFERENCE TO OutputRoot;
+				DECLARE inRequest REFERENCE TO Environment.UserProperties.RepeatRqForBilling;
+				CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+				CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE); 
+				CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'message'; 
+				SET outRoot.(XMLNSC.Attribute)"reference" = inRequest.reference;
+				SET outRoot.(XMLNSC.Attribute)"uid" = inRequest.uid;
+				SET outRoot.(XMLNSC.Attribute)"datetime" = inRequest.datetime;
+				SET outRoot.(XMLNSC.Attribute)"xtype" = inRequest.xtype;
+				
+				DECLARE req REFERENCE TO outRoot;
+				CREATE LASTCHILD OF outRoot AS req NAME 'request';
+				DECLARE bil REFERENCE TO req;
+				CREATE LASTCHILD OF req AS bil NAME 'Billing';
+				SET bil.(XMLNSC.Attribute)"UID" =  inRequest.request.Billing.UID;
+				SET bil.(XMLNSC.Attribute)"SystemId" =  inRequest.request.Billing.SystemId;
+				SET bil.GroupId = inRequest.request.Billing.GroupId;
+				SET bil.Source = inRequest.request.Billing.Source;
+				SET bil.TID = inRequest.request.Billing.TID;
+				
+				
+				IF EXISTS(inRequest.request.Billing.Pay[]) THEN
+					DECLARE pay REFERENCE TO bil;
+					CREATE LASTCHILD OF bil AS pay NAME 'Pay';
+					SET pay.(XMLNSC.Attribute)"Ref" =  inRequest.request.Billing.Pay.Ref;
+					SET pay.(XMLNSC.Attribute)"Sign" =  inRequest.request.Billing.Pay.Sign;
+					SET pay.(XMLNSC.Attribute)"Online" =  inRequest.request.Billing.Pay.Online;
+					SET pay.(XMLNSC.Attribute)"Type" =  inRequest.request.Billing.Pay.Type;
+					
+					
+					SET pay.Target = inRequest.request.Billing.Pay.Target;
+					SET pay.Amount = inRequest.request.Billing.Pay.Amount;
+					SET pay.Commission = inRequest.request.Billing.Pay.Commission;
+					SET pay.Currency = inRequest.request.Billing.Pay.Currency;
+					SET pay.DateTime = inRequest.request.Billing.Pay.DateTime;
+					SET pay.Description = inRequest.request.Billing.Pay.Description;
+					
+				END IF;
+				
+				SET bil.Code = inRequest.request.Billing.Code;
+				
+				DECLARE body REFERENCE TO bil;
+				CREATE LASTCHILD OF bil AS body NAME 'Body';
+				DECLARE objs REFERENCE TO body;
+				CREATE LASTCHILD OF body AS objs NAME 'objects';
+				DECLARE objit REFERENCE TO objs;
+				DECLARE subobjit REFERENCE TO objs;
+				FOR inobj AS inRequest.request.Billing.Body.objects.object[] DO					
+					CREATE LASTCHILD OF objs AS objit NAME 'object';
+					SET objit.(XMLNSC.Attribute)"name"	= inobj.name;
+					SET objit.(XMLNSC.Attribute)"title"	= inobj.title;
+					SET objit.(XMLNSC.Attribute)"type"	= inobj.type;
+					SET objit.(XMLNSC.Attribute)"value" = inobj.value;					
+				END FOR;
+				FOR insubobj AS inRequest.request.Billing.Body.objects.subobject[] DO
+					CREATE LASTCHILD OF objs AS subobjit NAME 'subobject';
+					SET subobjit.(XMLNSC.Attribute)"name"	= insubobj.name;
+					SET subobjit.(XMLNSC.Attribute)"title"	= insubobj.title;
+					SET subobjit.(XMLNSC.Attribute)"type"	= insubobj.type;
+					SET subobjit.(XMLNSC.Attribute)"value" 	= insubobj.value;
+				END FOR;
+				SET bil.PID = inRequest.request.Billing.PID;
+				SET outRoot.HTTPRequestIdentifier 	=	Environment.UserProperties.HTTPRequestIdentifier;
+				SET outRoot.OperUID 			=	Environment.UserProperties.OperUID;
+				PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+				RETURN FALSE;
+			ELSE
+				------------------------------------------------------------
+				
+				CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+				DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+				DECLARE outRoot REFERENCE TO OutputRoot;
+
+				CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+				CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+				CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing';
+
+				SET outRoot = inRoot;
+
+				SET outRoot.(XMLNSC.Attribute)"xtype" = 'BillingXTX04';				
+
+
+				SET outRoot.Body.objects = null;
+				DECLARE subobject REFERENCE TO outRoot;
+				DECLARE subobject_detail REFERENCE TO outRoot;
+				DECLARE result REFERENCE TO outRoot;
+				CREATE LASTCHILD OF outRoot AS result NAME 'Result';
+				SET result.Status = inRoot.Status.*:StatusDesc;
+				SET result.Status.(XMLNSC.Attribute)"Id" = inRoot.Status.*:StatusCode;
+				FOR items AS inRoot.Body.objects.object[] DO
+					--IF FIELDVALUE(items.(XMLNSC.Attribute)"name") <> 'Regions' THEN
+
+					IF NOT EXISTS(items.objects[]) THEN
+						CREATE LASTCHILD OF outRoot.Body.objects AS subobject NAME 'object';
+
+						SET subobject.(XMLNSC.Attribute)"name" = FIELDVALUE(items.(XMLNSC.Attribute)"name");
+						SET subobject.(XMLNSC.Attribute)"title" = FIELDVALUE(items.(XMLNSC.Attribute)"title");
+						SET subobject.(XMLNSC.Attribute)"type" = FIELDVALUE(items.(XMLNSC.Attribute)"type");
+						SET subobject.(XMLNSC.Attribute)"value" = FIELDVALUE(items.(XMLNSC.Attribute)"value");
+
+					ELSE
+
+						CREATE LASTCHILD OF outRoot.Body.objects AS subobject NAME 'object';
+
+						SET subobject.(XMLNSC.Attribute)"name" = FIELDVALUE(items.(XMLNSC.Attribute)"name"); --'Regions';
+						SET subobject.(XMLNSC.Attribute)"title" = FIELDVALUE(items.(XMLNSC.Attribute)"title");
+						SET subobject.(XMLNSC.Attribute)"type" = FIELDVALUE(items.(XMLNSC.Attribute)"type");
+						SET subobject.(XMLNSC.Attribute)"value" = FIELDVALUE(items.(XMLNSC.Attribute)"value");
+
+						FOR subitems AS items.objects.object[] DO
+
+							CREATE LASTCHILD OF subobject AS subobject_detail NAME 'subobject';
+
+							SET subobject_detail.(XMLNSC.Attribute)"name" = FIELDVALUE(subitems.(XMLNSC.Attribute)"name");
+							IF FIELDVALUE(subitems.(XMLNSC.Attribute)"title") <> '' THEN
+								SET subobject_detail.(XMLNSC.Attribute)"title" = FIELDVALUE(subitems.(XMLNSC.Attribute)"title");
+							END IF;
+
+							IF FIELDVALUE(subitems.(XMLNSC.Attribute)"type") <> '' THEN
+								SET subobject_detail.(XMLNSC.Attribute)"type" = FIELDVALUE(subitems.(XMLNSC.Attribute)"type");
+							END IF;
+
+							SET subobject_detail.(XMLNSC.Attribute)"value" = FIELDVALUE(subitems.(XMLNSC.Attribute)"value");
+						END FOR;
+					END IF;
+				END FOR;
+				--PROPAGATE TO TERMINAL 'out' DELETE NONE;
+				RETURN TRUE;
+			END IF;			
+		ELSE 
+			
+		CALL CopyMessageHeaders(InputRoot, OutputRoot); 
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE pragmanew_res REFERENCE TO Environment.UserProperties.Pragmanew;
+
+		--DECLARE coderes CHARACTER;
+		--DECLARE idres CHARACTER; 
+		DECLARE stat REFERENCE TO pragmanew_res.Status;
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE); 
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing'; 
+		
+		SET outRoot	=	inRoot;
+		--DECLARE resout REFERENCE TO outRoot.Billing.Result.Status;
+		SET outRoot.Body.objects = null;
+		
+		FOR inobj AS inRoot.Body.objects.object[] DO
+		DECLARE outobject REFERENCE TO outRoot; 
+		CREATE LASTCHILD OF outRoot.Body.objects AS outobject NAME 'object';
+		SET outobject.(XMLNSC.Attribute)"name" = inobj."name";
+		SET outobject.(XMLNSC.Attribute)"title" = inobj."title";
+		SET outobject.(XMLNSC.Attribute)"type" = inobj."type";
+		SET outobject.(XMLNSC.Attribute)"value" = inobj."value";
+		IF EXISTS(inobj.objects[]) THEN
+		FOR insubobj AS inobj.objects.object[] DO
+		DECLARE outsubobj REFERENCE TO outobject;
+		CREATE LASTCHILD OF outobject AS outsubobj NAME 'subobject';
+		SET outsubobj.(XMLNSC.Attribute)"name" =  insubobj."name";
+		SET outsubobj.(XMLNSC.Attribute)"title" =  insubobj."title";
+		SET outsubobj.(XMLNSC.Attribute)"type" =  insubobj."type";
+		SET outsubobj.(XMLNSC.Attribute)"value" =  insubobj."value";
+		END FOR;
+		END IF;
+		END FOR; 
+		
+		
+		SET outRoot.(XMLNSC.Attribute)"xtype" = 'BillingXTX04';
+		DECLARE varStatusBilling CHARACTER;
+		SET varStatusBilling = outRoot.Result.Status.Id;
+		DECLARE varStatusDesc CHARACTER;
+		SET varStatusDesc = stat.*:StatusCode;
+		
+		IF OutputRoot.XMLNSC.Billing.Result.Status.(XMLNSC.Attribute)"Id"   = '1' OR OutputRoot.XMLNSC.Billing.Result.Status.(XMLNSC.Attribute)"Id"   = '-500' THEN
+			SET outRoot.Result.Status      = 'Success'; 
+			SET outRoot.Result.Status.(XMLNSC.Attribute)"Id"  = '1';	
+		END IF;
+/*
+		IF stat.*:StatusCode <> '0' THEN
+			SET outRoot.Result.Status =  stat.*:StatusDesc;
+			SET outRoot.Result.Status.(XMLNSC.Attribute)"Id" = varStatusDesc;
+		END IF;
+		
+		IF CONTAINS(stat.*:StatusDesc, FIELDVALUE(Environment.UserProperties.RqUID)) and OutputRoot.XMLNSC.Billing.Result.Status.(XMLNSC.Attribute)"Id"   = '1' THEN
+			SET outRoot.Result.Status      = 'Success'; 
+			SET outRoot.Result.Status.(XMLNSC.Attribute)"Id"  = '1';
+		END IF;
+		
+		IF OutputRoot.XMLNSC.Billing.Result.Status.(XMLNSC.Attribute)"Id"   = '-500' and varStatusDesc = '0' THEN
+			SET outRoot.Result.Status = 'Success';   
+			SET outRoot.Result.Status.(XMLNSC.Attribute)"Id"  = '1';			
+		END IF;
+		
+		IF OutputRoot.XMLNSC.Billing.Result.Status.(XMLNSC.Attribute)"Id"   = '-500' and  CONTAINS(stat.*:StatusDesc, FIELDVALUE(Environment.UserProperties.RqUID)) THEN
+			SET outRoot.Result.Status = 'Success';   
+			SET outRoot.Result.Status.(XMLNSC.Attribute)"Id"  = '1';			
+		END IF;
+		
+		IF OutputRoot.XMLNSC.Billing.Result.Status.(XMLNSC.Attribute)"Id"   = '1' and  varStatusDesc = '0' THEN
+			SET outRoot.Result.Status = 'Success';   
+			SET outRoot.Result.Status.(XMLNSC.Attribute)"Id"  = '1';			
+		END IF;
+		*/
+		RETURN TRUE;
+			
+		END IF;		
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX062
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response."trx-amount"	= inRef.Amount;
+		SET outRef.response."Details"		= inRef.PaymentTarget;
+		SET outRef.response.fio				= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+		SET outRef.response."bank-comm"		= inRef.BankCommission;
+		SET outRef.response.status			= fillStatusCode(inRef.Status.*:StatusCode);
+		SET outRef.response.err				= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_XTX063
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		DECLARE resp REFERENCE TO outRef;
+		CREATE FIELD outRef.response AS resp;
+
+		SET resp."status"							= fillStatusCode(inRef.Status.*:StatusCode);
+		SET resp."err"								= COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),'');
+		SET resp."trx-datetime"						= convertDateForIPT(inRef.DateTime);
+		SET resp."trx-num"							= inRef.Id;
+		SET resp."type-payment"						= inRef.IPTPayType;
+		SET resp."card-number"						= inRef.CardNumber;
+		SET resp."Details"							= inRef.PaymentTarget;
+		CALL copyPaymentAttributes(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForIPT_ConvertMDO2IPT_BillingXTX05
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot); 
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE); 
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'Billing'; 
+		
+		SET outRoot	=	inRoot;
+		
+		SET outRoot.(XMLNSC.Attribute)"xtype" = 'BillingXTX05';
+		
+		RETURN TRUE;
+
+	END;
+END MODULE;

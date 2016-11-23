@@ -1,0 +1,342 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.bss.esql
+
+
+/*
+  Копирование данных из сообщений типа KZGetCurrencyRateRs и KZExpCurrencyRateRq (MDO) в блок CURRENCYRATES (BSS) 
+*/
+CREATE PROCEDURE CopyCurrRatesFromMDO(
+		IN inRef REFERENCE, 
+		IN outRef REFERENCE)
+BEGIN
+	DECLARE curElm REFERENCE TO outRef;
+		
+	-- Копирование данных в формат BSS
+	FOR curRate AS inRef.CurrRateData.CurrRate[] DO
+		CREATE LASTCHILD OF outRef AS curElm NAME 'RATE';
+		SET curElm.BASECURRCODE 		= curRate.BaseCurrCode;
+		SET curElm.CURRCODE 			= curRate.CurrCode;
+		SET curElm.DATETIMERATEBEG 		= curRate.StartDt;
+		SET curElm.DATETIMERATEEND 		= curRate.EndDt;
+		IF curRate.RateType = 'discount' THEN
+		SET curElm.RATE 				= curRate.RateValue;
+		ELSE
+			SET curElm.RATE 				= '0';
+		END IF;	
+		SET curElm.RATEBUY 				= curRate.RateBuy;
+		SET curElm.RATESELL 			= curRate.RateSell;
+		SET curElm.RATETYPE 			= curRate.RateType;
+		SET curElm.SCALE 				= curRate.Scale;
+	END FOR;
+	
+END;
+
+/*
+  Формирование квитка (KVT) на основе блока PayDocStatusInfo (MDO) 
+*/
+CREATE PROCEDURE CopyPayDocFromMDO(
+		IN payDoc REFERENCE, 
+		IN kvt REFERENCE)
+BEGIN
+	-- Копирование данных в формат BSS
+	SET kvt.DOCTYPE 			= 'BALANCE';
+	SET kvt.DOCREF 				= COALESCE(FIELDVALUE(payDoc.Doc.PayDocInfo.DocRef),'BALANCE');
+	SET kvt.NOTEFROMBANK 		= payDoc.Doc.PayDocInfo.Note;
+	SET kvt.RECEIVEROFFICIALS 	= payDoc.Doc.PayDocInfo.DocCreator;
+	SET kvt.STATUS 				= payDoc.DocStatus;	
+	
+	DECLARE acct REFERENCE TO kvt;
+	FOR acctInfo AS payDoc.AcctInfo[] DO 
+		CREATE LASTCHILD OF kvt AS acct NAME 'ACCOUNTINFO';	
+		DECLARE balanceCurrent CHARACTER;
+		DECLARE balanceArrest CHARACTER;
+		DECLARE balanceBlocked CHARACTER;
+		FOR bRec AS acctInfo.AcctBalInfo.BalanceRec[] DO
+			IF bRec.BalType = 'CURRENT' THEN
+				SET balanceCurrent = bRec.Amount;
+			ELSEIF bRec.BalType = 'ARREST' THEN 
+				SET balanceArrest = bRec.Amount;
+			ELSEIF bRec.BalType = 'BLOCKED' THEN 
+				SET balanceBlocked = bRec.Amount;
+			END IF;
+		END FOR;		
+		
+		SET acct.ACCOUNT		= acctInfo.AcctId;
+		SET acct.BALANCE		= balanceCurrent;
+		SET acct.ARREST			= balanceArrest;
+		SET acct.BLOCKED		= balanceBlocked;
+	END FOR;
+END;
+
+
+/*
+  Копирование данных из сообщений типа PAYDOC/PAYDOCCUR в формат MDO 
+*/
+CREATE PROCEDURE CopyPayDocToMDO(
+		IN inRef REFERENCE, 
+		IN outRef REFERENCE)
+BEGIN 	
+	SET outRef.TransType = inRef.TYPE;
+	SET outRef.PayerInfo.AcctInfo.AcctId 		= inRef.DocumentData.*:Payer.*:Account;
+	SET outRef.PayerInfo.AcctInfo.AcctCur		= inRef.DocumentData.*:Payer.*:CURRCODE;
+	SET outRef.PayerInfo.OrgInfo.orgs:Name		= inRef.DocumentData.*:Payer.*:NAME;
+		
+	DECLARE orgId REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef.PayerInfo.OrgInfo AS orgId NAME 'OrgIdExt';
+	SET orgId.Key 								= 'RNN';
+	SET orgId.Value 							= inRef.DocumentData.*:Payer.*:RNN;
+	CREATE LASTCHILD OF outRef.PayerInfo.OrgInfo AS orgId NAME 'OrgIdExt';
+	SET orgId.Key 								= 'BIC';
+	SET orgId.Value 							= inRef.DocumentData.*:PAYERBIC;
+		
+	DECLARE orgAttr REFERENCE TO outRef;
+	DECLARE person REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef.PayerInfo.OrgInfo AS orgAttr NAME 'OrgAttr';
+	CREATE LASTCHILD OF orgAttr AS person NAME 'KeyPerson';
+	SET person.PositionKey 						= 'CHIEF';
+	SET person.PersonInfo.inds:FullName			= inRef.DocumentData.*:Payer.*:CHIEF;
+	CREATE LASTCHILD OF orgAttr AS person NAME 'KeyPerson';
+	SET person.PositionKey 						= 'ACC';
+	SET person.PersonInfo.inds:FullName			= inRef.DocumentData.*:Payer.*:MAINBK;
+		
+	SET orgAttr.Resident 						= inRef.DocumentData.*:Payer.*:IRS; 
+	SET orgAttr.EcSector 						= inRef.DocumentData.*:Payer.*:SECO; 
+		
+	SET outRef.PayerInfo.ChkPay					= inRef.DocumentData.*:Payer.*:CHKPAY;
+	SET outRef.PayerInfo.AcctComId.AcctId 		= inRef.DocumentData.*:Payer.*:AccountCom;
+	SET outRef.PayerInfo.AcctComId.AcctCur 		= inRef.DocumentData.*:Payer.*:CurrCom;
+		
+	SET outRef.ReceiverInfo.AcctInfo.AcctId 	= inRef.DocumentData.*:Receiver.*:Account;
+	SET outRef.ReceiverInfo.AcctInfo.AcctCur 	= inRef.DocumentData.*:Receiver.*:CURRCODE;
+		
+	SET outRef.ReceiverInfo.OrgInfo.orgs:Name 	= inRef.DocumentData.*:Receiver.*:NAME;
+	DECLARE contInfo REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef.ReceiverInfo.OrgInfo AS contInfo NAMESPACE orgs NAME 'CompositeContactInfo';
+	SET contInfo.ifxca:ContactInfoType								= 'LegalAddress';
+	SET contInfo.ifxca:ContactInfo.ifxca:PostAddr.commons:Addr1 	= inRef.DocumentData.*:Receiver.*:ADDRESS;
+	SET contInfo.ifxca:ContactInfo.ifxca:PostAddr.commons:Country 	= inRef.DocumentData.*:Receiver.*:COUNTRY;
+	
+	SET outRef.ReceiverInfo.OrgInfo.orgs:KPPInfo.ifxca:TaxId 		= inRef.DocumentData.*:Receiver.*:KPP;
+		
+	CREATE LASTCHILD OF outRef.ReceiverInfo.OrgInfo AS orgId NAME 'OrgIdExt';
+	SET orgId.Key 								= 'RNN';
+	SET orgId.Value 							= inRef.DocumentData.*:Receiver.*:RNN;
+	CREATE LASTCHILD OF outRef.ReceiverInfo.OrgInfo AS orgId NAME 'OrgIdExt';
+	SET orgId.Key 								= 'BIC';
+	SET orgId.Value 							= inRef.DocumentData.*:RECEIVERBIC;
+		
+	CREATE LASTCHILD OF outRef.ReceiverInfo.OrgInfo AS orgAttr NAME 'OrgAttr';
+	SET orgAttr.Resident 						= inRef.DocumentData.*:Receiver.*:IRS; 
+	SET orgAttr.EcSector 						= inRef.DocumentData.*:Receiver.*:SECO; 
+	SET orgAttr.Country 						= inRef.DocumentData.*:Receiver.*:COUNTRY; 
+		
+	DECLARE bankInfo REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef.ReceiverInfo AS bankInfo name 'BankInfo';
+	SET bankInfo.banks:BankId 					= inRef.DocumentData.*:BANKRECIEVER.*:Receiverbic; 
+	SET bankInfo.banks:CorAcctId 				= inRef.DocumentData.*:BANKRECIEVER.*:CorAccount; 
+	SET bankInfo.banks:Name 					= inRef.DocumentData.*:BANKRECIEVER.*:NAME; 
+	SET bankInfo.banks:PostAddr.commons:Addr1	= inRef.DocumentData.*:BANKRECIEVER.*:ADDRESS; 
+	SET bankInfo.banks:PostAddr.commons:Country	= inRef.DocumentData.*:BANKRECIEVER.*:COUNTRY; 
+		
+	CREATE FIELD outRef.PayDocInfo.CorrBankInfo AS bankInfo;
+	SET bankInfo.banks:BankId 					= inRef.DocumentData.*:CORRBANK.*:Receiverbic;
+	SET bankInfo.banks:CorAcctId 				= inRef.DocumentData.*:CORRBANK.*:CorAccount;
+	SET bankInfo.banks:Name		 				= inRef.DocumentData.*:CORRBANK.*:NAME;
+	SET bankInfo.banks:PostAddr.commons:Addr1	= inRef.DocumentData.*:CORRBANK.*:ADDRESS;
+	SET bankInfo.banks:PostAddr.commons:Country	= inRef.DocumentData.*:CORRBANK.*:COUNTRY;
+		
+	DECLARE payDoc REFERENCE TO outRef.PayDocInfo;
+	SET payDoc.PurposeCode						= inRef.DocumentData.*:Details.*:KNP;
+	SET payDoc.OperKind							= inRef.DocumentData.*:Details.*:VO;
+	SET payDoc.DocNum							= inRef.DocumentData.*:Details.*:NUM;
+	SET payDoc.DocDate							= inRef.DocumentData.*:Details.*:DATE;
+	SET payDoc.ContractNum						= inRef.DocumentData.*:Details.*:NumCont;
+	SET payDoc.ContractDate						= inRef.DocumentData.*:Details.*:DateCont;
+	SET payDoc.ContractUN						= inRef.DocumentData.*:Details.*:UNK;
+	SET payDoc.Invoice							= inRef.DocumentData.*:Details.*:Invoice;
+	SET payDoc.ContractUNDate					= inRef.DocumentData.*:Details.*:DateUnk;
+	SET payDoc.SendMethod						= inRef.DocumentData.*:Details.*:SEND;
+	SET payDoc.SpecialService					= inRef.DocumentData.*:Details.*:PSO;
+	SET payDoc.IncomeCode						= inRef.DocumentData.*:Details.*:BCLASS;
+	SET payDoc.Urgent							= inRef.DocumentData.*:Details.*:URGENT;
+	SET payDoc.IsLoanPay						= inRef.DocumentData.*:Details.*:LON;
+	SET payDoc.OperTypeCode						= inRef.DocumentData.*:Details.*:CodeTypeOper;
+	SET payDoc.Assign							= inRef.DocumentData.*:Details.*:ASSIGN;
+	SET payDoc.Note								= inRef.DocumentData.*:Notification;
+	SET payDoc.DocRef							= inRef.DocumentData.OPERREF;
+	SET payDoc.RefDate							= inRef.DocumentData.DATE;
+	SET payDoc.CurrCode							= inRef.DocumentData.CURRCODE;
+	SET payDoc.Amount							= inRef.DocumentData.AMOUNT;
+	SET payDoc.PayerCommission					= inRef.DocumentData.PAYERCOM;
+	
+	CREATE FIELD outRef.ClientList;
+	DECLARE clientData REFERENCE TO outRef;
+	FOR clientInf AS inRef.ITEMS.*:ClientInf[] DO
+		CREATE LASTCHILD OF outRef.ClientList AS clientData NAME 'ClientData';
+		SET clientData.PersonInfo.inds:PersonName.inds:LastName		= clientInf.*:SURNAME;
+		SET clientData.PersonInfo.inds:PersonName.inds:FirstName	= clientInf.*:NAME;
+		SET clientData.PersonInfo.inds:PersonName.inds:MiddleName	= clientInf.*:FIRSTNAME;
+		SET clientData.PersonInfo.inds:BirthDt						= clientInf.*:DATE;
+		SET clientData.Amount										= clientInf.*:AMOUNT;
+		SET clientData.RegData										= clientInf.*:RegData;
+		SET clientData.AcctId										= clientInf.*:LIC;
+		SET clientData.CurrCode										= clientInf.*:CURRCODE;
+		SET clientData.Period										= clientInf.*:PERIOD;
+	END FOR;
+	
+END;
+
+
+/*
+  Формирование выписки (Statement) на основе блока StatementInfo (MDO) 
+*/
+CREATE PROCEDURE CopyStatementFromMDO(IN inRef REFERENCE, IN outRef REFERENCE, IN rqTm CHARACTER)
+BEGIN
+		SET outRef.OPERREF 							= inRef.StatementRef;
+		SET outRef.OPERREF 							= inRef.StatementRef;
+		CASE inRef.StatementType 
+		WHEN '1' THEN 
+			SET outRef.CODE 						= 'FINAL'; 
+		WHEN '0' THEN 
+			SET outRef.CODE 						= 'PRESENT';  
+		END CASE;
+		SET outRef.CLIENTID.BIC						= inRef.AcctInfo.BankInfo.*:BankId;
+		SET outRef.CLIENTID.ACCOUNT					= inRef.AcctInfo.AcctId;
+		DECLARE inBal REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS inBal NAME 'INBALANCE';
+		SET inBal.OPERATIONTYPE						= 'msc';
+		SET inBal.DATE								= inRef.DateStart;
+		SET inBal.CURRCODE							= inRef.AcctInfo.AcctCur;
+		SET inBal.AMOUNT							= THE(SELECT ITEM balRec.Amount FROM inRef.AcctInfo.AcctBalInfo.BalanceRec[] AS balRec 
+														  WHERE balRec.BalType='INBAL');
+		SET inBal.ARREST							= COALESCE(THE(SELECT ITEM balRec.Amount FROM inRef.AcctInfo.AcctBalInfo.BalanceRec[] AS balRec 
+														  WHERE balRec.BalType='ARRESTED'), '0');
+		SET inBal.BLOCKED							= COALESCE(THE(SELECT ITEM balRec.Amount FROM inRef.AcctInfo.AcctBalInfo.BalanceRec[] AS balRec 
+														  WHERE balRec.BalType='BLOCKED'), '0');
+
+		DECLARE doc REFERENCE TO outRef;
+		DECLARE payer REFERENCE TO outRef;
+		
+		FOR inDoc AS inRef.Document[] DO
+			CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+			CREATE FIELD doc.Payer AS payer;
+			SET payer.Account 							= inDoc.PayerInfo.AcctInfo.AcctId;
+			SET payer.CURRCODE 							= inRef.AcctInfo.AcctCur;
+			SET payer.RNN 								= THE(SELECT ITEM orgId.Value FROM inDoc.PayerInfo.OrgInfo.OrgIdExt[] 
+															  AS orgId WHERE orgId.Key='RNN');
+			SET payer.CHIEF 							= THE(SELECT ITEM keyPerson.PersonInfo.inds:FullName 
+															  FROM inDoc.PayerInfo.OrgInfo.OrgAttr.KeyPerson[] 
+															  AS keyPerson WHERE keyPerson.PositionKey='CHIEF');		
+			SET payer.MAINBK 							= THE(SELECT ITEM keyPerson.PersonInfo.inds:FullName 
+															  FROM inDoc.PayerInfo.OrgInfo.OrgAttr.KeyPerson[] 
+															  AS keyPerson WHERE keyPerson.PositionKey='ACC');
+			SET payer.IRS 								= inDoc.PayerInfo.OrgInfo.OrgAttr.Resident;
+			SET payer.SECO 								= inDoc.PayerInfo.OrgInfo.OrgAttr.EcSector;
+			SET payer.NAME 								= FIELDVALUE(inDoc.PayerInfo.OrgInfo.orgs:Name);
+			SET payer.AccountCom 						= '';
+			SET payer.CurrCom 							= '';
+			SET payer.CHKPAY 							= '';
+			
+			SET doc.PAYERBIC 							= THE(SELECT ITEM orgId.Value FROM inDoc.PayerInfo.OrgInfo.OrgIdExt[] 
+															  AS orgId WHERE orgId.Key='BIC');
+			SET doc.RECEIVERBIC 						= THE(SELECT ITEM orgId.Value FROM inDoc.ReceiverInfo.OrgInfo.OrgIdExt[] 
+															  AS orgId WHERE orgId.Key='BIC');
+			SET doc.PayerBankName 						= FIELDVALUE(inDoc.PayerInfo.BankInfo.*:Name);
+			SET doc.ReceiverBankName 					= FIELDVALUE(inDoc.ReceiverInfo.BankInfo.*:Name);
+						
+			DECLARE receiver REFERENCE TO outRef;
+			CREATE LASTCHILD OF doc AS receiver NAME 'Receiver';
+			SET receiver.Account 						= inDoc.ReceiverInfo.AcctInfo.AcctId;
+			SET receiver.CURRCODE 						= inRef.AcctInfo.AcctCur;
+			SET receiver.RNN 							= THE(SELECT ITEM orgId.Value FROM inDoc.ReceiverInfo.OrgInfo.OrgIdExt[] 
+															  AS orgId WHERE orgId.Key='RNN');
+			SET receiver.IRS 							= inDoc.ReceiverInfo.OrgInfo.OrgAttr.Resident;
+			SET receiver.SECO 							= inDoc.ReceiverInfo.OrgInfo.OrgAttr.EcSector;
+			SET receiver.NAME 							= FIELDVALUE(inDoc.ReceiverInfo.OrgInfo.orgs:Name);
+			SET receiver.COUNTRY 						= '';
+			SET receiver.ADDRESS 						= '';
+			SET receiver.KPP 							= '';
+			
+			DECLARE bank REFERENCE TO outRef;
+			CREATE LASTCHILD OF doc AS bank NAME 'BANKRECEIVER';
+			SET bank.Receiverbic 						= '';
+			SET bank.CorAccount 						= '';
+			SET bank.NAME 								= '';
+			SET bank.COUNTRY 							= '';
+			SET bank.ADDRESS 							= '';
+			CREATE LASTCHILD OF doc AS bank NAME 'CORRBANK';
+			SET bank.Receiverbic 						= '';
+			SET bank.CorAccount 						= '';
+			SET bank.NAME 								= '';
+			SET bank.COUNTRY 							= '';
+			SET bank.ADDRESS 							= '';
+			
+			DECLARE details REFERENCE TO outRef;
+			CREATE LASTCHILD OF doc AS details NAME 'Details';
+			SET details.KNP 							= inDoc.AssignCode;
+			SET details.VO 								= inDoc.OperCode;
+			SET details.NUM 							= inDoc.DocNum;
+			SET details.DATE 							= inDoc.DocDate;
+			SET details.NumCont 						= '';
+			SET details.DateCont 						= '';
+			SET details.UNK 							= '';
+			SET details.Invoice 						= '';
+			SET details.DateUnk 						= '';
+			SET details.SEND 							= inDoc.SendMethod;
+			SET details.PSO 							= '1';
+			SET details.BCLASS 							= inDoc.CBC;
+			IF inRef.Document.PayOrder = '01' THEN  
+				SET details.URGENT 						= '1';
+			ELSE
+				SET details.URGENT 						= '2';
+			END IF;
+			SET details.LON 							= '';
+			SET details.CodeTypeOver 					= '';		
+			SET details.ASSIGN 							= inDoc.Assign;
+			SET doc.Notification						= '';
+			
+			DECLARE operation REFERENCE TO outRef;
+			CREATE LASTCHILD OF doc AS operation NAME 'OPERATION';
+			SET operation.DATE 							= inDoc.OperDate;
+			SET operation.TIME 							= inDoc.OperTime;
+			SET operation.DCPROPERTY 					= inDoc.OperType;
+			SET operation.CURRCODE 						= inRef.AcctInfo.AcctCur;
+			SET operation.AMOUNT 						= inDoc.Amount;
+			SET operation.TYPE 							= '';
+			SET operation.PAYERBIC 						= THE(SELECT ITEM orgId.Value FROM inDoc.PayerInfo.OrgInfo.OrgIdExt[] 
+															  AS orgId WHERE orgId.Key='BIC');
+			SET operation.PRIORITY 						= inDoc.Priority;
+			SET operation.CLIENTOPERREF 				= inDoc.DocRef;
+			SET operation.CONFIRMREF 					= inDoc.AnsRef;
+			SET operation.CODEGROUND 					= inDoc.AssignCode;
+			
+			SET doc.ValueDate							= inDoc.ValDate;
+			SET doc.ACCEPTADATE							= SUBSTRING(rqTm FROM 1 FOR 10);
+		END FOR;
+		
+		
+		DECLARE outBal REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS outBal NAME 'OUTBALANCE';
+		SET outBal.OPERATIONTYPE					= 'msc';
+		SET outBal.DATE								= inRef.DateEnd;
+		SET outBal.CURRCODE							= inRef.AcctInfo.AcctCur;
+		SET outBal.AMOUNT							= THE(SELECT ITEM balRec.Amount FROM inRef.AcctInfo.AcctBalInfo.BalanceRec[] 
+														  AS balRec WHERE balRec.BalType='OUTBAL');
+		
+		DECLARE addData REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS addData NAME 'AdditionalData';
+		SET addData.DebitTurnover					= THE(SELECT ITEM balRec.Amount FROM inRef.AcctInfo.AcctBalInfo.BalanceRec[] 
+														  AS balRec WHERE balRec.BalType='DEBT');
+		SET addData.CreditTurnover					= THE(SELECT ITEM balRec.Amount FROM inRef.AcctInfo.AcctBalInfo.BalanceRec[] 
+														  AS balRec WHERE balRec.BalType='CREDT');
+		SET addData.DebitTurnoverNat				= THE(SELECT ITEM balRec.Amount FROM inRef.AcctInfo.AcctBalInfo.BalanceRec[] 
+														  AS balRec WHERE balRec.BalType='DEBTN');
+		SET addData.CreditTurnoverNat				= THE(SELECT ITEM balRec.Amount FROM inRef.AcctInfo.AcctBalInfo.BalanceRec[] 
+														  AS balRec WHERE balRec.BalType='CREDTN');
+		SET addData.InBalanceNat					= THE(SELECT ITEM balRec.Amount FROM inRef.AcctInfo.AcctBalInfo.BalanceRec[] 
+														  AS balRec WHERE balRec.BalType='INBALN');
+		SET addData.OutBalanceNat					= THE(SELECT ITEM balRec.Amount FROM inRef.AcctInfo.AcctBalInfo.BalanceRec[] 
+														  AS balRec WHERE balRec.BalType='OUTBALN');
+		SET addData.ActualityDate					= SUBSTRING(rqTm FROM 1 FOR 10);
+		SET addData.Rate							= '';
+		SET addData.DocDate							= inRef.Document.DocDate;
+END;

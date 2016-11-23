@@ -1,0 +1,6 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pragma.esql
+
+-- Обозначение идентификатора БИН
+DECLARE ORG_TYPE_KZBIN CONSTANT CHARACTER 'KZBIN';
+-- Обозначение идентификатора РНН
+DECLARE ORG_TYPE_KZRNN CONSTANT CHARACTER 'KZRNN';

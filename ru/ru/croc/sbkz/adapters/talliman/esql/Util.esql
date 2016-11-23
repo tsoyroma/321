@@ -1,0 +1,62 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.talliman.esql
+
+DECLARE XSD_DATE_TIME_FORMAT CONSTANT CHARACTER 'IU';
+
+/**
+ * Заполняет запрос из Talliman стандартными значениями
+ **/
+CREATE PROCEDURE FillStandardMDORq(
+		IN InputRoot REFERENCE, 
+		IN OutputRoot REFERENCE, 
+		IN msgType CHARACTER,
+		IN SPName CHARACTER, 
+		IN VersionId CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF OutputRoot.XMLNSC NAME msgType;
+	DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+	DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+	
+	SET outRoot.RqUID 		= inRoot.*:RqUID;
+	SET outRoot.RqTm 		= inRoot.*:RqTm;
+	SET outRoot.SPName  	= SPName;
+	SET outRoot.VersionId	= VersionId;	
+END;
+
+
+/**
+ * Заполняет запрос/ответ в Talliman стандартными значениями
+ **/
+CREATE PROCEDURE FillStandardTallimanRq(
+		IN InputRoot REFERENCE, 
+		IN OutputRoot REFERENCE, 
+		IN msgType CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF OutputRoot.XMLNSC NAMESPACE tns NAME msgType;
+	DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*:*[<];
+	DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:*[<];
+	
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:tns 		= tns;
+	
+	SET outRoot.tns:RqUID 								= inRoot.RqUID;
+	SET outRoot.tns:RqTm 								= inRoot.RqTm;
+END;
+
+/**
+ * Заполняет ответ в Talliman стандартными значениями в стиле BSS
+ **/
+CREATE PROCEDURE FillStandardTallimanBSSStyleRq(
+		IN InputRoot REFERENCE, 
+		IN OutputRoot REFERENCE, 
+		IN msgType CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF OutputRoot.XMLNSC NAME msgType;
+	DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*:*[<];
+	
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:ns2 		= ns2;
+	SET outRoot.(XMLNSC.Attribute)ID 					= InputRoot.XMLNSC.*:*[<].RqUID;
+	SET outRoot.(XMLNSC.Attribute)DateTime 				= SUBSTRING(InputRoot.XMLNSC.*:*[<].RqTm FROM 1 FOR 19);
+	
+END;

@@ -1,0 +1,18 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.imap.esql
+
+PATH ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE HTTPRequestResponse_ParseImapResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		IF CARDINALITY(InputRoot.BLOB[]) = 0 THEN
+			PROPAGATE TO TERMINAL 'out';
+		ELSE
+			PROPAGATE TO TERMINAL 'out1';
+		END IF;
+		
+		RETURN FALSE;
+	END;
+END MODULE;

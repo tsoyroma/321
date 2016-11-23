@@ -1,0 +1,80 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sbolrs.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE SchedulerForSBOLRS_ConvertMDO2SBOLRS
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				  
+		DECLARE inRef REFERENCE TO InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC.UFXMsg;		
+		DECLARE oRef REFERENCE TO OutputRoot;
+		
+		DECLARE SOAPENV CONSTANT CHARACTER 'http://schemas.xmlsoap.org/soap/encoding/';
+		DECLARE soapenv NAMESPACE SOAPENV;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS oRef NAME 'DoIFX';	
+		
+		--SET oRef.(SOAP.NamespaceDecl)xmlns:encodingStyle = soapenv;
+
+		SET oRef.(XMLNSC.NamespaceDecl)xmlns:encodingStyle = soapenv;
+--		SET OutputLocalEnvironment.SOAP.Envelope.soapenv:Envelope.(SOAP.NamespaceDecl)xmlns:p = 'http://www.mclsoftware.co.uk/HunterII/WebServices';
+		
+		DECLARE request REFERENCE TO oRef;		
+		CREATE LASTCHILD OF oRef AS request NAME 'req';
+		
+		DECLARE curList REFERENCE TO request;		
+		CREATE LASTCHILD OF request AS curList NAME 'CurListInqRq';
+		
+		SET curList.RqUID 	= inRef.MsgData.ConfigurationInfo.RegNumber;
+		SET curList.RqTm  	= SUBSTRING(Environment.UserProperties.RqTm FROM 0 FOR 20);
+		SET curList.OperUID = inRef.MsgData.ConfigurationInfo.RegNumber; 	
+
+		---SET curList.BankInfo.BranchId	=	' ';
+		--SET curList.BankInfo.AgencyId	=	' ';
+		SET curList.BankInfo.RegionId	=	'038';
+
+		SET curList.OrderId = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd''T''HH:mm:ss');--inRef.MsgData.ConfigurationInfo.ObjectFor.ContractIDT.ContractNumber;
+		SET curList.OrderDt = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd''T''HH:mm:ss');
+		
+		DECLARE	curListRec REFERENCE TO curList;		
+		CREATE LASTCHILD OF curList AS curListRec NAME 'CurListRec';		
+		SET curListRec.EffDt = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd''T''HH:mm:ss');
+		
+	    DECLARE CURCODE CHARACTER;
+		
+		DECLARE curListItem REFERENCE TO curListRec;		
+		FOR inExchangeRateRs AS inRef.MsgData.ConfigurationInfo.DataRs.ExchangeRateRs[] DO
+
+			CREATE LASTCHILD OF curListRec AS curListItem NAME 'CurListItem';
+
+			SET curListItem.ProductId    = 'cards';
+			--SET curListItem."Tarif_plan" = ' ';
+			
+			IF inExchangeRateRs.CurrencyFrom = 'KZT' THEN 
+			   SET CURCODE = inExchangeRateRs.CurrencyTo; 
+			ELSE 
+			   SET CURCODE = inExchangeRateRs.CurrencyFrom; 
+			END IF ;
+			   
+			SET curListItem."Pr_code"    = CURCODE;
+			SET curListItem."Pr_quot"    = '1.00';
+			SET curListItem."Pr_cb"      = inExchangeRateRs.CBRate;
+			--SET curListItem."Pr_buy"     = ' ';
+			--SET curListItem."Pr_sale"    = ' ';
+			SET curListItem."Pr_buy3"    = inExchangeRateRs.BuyRate;
+			SET curListItem."Pr_sale3"   = inExchangeRateRs.SellRate;
+		END FOR;
+		
+		SET curList.MsText	=	'Way4'; 
+
+        DECLARE wholeMsgBlob BLOB ASBITSTREAM(OutputRoot.XMLNSC.*[<].*[<] CCSID 1208);           
+        DECLARE wholeMsgChar CHAR CAST(wholeMsgBlob AS CHAR CCSID 1208);
+            
+        SET OutputRoot.XMLNSC.*[<].*[<] = NULL;            
+        SET OutputRoot.XMLNSC.*[<].(XMLNSC.CDataField)"req" = wholeMsgChar;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

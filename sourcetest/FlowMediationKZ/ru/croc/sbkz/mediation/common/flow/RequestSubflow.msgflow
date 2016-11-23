@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmAggregateControl.msgnode="ComIbmAggregateControl.msgnode" xmlns:ComIbmAggregateRequest.msgnode="ComIbmAggregateRequest.msgnode" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmMQOutput.msgnode="ComIbmMQOutput.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow" xmlns:ru_croc_sbrf_bp_common_flow_EchoAggrSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EchoAggrSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow"
+    xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbkz/mediation/common/flow/RequestSubflow.msgflow"
+    nsPrefix="ru_croc_sbkz_mediation_common_flow_RequestSubflow.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.RequestQueue" name="RequestQueue" defaultValueLiteral="ROUTER.REQUEST">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.RequestQM" name="RequestQM">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.CorrelationQueueName" name="CorrelationQueueName" defaultValueLiteral="ESB.MEDIATION.(OPER|INFO).AGGR.ECHO">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.CorrelationReplyToQueue" name="CorrelationReplyToQueue" defaultValueLiteral="ESB.MEDIATION.oper_name.RESPONSE">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.ReplyToQueue" name="ReplyToQueue" defaultValueLiteral="ESB.MEDIATION.oper_name.RESPONSE">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.EventSource" name="EventSource" lowerBound="1" defaultValueLiteral="oper_name">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.IsCopyCorrelationParams" name="IsCopyCorrelationParams" lowerBound="1">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EBoolean"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" name="aggregateName" lowerBound="1" defaultValueLiteral="oper_name">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" name="AggrTimeout" lowerBound="1" defaultValueLiteral="40">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EInt"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="RequestSubflow" bundleName="ru/croc/sbkz/mediation/common/flow/RequestSubflow" pluginId="FlowMediationKZ"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/FlowMediationKZ/icons/full/obj16/RequestSubflow.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/FlowMediationKZ/icons/full/obj30/RequestSubflow.gif"/>
+    <composition>
+      <nodes xmi:type="ComIbmAggregateRequest.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="518,79" folderName="REQUEST">
+        <translation xmi:type="utility:ConstantString" string="AggrRequest"/>
+      </nodes>
+      <nodes xmi:type="eflow:FCMSource" xmi:id="InTerminal.Input" location="44,79">
+        <translation xmi:type="utility:TranslatableString" key="InTerminal.Input" bundleName="ru/croc/sbkz/mediation/common/flow/RequestSubflow" pluginId="FlowMediationKZ"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EchoAggrSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_3" location="387,172">
+        <translation xmi:type="utility:ConstantString" string="EchoAggrSubflow"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_4" location="599,79" CurrentOperation="Сообщение передано интеграционной логикой" CurrentEventSource="ESB" CurrentEventReceiver="ESB">
+        <translation xmi:type="utility:ConstantString" string="OPERATION -> ESB"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_5" location="402,75" queueName="ESB.WAY.AGGR.REQUEST" request="true" replyToQ="BP.CRBLOCK.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="ROUTER.REQUEST"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_6" location="229,124" computeExpression="esql://routine/ru.croc.sbkz.mediation.common.esql#RequestSubflow_RestoreMqCorrelationParams.Main">
+        <translation xmi:type="utility:ConstantString" string="RestoreMqCorrelationParams"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateControl.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_10" location="156,79" aggregateName="CRBLOCK" timeoutInterval="40">
+        <translation xmi:type="utility:ConstantString" string="AggrControl"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_1" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_6" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_10" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_10" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_8" targetNode="FCMComposite_1_10" sourceNode="InTerminal.Input" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.MQ" configurable="true" describedAttribute="Property.RequestQueue">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.RequestQueue" bundleName="ru/croc/sbkz/mediation/common/flow/RequestSubflow" pluginId="FlowMediationKZ"/>
+        <propertyDescriptor groupName="Group.MQ" configurable="true" describedAttribute="Property.RequestQM">
+          <propertyName xmi:type="utility:TranslatableString" key="Property.RequestQM" bundleName="ru/croc/sbkz/mediation/common/flow/RequestSubflow" pluginId="FlowMediationKZ"/>
+          <propertyDescriptor groupName="Group.MQ" configurable="true" describedAttribute="Property.CorrelationQueueName">
+            <propertyName xmi:type="utility:TranslatableString" key="Property.CorrelationQueueName" bundleName="ru/croc/sbkz/mediation/common/flow/RequestSubflow" pluginId="FlowMediationKZ"/>
+            <propertyDescriptor groupName="Group.MQ" propertyEditor="com.ibm.etools.mft.ibmnodes.editors.RequestListenerPropertyEditor" configurable="true" describedAttribute="Property.CorrelationReplyToQueue">
+              <propertyName xmi:type="utility:TranslatableString" key="Property.CorrelationReplyToQueue" bundleName="ru/croc/sbkz/mediation/common/flow/RequestSubflow" pluginId="FlowMediationKZ"/>
+              <propertyDescriptor groupName="Group.MQ" propertyEditor="com.ibm.etools.mft.ibmnodes.editors.RequestListenerPropertyEditor" configurable="true" describedAttribute="Property.ReplyToQueue">
+                <propertyName xmi:type="utility:TranslatableString" key="Property.ReplyToQueue" bundleName="ru/croc/sbkz/mediation/common/flow/RequestSubflow" pluginId="FlowMediationKZ"/>
+                <propertyDescriptor groupName="Group.Other" describedAttribute="//FCMComposite_1/AggrTimeout">
+                  <propertyName xmi:type="utility:TranslatableString" key="Property.AggrTimeout" bundleName="ru/croc/sbkz/mediation/common/flow/RequestSubflow" pluginId="FlowMediationKZ"/>
+                  <propertyDescriptor groupName="Group.Other" configurable="true" describedAttribute="//FCMComposite_1/aggregateName">
+                    <propertyName xmi:type="utility:TranslatableString" key="Property.aggregateName" bundleName="ComIbmAggregateControl" pluginId="com.ibm.etools.mft.ibmnodes"/>
+                    <propertyDescriptor groupName="Group.Other" configurable="true" userDefined="true" describedAttribute="Property.EventSource">
+                      <propertyName xmi:type="utility:TranslatableString" key="Property.EventSource" bundleName="ru/croc/sbkz/mediation/common/flow/RequestSubflow" pluginId="FlowMediationKZ"/>
+                      <propertyDescriptor groupName="Group.MQ" configurable="true" userDefined="true" describedAttribute="Property.IsCopyCorrelationParams">
+                        <propertyName xmi:type="utility:TranslatableString" key="Property.IsCopyCorrelationParams" bundleName="ru/croc/sbkz/mediation/common/flow/RequestSubflow" pluginId="FlowMediationKZ"/>
+                      </propertyDescriptor>
+                    </propertyDescriptor>
+                  </propertyDescriptor>
+                </propertyDescriptor>
+              </propertyDescriptor>
+            </propertyDescriptor>
+          </propertyDescriptor>
+        </propertyDescriptor>
+      </propertyDescriptor>
+    </propertyOrganizer>
+    <attributeLinks promotedAttribute="Property.RequestQueue" overriddenNodes="FCMComposite_1_5">
+      <overriddenAttribute href="ComIbmMQOutput.msgnode#Property.queueName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.RequestQM" overriddenNodes="FCMComposite_1_5">
+      <overriddenAttribute href="ComIbmMQOutput.msgnode#Property.queueManagerName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.CorrelationQueueName" overriddenNodes="FCMComposite_1_3">
+      <overriddenAttribute href="ru/croc/sbrf/bp/common/flow/EchoAggrSubflow.msgflow#Property.queueName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.CorrelationReplyToQueue" overriddenNodes="FCMComposite_1_3">
+      <overriddenAttribute href="ru/croc/sbrf/bp/common/flow/EchoAggrSubflow.msgflow#Property.replyToQ"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.ReplyToQueue" overriddenNodes="FCMComposite_1_5">
+      <overriddenAttribute href="ComIbmMQOutput.msgnode#Property.replyToQ"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.EventSource" overriddenNodes="FCMComposite_1_4">
+      <overriddenAttribute href="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow#Property.CurrentEventSource"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="//FCMComposite_1/aggregateName" overriddenNodes="FCMComposite_1_10">
+      <overriddenAttribute href="ComIbmAggregateControl.msgnode#Property.aggregateName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="//FCMComposite_1/AggrTimeout" overriddenNodes="FCMComposite_1_10">
+      <overriddenAttribute href="ComIbmAggregateControl.msgnode#Property.timeoutInterval"/>
+    </attributeLinks>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

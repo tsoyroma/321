@@ -1,0 +1,60 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pragma.esql
+
+-- Код общей (неспецифицированной) ошибки для HTTP-адаптера
+DECLARE CommonHTTPErrorCode CONSTANT CHARACTER '-110';
+-- Код общего описания для ошибки HTTP-адаптера
+DECLARE CommonHTTPErrorDesc CONSTANT CHARACTER 'Error has been occured on ESB';
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос)
+ **/
+CREATE PROCEDURE FillPragmaStandartElementsRq (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;
+	
+END;
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRs (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;
+	SET outroot.*:*[<].Status.ifxca:StatusCode	= inroot.*:*[<].Status.StatusCode;
+	SET outroot.*:*[<].Status.ifxca:StatusDesc	= inroot.*:*[<].Status.StatusDesc;
+	
+END;
+
+/**
+ * Заполнение стандартных полей MDO в нотификациях от Pragma
+ **/
+CREATE PROCEDURE FillMDOStandartElementsNf (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;
+	
+END;
+
+/**
+ *  Перекодировка типа документа
+ **/ 
+CREATE FUNCTION recodeIdTypeFromESB(IN type CHARACTER) RETURNS INTEGER
+BEGIN
+	RETURN CASE type
+		WHEN '3' THEN 1
+		WHEN '1' THEN 2
+		WHEN '2' THEN 3
+		ELSE NULL
+	END;
+END;
+
+
+	

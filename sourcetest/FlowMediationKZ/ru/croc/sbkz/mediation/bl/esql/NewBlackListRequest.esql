@@ -1,0 +1,80 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.bl.esql
+
+PATH ru.croc.sbkz.mediation.common.esql;
+
+/**
+ * Формирует и отсылает два запроса к Прагме новой
+ * и Прагме старой.
+ **/
+CREATE COMPUTE MODULE NewBlackListRequest_MakePragmaRequests
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Константа для указания, что ищем адаптер системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+	 	
+        /* microbiz */
+		IF InputRoot.XMLNSC.*[<].MBOnly = '1' THEN
+			SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:newpragma';
+			PROPAGATE TO TERMINAL 'out' DELETE NONE;
+		ELSE
+		 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:pragma';
+		 	PROPAGATE TO TERMINAL 'out' DELETE NONE;
+		 	
+			SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:newpragma';
+			PROPAGATE TO TERMINAL 'out' DELETE NONE;
+		END IF;
+		
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+/**
+ * Определяет, должен ли быть сразу запрос в AML с пропуском
+ * в Прагму или же вначале в Прагму.
+ **/
+CREATE FILTER MODULE NewBlackListRequest_IsSkippingPragma
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		IF Root.XMLNSC.*[<].AMLOnly = '1' THEN
+			RETURN TRUE;
+		ELSE
+			RETURN FALSE;
+		END IF;
+	END;
+END MODULE;
+
+
+/**
+ * Заполнение полей заголовка MQRFH2 для
+ * маршрутизации в систему AML.
+ **/
+CREATE COMPUTE MODULE NewBlackListRequest_FillMqRfh2usrAML
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		SET systemId 	= 'urn:sbkzsystems:aml';
+		SET adapterType = 'urn:sbkztypes:esb:adapter';
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Константа для указания, что ищем адаптер системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	-- Идентификатор системы, в адаптер которой необходимо отправить запрос
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;
+	 	
+	 	RETURN TRUE;
+	END;
+END MODULE;

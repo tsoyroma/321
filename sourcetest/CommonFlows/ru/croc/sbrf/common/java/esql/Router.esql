@@ -1,0 +1,12 @@
+BROKER SCHEMA ru.croc.sbrf.common.java.esql
+
+/**
+ *  Определение функции java проверки данных маршрутизации
+ * 		element		- ссылка на родительский тэг сообщения
+ * 		error		- буффер для текста ошибки
+ */
+
+CREATE FUNCTION isMsgCorrect (IN element REFERENCE, OUT error CHARACTER)
+RETURNS BOOLEAN
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.RouteHashValidator.isMsgCorrect";

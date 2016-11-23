@@ -1,0 +1,187 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crm.retail.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Установка ответных заголовков а также получение ответного сообщения из агрегации
+CREATE COMPUTE MODULE ResponseForESB_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE OrigMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+		SET Environment.UserProperties = OrigMsg.UserProperties;
+
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+
+		SET OutputRoot.XMLNSC = InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC;
+
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(OrigMsg, OutputLocalEnvironment);
+
+		IF Environment.UserProperties.Operation = '' THEN
+				SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = 'unchanged';
+		END IF;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE ResponseForESB_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDVALUE(Environment.UserProperties.Operation);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZExpPersonInfoRq' THEN
+			SET labelName = 'KZExpPersonInfoRs';
+		WHEN 'KZExpMDMPrivateClientDataRq' THEN
+			SET labelName = 'KZExpMDMPrivateClientDataRs';
+		WHEN 'KZExpMDMLegalClientDataRq' THEN
+			SET labelName = 'KZExpMDMLegalClientDataRs';
+		WHEN 'message' THEN -- order_add
+			SET labelName = 'ORDER_ADD_RS';
+		WHEN 'sClientCreditTransactionInfo' THEN -- u07357 21.07.2015
+			SET labelName = 'KZGetCreditFromCRMRs';	 			 
+		WHEN 'sUpdateCreditStatus' THEN
+			SET labelName = 'KZSetRequestStatusRs';
+		ELSE
+		-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Ответ из CRM Розничного в шину для взаимодействия "Экспорт данных по ФЛ и счетам из МАБПК в СРМ": PragmaCRMContactRs -> KZExpPersonInfoRs
+ **/
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZExpPersonInfoRs';
+		
+		CALL FillMDOStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Ответ из CRM Розничного в шину для взаимодействия "Экспорт данных по ФЛ и счетам из ЕПК в СРМ": PragmaCRMContactRs -> KZExpMDMPrivateClientDataRs
+ **/
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZExpMDMPrivateClientDataRs';
+		
+		CALL FillMDOStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+
+		CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC.*[<].Status NAME 'SPName' VALUE 'CRMr';
+
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.Message.DataRs.Contact;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef.PersonInfo.PersonIdExt[1].Key		= Environment.UserProperties.SPName;
+		SET outRef.PersonInfo.PersonIdExt[1].Value		= inRef.IntegrationId;
+		SET outRef.PersonInfo.PersonIdExt[2].Key		= 'CRMr';
+		SET outRef.PersonInfo.PersonIdExt[2].Value		= inRef.SiebelContactId;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Ответ из CRM Розничного в шину для взаимодействия "Экспорт данных по ЮЛ из ЕПК в СРМ": EPKCRMAccountRs -> KZExpMDMLegalClientDataRs
+ **/
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZExpMDMLegalClientDataRs';
+		
+		CALL FillMDOStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+
+		CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC.*[<].Status NAME 'SPName' VALUE 'CRMr';
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.Message.DataRs.Account;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef.OrgInfo.OrgIdExt[1].Key		= 'CIF';
+		SET outRef.OrgInfo.OrgIdExt[1].Value	= inRef.IntegrationId;
+		SET outRef.OrgInfo.OrgIdExt[2].Key		= 'CRMr';
+		SET outRef.OrgInfo.OrgIdExt[2].Value	= inRef.SiebelAccountId;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO3_LKA
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		SET OutputRoot = InputRoot;		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+-- u07357 20.07.2015
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO3_KZGetCreditFromCRMRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+								
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetCreditFromCRMRs';
+		DECLARE outReq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE inReq REFERENCE TO InputRoot.XMLNSC.*[<];
+		SET outReq = inReq;
+		
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = 'ESB.CAKD.APPROVE.SINGLE.OUT';
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName = 'MKZ.ESB.ADP1';
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- u07357 21.07.2015
+CREATE COMPUTE MODULE ResponseForESB_ConvertCRM2MDO3_KZSetRequestStatusRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSetRequestStatusRs';
+		DECLARE outReq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE inReq REFERENCE TO InputRoot.XMLNSC.*[<];
+		SET outReq = inReq;
+		
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = 'ESB.CAKD.APPROVE.SINGLE.OUT';
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName = 'MKZ.ESB.ADP1';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+

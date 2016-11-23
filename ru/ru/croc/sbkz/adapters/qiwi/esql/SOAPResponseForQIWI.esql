@@ -1,0 +1,121 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.qiwi.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+
+CREATE COMPUTE MODULE SOAPResponseForQIWI_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		SET OutputRoot = InputRoot.ComIbmAggregateReplyBody.REQUEST;
+		
+		DECLARE OrigMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+
+		
+		SET Environment.UserProperties = OrigMsg.UserProperties;
+		
+		SET Environment.UserProperties.SOAPReplyIdentifier	= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.ReplyIdentifier;
+
+		SET OutputRoot.Properties.ReplyIdentifier			= CAST(Environment.UserProperties.SOAPReplyIdentifier AS BLOB);
+		
+		SET OutputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier = CAST(Environment.UserProperties.SOAPReplyIdentifier AS BLOB);
+
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = Environment.UserProperties.Operation;
+
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE SOAPResponseForQIWI_ConvertQPRAGMA2QIWI
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		
+		SET OutputRoot.MQMD = NULL;
+		SET OutputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier = CAST(Environment.UserProperties.ReplyIdentifier AS BLOB);		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:*[<];
+		
+		SET OutputRoot.XMLNSC.GetStatementsResponse VALUE = NULL;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.GetStatementsResponse;
+		
+		SET outRef.(XMLNSC.Attribute)ID VALUE = FIELDVALUE(inRef.MessageUID);
+		SET outRef.(XMLNSC.Attribute)DateTime VALUE = FIELDVALUE(inRef.MessageDateTime);
+		
+		
+		SET outRef.dateFrom VALUE = FIELDVALUE(inRef.ResponseData.AccountStatements.AccountStatement.StartDate);
+		SET outRef.dateTo VALUE = FIELDVALUE(inRef.ResponseData.AccountStatements.AccountStatement.EndDate);
+		SET outRef.account VALUE = FIELDVALUE(inRef.ResponseData.AccountStatements.AccountStatement.Number);
+		DECLARE outSt REFERENCE TO outRef;
+		IF EXISTS(inRef.ErrorData[]) THEN
+		CREATE LASTCHILD OF outRef AS outSt NAME 'statusResponse';
+		SET outSt.code = inRef.ErrorData.ErrorCode;
+		SET outSt.codeDetails = inRef.ErrorData.ErrorDesc;
+		ELSE 
+		CREATE LASTCHILD OF outRef AS outSt NAME 'statusResponse';
+		SET outSt.code = '0';
+		SET outSt.codeDetails = 'Успешно';	
+		END IF;
+		
+		DECLARE inRefDocs REFERENCE TO inRef.ResponseData.AccountStatements.AccountStatement.AccountDocuments;
+		
+		/*SET OutputRoot.XMLNSC.GetStatementsResponse.operations VALUE = NULL;
+		DECLARE outRefOps REFERENCE TO OutputRoot.XMLNSC.GetStatementsResponse.operations;*/
+		
+		DECLARE outOper REFERENCE TO outRef;
+		DECLARE outOpers REFERENCE TO outRef;
+		
+		IF EXISTS(inRef.ResponseData.AccountStatements.AccountStatement.AccountDocuments.AccountDocument[]) THEN			
+			
+			CREATE LASTCHILD OF outRef AS outOper NAME 'operations';
+			
+			FOR items AS inRef.ResponseData.AccountStatements.AccountStatement.AccountDocuments.AccountDocument[] DO
+				
+				CREATE LASTCHILD OF outOper AS outOpers NAME 'operation';
+				
+				SET outOpers.operationId   		 = items.Id;
+				SET outOpers.operationDate 		 = items.OperDate;
+				SET outOpers.operationValueDate  = items.ValueDate;
+				SET outOpers.senderAccount		 = items.PayerAccount;
+				SET outOpers.receiverAccount     = items.PayeeAccount;
+				SET outOpers.operationAmount     = items.Amount;
+				SET outOpers.operationDetails	 = items.Details;
+				
+				IF items.OperationType = 'D' THEN
+					SET outOpers.BranchBIN	 = items.PayeeRNN;
+				ELSEIF items.OperationType = 'C' THEN
+					SET outOpers.BranchBIN	 = items.PayerRNN;	
+				END IF;	
+			
+			END FOR;	
+		
+		END IF;	
+		
+		
+		/*
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		
+		SET J = CARDINALITY(inRefDocs.AccountDocument[]);
+		WHILE I < J DO
+			
+			SET outRefOps.operation[I].operationId = inRefDocs.AccountDocument[I].Id;
+			SET outRefOps.operation[I].operationDate = inRefDocs.AccountDocument[I].OperDate;
+			SET outRefOps.operation[I].operationValueDate = inRefDocs.AccountDocument[I].ValueDate;
+			SET outRefOps.operation[I].senderAccount = inRefDocs.AccountDocument[I].PayerAccount;
+			SET outRefOps.operation[I].receiverAccount = inRefDocs.AccountDocument[I].PayeeAccount;
+			SET outRefOps.operation[I].operationAmount = inRefDocs.AccountDocument[I].Amount;
+			SET outRefOps.operation[I].operationDetails = inRefDocs.AccountDocument[I].Details;			
+			
+			SET I = I + 1;
+		END WHILE;
+		*/
+
+		RETURN TRUE;
+	END;
+
+END MODULE;
+

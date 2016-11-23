@@ -1,0 +1,54 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.saplm.esql
+
+PATH ru.croc.sbkz.utils;
+
+DECLARE SAP_DATE_FORMAT CONSTANT CHARACTER 'dd.MM.yyyy';
+DECLARE ESB_DATE_FORMAT CONSTANT CHARACTER 'yyyy-MM-dd';
+
+/**
+ * Функция преобразования формата даты из SAP в КСШ
+ **/
+CREATE FUNCTION convertFromSAPDate (IN inDate CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF LENGTH(inDate) = LENGTH(SAP_DATE_FORMAT) THEN
+		RETURN CAST(CAST(inDate AS DATE FORMAT SAP_DATE_FORMAT) AS CHARACTER FORMAT ESB_DATE_FORMAT);
+	ELSE
+		RETURN inDate;
+	END IF;
+END;
+
+/**
+ * Функция преобразования формата даты из КСШ в SAP
+ **/
+CREATE FUNCTION convertToSAPDate (IN inDate CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF LENGTH(inDate) >= LENGTH(ESB_DATE_FORMAT) THEN
+		RETURN CAST(CAST(LEFT(inDate, LENGTH(ESB_DATE_FORMAT)) AS DATE FORMAT ESB_DATE_FORMAT) AS CHARACTER FORMAT SAP_DATE_FORMAT);
+	ELSE
+		RETURN inDate;
+	END IF;
+END;	
+
+/**
+ * Функция преобразования формата сумм из КСШ в SAP
+ **/
+/*CREATE FUNCTION convertToSAPSum (IN inSum CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF inSum <> '' THEN
+		RETURN CAST(CAST(inSum AS DECIMAL) AS CHARACTER FORMAT '###,##0.0#:groupsep=.:decsep=,');
+	ELSE
+		RETURN inSum;
+	END IF;
+END;*/
+
+/**
+ * Функция преобразования формата сумм из SAP в КСШ
+ **/
+/*CREATE FUNCTION convertFromSAPSum (IN inSum CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF inSum <> '' THEN
+		RETURN CAST(CAST(inSum AS DECIMAL FORMAT '###,##0.0#:groupsep=.:decsep=,') AS CHARACTER);
+	ELSE
+		RETURN inSum;
+	END IF;
+END;*/

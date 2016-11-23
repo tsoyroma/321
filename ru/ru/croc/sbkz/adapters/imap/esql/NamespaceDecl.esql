@@ -1,0 +1,4 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.imap.esql
+
+DECLARE NS_MDO_IFXCA CONSTANT CHARACTER 'http://sberbank.ru/dem/commonAggregates/15';
+DECLARE	ifxca	NAMESPACE 	NS_MDO_IFXCA;

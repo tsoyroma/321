@@ -1,0 +1,150 @@
+BROKER SCHEMA ru.croc.sbkz.utils
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+/**
+ * Удаляет из RqUID символы "-", находящиеся
+ * в идентификаторе сообщения UFX.
+ **/
+CREATE FUNCTION CleanRqUID(
+		IN rqUID CHARACTER	
+	) RETURNS CHARACTER BEGIN
+	RETURN REPLACE(rqUID, '-', '');
+END;
+
+
+/**
+ * Заполняет стандартные поля для сообщений-ответов
+ * в формате UFX.
+ **/
+CREATE PROCEDURE FillStandardUFXFieldsReq2(
+		IN inMessageBody REFERENCE, 
+		IN outMessageBody REFERENCE,
+		IN userProperties REFERENCE,
+		IN msgType REFERENCE,
+		IN scheme REFERENCE
+	) BEGIN
+	DECLARE ufxRoot REFERENCE TO outMessageBody.*[<];
+	DECLARE mdoRoot REFERENCE TO inMessageBody.*[<];
+	
+	SET ufxRoot.(XMLNSC.Attribute)msg_type = msgType;
+	SET ufxRoot.(XMLNSC.Attribute)scheme = scheme;
+	SET ufxRoot.(XMLNSC.Attribute)direction = 'Rq';
+	SET ufxRoot.(XMLNSC.Attribute)version = THE(SELECT s.AttrValue FROM mdoRoot.ServiceAttr[] AS s WHERE s.AttrId='VERS');
+	IF ufxRoot.(XMLNSC.Attribute)version IS NULL THEN
+		SET ufxRoot.(XMLNSC.Attribute)version = '2.0';
+	END IF;
+	SET ufxRoot.MsgId = mdoRoot.RqUID;
+	SET ufxRoot.Source.(XMLNSC.Attribute)App = COALESCE(mdoRoot.SPName, userProperties.SPName);
+END;
+
+/**
+ * Заполняет наиболее общие поля для сообщений-ответов
+ * в формате UFX.
+ **/
+CREATE PROCEDURE FillStandardUFXFieldsResp2(
+		IN inMessageBody REFERENCE, 
+		IN outMessageBody REFERENCE,
+		IN userProperties REFERENCE,
+		IN msgType CHARACTER,
+		IN scheme CHARACTER
+	) BEGIN
+	DECLARE ufxRoot REFERENCE TO outMessageBody.*[<];
+	DECLARE mdoRoot REFERENCE TO inMessageBody.*[<];
+	
+	SET ufxRoot.(XMLNSC.Attribute)msg_type = msgType;
+	SET ufxRoot.(XMLNSC.Attribute)scheme = scheme;
+	SET ufxRoot.(XMLNSC.Attribute)direction = 'Rs';
+	SET ufxRoot.(XMLNSC.Attribute)version = THE(SELECT s.AttrValue FROM mdoRoot.ServiceAttr[] AS s WHERE s.AttrId='VERS');
+	IF ufxRoot.(XMLNSC.Attribute)version IS NULL THEN
+		SET ufxRoot.(XMLNSC.Attribute)version = '2.0';
+	END IF;
+	SET ufxRoot.(XMLNSC.Attribute)resp_class = CASE  
+		WHEN mdoRoot.Status.*:Severity = 'Error' THEN 'E' 
+		WHEN mdoRoot.Status.*:Severity = 'Info' THEN 'I'
+		WHEN mdoRoot.Status.*:Severity = 'Information' THEN 'I'
+	END;
+	SET ufxRoot.(XMLNSC.Attribute)resp_code = COALESCE(mdoRoot.Status.*:StatusCode, '0');
+	SET ufxRoot.(XMLNSC.Attribute)resp_text = CASE ufxRoot.(XMLNSC.Attribute)resp_code WHEN '0' THEN 'Successfully processed' ELSE mdoRoot.Status.*:StatusDesc END;
+	SET ufxRoot.MsgId = mdoRoot.RqUID;
+	
+	SET ufxRoot.Source.(XMLNSC.Attribute)app 	= COALESCE(FIELDVALUE(mdoRoot.SPName), FIELDVALUE(userProperties.SPName));
+	SET ufxRoot.Target.(XMLNSC.Attribute)role 	= ' ';
+END;
+
+/**
+ * Заполняет поля статуса
+ * в формате UFX.
+ **/
+CREATE PROCEDURE UFXCreateStatusFields(
+		IN inMessageBody REFERENCE,
+		IN outMessageBody REFERENCE
+	) BEGIN
+	
+	DECLARE ufxRoot REFERENCE TO outMessageBody.*:*[<];
+	DECLARE mdoRoot REFERENCE TO inMessageBody.*:*[<];
+		
+	SET ufxRoot.MsgData.Information.Status.RespClass = CASE  
+			WHEN mdoRoot.Status.*:Severity = 'Error' THEN 'Error' 
+			WHEN mdoRoot.Status.*:Severity = 'Info' THEN 'Information'
+			END;
+	SET ufxRoot.MsgData.Information.Status.RespCode = COALESCE(mdoRoot.Status.*:StatusCode, '0');
+	SET ufxRoot.MsgData.Information.Status.RespText = CASE ufxRoot.MsgData.Information.Status.RespCode WHEN '0' THEN 'Success' ELSE mdoRoot.Status.*:StatusDesc END;
+END;
+
+
+/**
+ * Заполняет поля статуса
+ * в формате UFX.
+ **/
+CREATE PROCEDURE UFXCreateStatusFields2(
+		IN inMessageBody REFERENCE,
+		IN outMessageRef REFERENCE
+	) BEGIN
+	
+	DECLARE mdoRoot REFERENCE TO inMessageBody.*:*[<];
+		
+	SET outMessageRef.Status.RespClass = CASE  
+			WHEN mdoRoot.Status.*:Severity = 'Error' THEN 'Error' 
+			WHEN mdoRoot.Status.*:Severity = 'Info' THEN 'Information'
+			END;
+	SET outMessageRef.Status.RespCode = FIELDVALUE(mdoRoot.Status.*:StatusCode);
+	SET outMessageRef.Status.RespText = FIELDVALUE(mdoRoot.Status.*:StatusDesc);
+END;
+	
+/**
+ * Подставляет общие для всех взаимодействие МДО-элементы
+ * из запросов СБОЛ.
+ **/
+CREATE PROCEDURE SetCommonMDOElementsFromUFX(IN inRoot REFERENCE, IN outRoot REFERENCE)
+BEGIN
+	SET outRoot.RqUID = inRoot.MsgId;
+	IF EXISTS(inRoot.MsgData.Doc.LocalDt[]) THEN
+		SET outRoot.RqTm = inRoot.MsgData.Doc.LocalDt;
+	ELSE
+		SET outRoot.RqTm = getLocalTimeStamp();
+	END IF;
+	SET outRoot.SPName = FIELDVALUE(inRoot.Source.(XMLNSC.Attribute)app);
+END;	
+
+/**
+ * Данная функция требуется для заполнения ответов от ответа ГЦВП.  
+ *
+ **/
+CREATE FUNCTION getStatusText(IN statusDesc CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE statusDesc
+		WHEN 'FOUND' THEN 'Запрос обработан'
+		WHEN 'MISSING_INPUT_PARAMETERS' THEN 'Не найден period или же входящий номер'
+		WHEN 'WRONG_PERIOD'	THEN 'Указан не верный период (не 3 или 6 или 12)'
+		WHEN 'DUPLICATE_REQUEST_NUMBER' THEN 'Запрос по такому же requestNumber направлялся ранее'
+		WHEN 'IIN_NOT_FOUND' THEN 'ИИН не найден'
+		WHEN 'FIO_BD_INCORRECT' THEN 'Не соответствуют ИИНу ФИО и ДР'
+		WHEN 'ERROR1' THEN 'Ошибка, при которой можно сделать запрос позже, через некоторое время'
+		WHEN 'ERROR2' THEN 'Ошибка, при которой для разбирательства нужно уже обращаться в ГЦВП'
+		WHEN 'ACCESS_DENIED' THEN 'Запрещен доступ (для данного БИН доступ запрещен)'
+		WHEN 'SIGNATURE_NOT_VALID' THEN 'Отсутствует ЭЦП или ЭЦП не валидна'				
+	END;	
+END;	
+
+				

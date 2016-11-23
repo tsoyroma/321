@@ -1,0 +1,162 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.ipt.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRq (IN userProps REFERENCE, IN inRoot REFERENCE, IN outRoot REFERENCE)
+BEGIN
+	
+	SET outRoot.*:*[<].RqUID	= userProps.RqUID;
+	SET outRoot.*:*[<].RqTm		= userProps.RqTm;
+	SET outRoot.*:*[<].SPName	= userProps.SPName;
+	SET outRoot.*:*[<].ServiceAttr[1].Key	= 'XTYPE';
+	SET outRoot.*:*[<].ServiceAttr[1].Value	= FIELDVALUE(inRoot.message.xtype);
+	SET outRoot.*:*[<].ServiceAttr[2].Key	= 'SMC';
+	SET outRoot.*:*[<].ServiceAttr[2].Value	= FIELDVALUE(inRoot.message.sender."member-caption");
+	SET outRoot.*:*[<].ServiceAttr[3].Key	= 'SMID';
+	SET outRoot.*:*[<].ServiceAttr[3].Value	= FIELDVALUE(inRoot.message.sender."member-id");
+	SET outRoot.*:*[<].ServiceAttr[4].Key	= 'RMC';
+	SET outRoot.*:*[<].ServiceAttr[4].Value	= FIELDVALUE(inRoot.message.recipient."member-caption");
+	SET outRoot.*:*[<].ServiceAttr[5].Key	= 'RMID';
+	SET outRoot.*:*[<].ServiceAttr[5].Value	= FIELDVALUE(inRoot.message.recipient."member-id");
+END;
+
+/**
+ * Заполнение стандартных полей ИПТ в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillIPTStandartElementsRs (IN inRoot REFERENCE, IN outRoot REFERENCE)
+BEGIN
+	DECLARE xtype CHARACTER;
+	DECLARE rmc CHARACTER;
+	DECLARE rmid CHARACTER;
+	DECLARE smc CHARACTER;
+	DECLARE smid CHARACTER;
+
+	FOR inServiceAttr AS inRoot.*[<].ServiceAttr[] DO
+		IF		inServiceAttr.Key = 'XTYPE' THEN
+			SET xtype	= inServiceAttr.Value;
+		ELSEIF	inServiceAttr.Key = 'RMC' THEN
+			SET rmc		= inServiceAttr.Value;
+		ELSEIF	inServiceAttr.Key = 'RMID' THEN
+			SET rmid	= inServiceAttr.Value;
+		ELSEIF	inServiceAttr.Key = 'SMC' THEN
+			SET smc		= inServiceAttr.Value;
+		ELSEIF	inServiceAttr.Key = 'SMID' THEN
+			SET smid	= inServiceAttr.Value;
+		END IF;
+	END FOR;
+	
+	SET outRoot.message.(XMLNSC.Attribute)"date-time"	= inRoot.*[<].RqTm;
+	SET outRoot.message.(XMLNSC.Attribute)"uid"	= inRoot.*[<].RqUID;
+	SET outRoot.message.(XMLNSC.Attribute)"xtype"		= xtype;
+	SET outRoot.message.sender.(XMLNSC.Attribute)"member-caption"		= rmc;
+	SET outRoot.message.sender.(XMLNSC.Attribute)"member-id"			= rmid;
+	SET outRoot.message.recipient.(XMLNSC.Attribute)"member-caption"	= smc;
+	SET outRoot.message.recipient.(XMLNSC.Attribute)"member-id"			= smid;
+END;
+
+/**
+ * Заполнение статуса в ответных сообщениях в ИПТ по статусу в MDO
+ **/
+CREATE FUNCTION fillStatusCode (IN status REFERENCE) RETURNS CHARACTER
+BEGIN
+	IF FIELDVALUE(status) = '0' THEN
+		RETURN '1';
+	ELSE
+		RETURN '0';
+	END IF;		
+END;
+
+/**
+ * Изменение формата даты для ИПТ
+ **/
+CREATE FUNCTION convertDateForIPT (IN stdDate CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE chunkDate CHARACTER SUBSTRING(stdDate FROM 1 FOR 10);
+	DECLARE chunkTime CHARACTER SUBSTRING(stdDate FROM 12 FOR 8);
+	RETURN 	chunkDate || ' ' || chunkTime;
+END;
+
+
+/**
+ * Создает ответ в ИПТ с описанием возникшей на КСШ ошибки
+ **/
+CREATE COMPUTE MODULE CreateErrorResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+		SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier = CAST(Environment.UserProperties.HTTPRequestIdentifier AS BLOB);
+
+		-- Получение описания ошибки
+		DECLARE sErrDescr CHARACTER;
+		DECLARE sErrNumber CHARACTER;
+		CALL ru.croc.sbrf.mdm.common.GetExcDescription(InputExceptionList, sErrDescr, sErrNumber);
+
+		-- Формирование структуры сообщения-ответа
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response.status		= fillStatusCode(sErrNumber);
+		SET outRef.response.err			= sErrDescr;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Создает ответ в ИПТ в случае таймаута
+ **/
+CREATE COMPUTE MODULE CreateTimeoutResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRef REFERENCE TO InputRoot;
+		
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+		SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier = CAST(Environment.UserProperties.HTTPRequestIdentifier AS BLOB);
+		
+		-- Формирование структуры сообщения-ответа
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'message';		
+		
+		CALL FillIPTStandartElementsRs(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body, OutputRoot.XMLNSC);
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.message;
+
+		SET outRef.response.status		= '0';
+		SET outRef.response.err			= 'Таймаут во время ожидания ответа от обрабатывающей системы';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Копирование стандартных аттрибутов платежа в ответ.
+ **/
+CREATE PROCEDURE copyPaymentAttributes(IN inRef REFERENCE, IN outRef REFERENCE)
+BEGIN
+	DECLARE typepayment CHARACTER '';
+	DECLARE cardnum CHARACTER '';
+	FOR inPaymentExtAttr AS inRef.PaymentExtAttr[] DO
+		IF inPaymentExtAttr.Key = 'TYPEPAY' THEN
+			SET typepayment = COALESCE(inPaymentExtAttr.Value,'');
+		ELSEIF inPaymentExtAttr.Key = 'CARDNUM' THEN
+			SET cardnum = COALESCE(inPaymentExtAttr.Value,'');
+		END IF;
+	END FOR;
+	SET outRef.response."type-payment"		= typepayment;
+	SET outRef.response."card-number"		= cardnum; 
+END;

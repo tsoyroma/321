@@ -1,0 +1,554 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sbolrs.esql
+
+-- Константа для пространства имен, в котором объявлены методы веб-сервиса, которые предоставляет КСШ для СБОЛ
+DECLARE sbol_ws_ns NAMESPACE 'http://sberbank.kz/processing';
+-- Код общей (неспецифицированной) ошибки для HTTP-адаптера
+DECLARE CommonSBOLErrorCode CONSTANT CHARACTER '-110';
+-- Код общего описания для ошибки HTTP-адаптера
+DECLARE CommonSBOLErrorDesc CONSTANT CHARACTER 'Error has been occured on ESB';
+
+
+CREATE FUNCTION recodeYesNoForSBOL(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+		WHEN 'YES' THEN 'Y'
+		WHEN 'NO' THEN 'N'
+		ELSE param
+	END;
+END;
+
+CREATE FUNCTION recodeTrueFalseForSBOL(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+		WHEN 'YES' THEN 'true'
+		WHEN 'NO' THEN 'false'
+		ELSE param
+	END;
+END;
+
+CREATE FUNCTION GetTrueFalse(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+		WHEN 'OPEN' THEN 'true'
+		WHEN 'CLOSE' THEN 'false'
+		WHEN 'BLOCKED' THEN 'false'	
+		ELSE 'false'
+	END;
+END;
+
+CREATE FUNCTION GetLimitStatus(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+		WHEN 'Suspended' THEN 'NO'
+		WHEN 'InActive' THEN 'NO'
+		WHEN 'Active' THEN 'YES'
+		WHEN 'Override' THEN 'YES'
+		WHEN 'Disabled' THEN 'NO'		
+	END;
+END;
+
+CREATE FUNCTION GetTypeStatusPerson(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+	WHEN '1' THEN 'Паспорт Гражданина СССР'
+	WHEN '2' THEN 'Загранпаспорт гражданина СССР'
+	WHEN '3' THEN 'Свидетельство о рождении'
+	WHEN '4' THEN 'Удостоверение личности офицера'
+	WHEN '5' THEN 'Справка об освобождении из места лишения свободы'
+	WHEN '6' THEN 'Паспорт Минморфлота'
+	WHEN '7' THEN 'Военный билет солдата (матроса, сержанта, старшины)'
+	WHEN '9' THEN 'Дипломатический паспорт гражданина РФ'					
+	WHEN '10' THEN 'Иностранный паспорт'	
+	WHEN '11' THEN 'Свидетельство о регистрации ходатайства о признании иммигранта беженцем'	
+	WHEN '12' THEN 'Вид на жительство'
+	WHEN '13' THEN 'Удостоверение беженца в РФ'
+	WHEN '14' THEN 'Временное удостоверение личности гражданина РФ'	
+	WHEN '21' THEN 'Паспорт гражданина РФ'	
+	WHEN '22' THEN 'Загранпаспорт гражданина РФ'
+	WHEN '26' THEN 'Паспорт моряка'
+	WHEN '27' THEN 'Военный билет офицера запаса'
+	WHEN '91' THEN 'Иные документы, выдаваемые органами МВД'
+	WHEN '39' THEN 'Миграционная карта'
+	WHEN '300' THEN 'Паспорт way(Реквизиты документа, удостоверяющего личность, представляют собой строку, в которой указаны последовательно серия и номер документа. Не допускается использование пробелов в поле данного типа)'													
+	WHEN '400' THEN 'Индивидуальный Идентификационный Номер (ИИН), цифровой код, присваивающийся физическому лицу один раз и пожизненно'
+		ELSE param
+	END;
+END;
+
+CREATE FUNCTION ChangeStatus(IN param CHARACTER) RETURNS CHARACTER
+BEGIN 
+	RETURN CASE param
+		WHEN 'OPEN' THEN 'Opened'
+		WHEN 'CLOSE' THEN 'Closed'
+		WHEN 'BLOCKED' THEN 'Arrested'	
+		ELSE param
+	END;
+END;
+
+CREATE FUNCTION ChangeStatusRS(IN param CHARACTER) RETURNS CHARACTER
+BEGIN 
+	RETURN CASE param
+		WHEN 'OPEN' THEN 'Opened'
+		WHEN 'CLOSE' THEN 'Closed'
+		WHEN 'BLOCKED' THEN 'Arrested'			
+		ELSE param
+	END;
+END;
+
+CREATE FUNCTION GetBalType(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+		WHEN 'AVAILABLE' THEN 'Avail'
+		WHEN 'CR_LIMIT' THEN 'CR_LIMIT'
+		WHEN 'PAYMENT' THEN	'AvailPmt'
+		WHEN 'RETAIL' THEN 'Retail'
+		WHEN 'STMT_BALANCE'	THEN 'Stmt_balance'
+		WHEN 'TOTAL_DUE' THEN 'Total_due'
+		WHEN 'OVD_01' THEN 'Ovd_01'
+					 
+		ELSE param
+	END;
+END;
+
+CREATE FUNCTION CompareDebit(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF param < '0' THEN
+		RETURN 'False';
+	ELSEIF param > '0' THEN
+		RETURN 'True';
+	END IF;
+				 
+END;
+
+
+CREATE FUNCTION changeValue(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+		WHEN 'YES' THEN 'true'
+		WHEN 'NO' THEN 'false'
+		ELSE param
+	END;
+END;
+
+CREATE FUNCTION GetStmtType(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+		WHEN 'Y' THEN 'Authorization'
+		WHEN 'N' THEN 'Financial'
+		ELSE param
+	END;
+END;
+
+/*CREATE FUNCTION GetId(OUT id INTEGER) RETURNS INTEGER
+LANGUAGE JAVA 
+EXTERNAL NAME "ru.croc.sbkz.adapters.sbolrs.getInt";*/
+
+/**
+ * Процедура сохранения параметров сообщения в БД, а
+ * также генерации идентификатора в соответствие с
+ * определенным алгоритмом.
+ * Реализована как внешняя процедура PL/SQL.
+ */
+CREATE PROCEDURE generateId(OUT file_id CHARACTER)
+LANGUAGE DATABASE
+EXTERNAL NAME "sbkz.gcvp_adapter_kz.generate_file_id";
+/**
+ *  Определение функции java хэшированяи строки
+ */
+CREATE PROCEDURE hash(IN days CHARACTER, IN serivce CHARACTER,OUT output CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.generateId";
+
+CREATE PROCEDURE CRC8(IN statusCode CHARACTER,OUT outputCode CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.crc8";
+
+CREATE PROCEDURE putQueue()
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.putQueue";
+
+CREATE PROCEDURE getID(OUT output CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.getID";
+
+CREATE PROCEDURE removeDigits(IN name CHARACTER, OUT output CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.removeDigits";
+
+CREATE PROCEDURE hash_one(IN enddate CHARACTER,IN startdate CHARACTER,OUT output CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.getdate"; 
+
+/*CREATE PROCEDURE comparerrn(IN number CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.compareRRN";*/ 
+
+CREATE FUNCTION changeType(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+		WHEN 'DB' THEN 'DC'
+		WHEN 'CR' THEN 'CC'
+		ELSE param
+	END;
+END;
+
+CREATE FUNCTION ConvertToDay(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	
+	DECLARE vAT01 CHARACTER;
+	DECLARE vAT02 CHARACTER;
+	
+	DECLARE day_format CHARACTER;
+	
+	SET vAT01 = SUBSTRING(param FROM 6 FOR 2);
+	SET vAT02 = SUBSTRING(param FROM 8 FOR 2);
+	
+	SET day_format = vAT02 || vAT01;
+	
+END;
+
+CREATE FUNCTION StatusGet(IN param CHARACTER, IN status CHARACTER) RETURNS CHARACTER
+BEGIN
+	
+	IF status <> '105' THEN
+	
+		RETURN CASE param
+			WHEN 'Valid' THEN 'Active'
+			WHEN 'Do not Honor' THEN 'Blocked'
+			WHEN 'Invalid' THEN 'Stoped'
+			WHEN 'Decline' THEN 'Blocked'						
+			ELSE param
+		END;
+	
+	ELSE
+		
+		RETURN CASE param
+			WHEN 'Valid' THEN 'Active'
+			WHEN 'Do not Honor' THEN 'Blocked'
+			WHEN 'Invalid' THEN 'Stoped'
+			WHEN 'Decline' THEN 'TempBlocked'						
+			ELSE param
+		END;
+		
+	END IF;
+	
+END;
+
+CREATE FUNCTION GetDate(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE vAT01 CHARACTER;
+	DECLARE vAT02 CHARACTER;
+	
+	DECLARE day_format CHARACTER;
+	DECLARE date_format CHARACTER;
+	
+	SET vAT01 = SUBSTRING(param FROM 0 FOR 3);
+	SET vAT02 = SUBSTRING(param FROM 3 FOR 2);
+	
+	CASE vAT02 
+	WHEN  '01' THEN
+		SET day_format = '31'; 
+	WHEN '02' THEN
+		SET day_format = '28';
+	WHEN '03' THEN
+		SET day_format = '31';
+	WHEN '04' THEN
+		SET day_format = '30';
+	WHEN '05' THEN
+		SET day_format = '31';
+	WHEN '06' THEN
+		SET day_format = '30';
+	WHEN '07' THEN
+		SET day_format = '31';
+	WHEN '08' THEN
+		SET day_format = '31';
+	WHEN '09' THEN
+		SET day_format = '30';
+	WHEN '10' THEN
+		SET day_format = '31';
+	WHEN '11' THEN
+		SET day_format = '30';
+	WHEN '12' THEN
+		SET day_format = '31';
+	END CASE;
+								 				
+	SET date_format = '20' || vAT01 || '-' || vAT02 || '-' || day_format;
+
+	RETURN date_format;
+END;
+
+
+CREATE FUNCTION DefineStatusBILLING(In status_code CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE status_code
+		WHEN '1' THEN 'Успешно'
+	    WHEN '-105' THEN 'Произошел TIMEOUT' -- Таймаут от любой системы   
+		WHEN '-100' THEN 'КСШ не доступно'	
+		WHEN '-400' THEN 'Одна из систем не вернула ответ'
+		WHEN '-2' THEN 'В системе произошла внутренняя ошибка'
+--		WHEN '2200' THEN 'Одна из систем не вернула ответ'
+		WHEN '-500' THEN 'В системе произошла внутренняя ошибка'		
+	ELSE 'В системе произошла внутренняя ошибка'
+		
+		
+	END;		
+END;
+
+CREATE FUNCTION DefineStatusForINTEGRA(In status_code CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE status_code
+		WHEN '1' THEN 'Успешно'
+	    WHEN '-105' THEN 'Time-out' -- Таймаут от любой системы   
+		WHEN '-100' THEN 'КСШ не доступно'
+		WHEN '-110' THEN 'В системе произошла внутренняя ошибка'		
+		WHEN '-400' THEN 'В системе произошла внутренняя ошибка'
+		WHEN '-2' THEN 'В системе произошла внутренняя ошибка'
+--		WHEN '2200' THEN 'Одна из систем не вернула ответ'
+		WHEN '-500' THEN 'В системе произошла внутренняя ошибка'
+		WHEN '12' THEN 'Автоплатежи не найдены'
+		WHEN '11' THEN 'Некорректный статус подписки (в ответ на запрос редактирования - можно редактировать только Активные и Приостановленные подписки)'
+		WHEN '13' THEN 'Подписка уже в нужном статусе'
+		WHEN '3' THEN 'Коды зарезервированы для других возможных неспецифичных ошибок'
+		WHEN '9' THEN 'Коды зарезервированы для других возможных неспецифичных ошибок'
+		WHEN '14' THEN 'Коды зарезервированы для других возможных специфичных ошибок'
+		WHEN '99' THEN 'Коды зарезервированы для других возможных специфичных ошибок'							
+	ELSE 'В системе произошла внутренняя ошибка'
+		
+		
+	END;		
+END;
+
+CREATE FUNCTION DefineStatusFORALL(In status_code CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE status_code
+		WHEN '0' THEN 'Успешно'
+	    WHEN '-105' THEN 'Произошел TIMEOUT' -- Таймаут от любой системы   
+		WHEN '-100' THEN 'КСШ не доступно'	
+		WHEN '-400' THEN 'Одна из систем не вернула ответ'
+		WHEN '-2' THEN 'В системе произошла внутренняя ошибка'
+--		WHEN '2200' THEN 'Одна из систем не вернула ответ'
+		WHEN '-500' THEN 'В системе произошла внутренняя ошибка'		
+	ELSE 'В системе произошла внутренняя ошибка'
+		
+		
+	END;		
+END;
+
+CREATE FUNCTION DefineStatusFORVKLADI(In status_code CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE status_code
+		WHEN '0' THEN 'Открытие вклада прошло успешно'
+	    WHEN '-105' THEN 'Произошел TIMEOUT' -- Таймаут от любой системы   
+		WHEN '-100' THEN 'КСШ не доступно'	
+		WHEN '-400' THEN 'Одна из систем не вернула ответ'
+		WHEN '-2' THEN 'Неизвестная ошибка открытия вклада'
+--		WHEN '2200' THEN 'Одна из систем не вернула ответ'
+		WHEN '-500' THEN 'Неизвестная ошибка открытия вклада'		
+	ELSE 'Неизвестная ошибка открытия вклада'
+		
+		
+	END;		
+END;
+
+CREATE FUNCTION DefineStatusCodeFORALL(In status_code CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE status_code
+		WHEN '0' THEN '0'
+		WHEN '-105' THEN '-105'
+		WHEN '-100' THEN '-100'	
+		WHEN '-400' THEN '-400'
+		WHEN '-2' THEN '-110'
+		WHEN '2200' THEN '-110'
+		WHEN '-500' THEN '-110'			
+		ELSE '-110'
+	END;		
+END;
+
+CREATE FUNCTION DefineStatusCodeFORVKLADI(In status_code CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE status_code
+		WHEN '0' THEN '0'
+		WHEN '-105' THEN '-105'
+		WHEN '-100' THEN '-100'	
+		WHEN '-400' THEN '-400'
+		WHEN '-2' THEN '-1'
+		WHEN '2200' THEN '-1'
+		WHEN '-500' THEN '-1'			
+		ELSE '-1'
+	END;		
+END;
+
+CREATE FUNCTION DefineStatusCode(In status_code CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE status_code
+		WHEN '0' THEN '0'
+		WHEN '-105' THEN '-105'
+		WHEN '-100' THEN '-100'	
+		WHEN '-400' THEN '-110'
+		WHEN '-2' THEN '-110'
+		WHEN '2200' THEN '-632'
+		WHEN '2400' THEN '-636'	
+		WHEN '-500' THEN '-110'
+		WHEN '12' THEN '12'				
+		WHEN '11' THEN '11'
+		WHEN '13' THEN '13'
+                WHEN '3' THEN '3'
+                WHEN '9' THEN '9'
+                WHEN '14' THEN '14'
+                WHEN '99' THEN '99'
+		ELSE '-110'
+	END;		
+END;
+
+CREATE FUNCTION DefineStatusCodeBILLING(In status_code CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE status_code
+		WHEN '1' THEN '0'
+		WHEN '-1' THEN '-110'
+		WHEN '0' THEN '-105'
+		WHEN '-4' THEN '-105'	
+		WHEN '-105' THEN '-105'
+		WHEN '-100' THEN '-105'	
+		WHEN '-400' THEN '-105'
+		WHEN '-2' THEN '-105'
+		WHEN '2200' THEN '-105'
+		WHEN '-500' THEN '-105'			
+		ELSE '-105'
+	END;		
+END;
+
+CREATE FUNCTION DefineStatusCodeGFL(In status_code CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE status_code
+		WHEN '0' THEN '0'
+		WHEN '-105' THEN '-105'
+		WHEN '-100' THEN '-100'	
+		WHEN '-400' THEN '-400'
+		WHEN '-2' THEN '-400'
+		WHEN '2200' THEN '-400'
+		WHEN '-500' THEN '-400'			
+		ELSE '-400'
+	END;		
+END;
+
+CREATE FUNCTION DefineStatus(In status_code CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE status_code
+		WHEN '0' THEN 'Успешно'
+	    WHEN '-105' THEN 'Произошел TIMEOUT'   
+		WHEN '-100' THEN 'КСШ не доступно'	
+		WHEN '-110' THEN 'В системе произошла внутренняя ошибка'
+		WHEN '-120' THEN 'Указанная карта не найдена в системе'
+		WHEN '2200' THEN 'Указанная карта не найдена в системе'
+		WHEN '2400' THEN 'Указанная карта не найдена в системе'					
+		WHEN '-400' THEN 'Одна из систем не вернула ответ'
+		WHEN '-2' THEN 'В системе произошла внутренняя ошибка'
+--		WHEN '2200' THEN 'Одна из систем не вернула ответ'
+		WHEN '-500' THEN 'В системе произошла внутренняя ошибка'		
+		ELSE 'В системе произошла внутренняя ошибка'
+	END;		
+END;
+
+
+CREATE FUNCTION DefineStatusCodeInt(In status_code CHARACTER) RETURNS CHARACTER
+BEGIN	
+	DECLARE varASD INTEGER 0;
+	DECLARE varZXC CHARACTER ' ';
+    
+	SET varASD	= CAST(status_code AS INTEGER);
+
+	CASE varASD
+		WHEN -2 THEN SET varASD = -110;
+	    WHEN 2200 THEN SET varASD = -400; 
+		WHEN -500 THEN SET varASD = -400;			
+	END CASE;
+
+	IF varASD > 0 THEN 
+	  SET varZXC	= '-110';
+	ELSE 
+	  SET varZXC	= CAST(varASD AS CHARACTER);
+	END IF;
+	
+    RETURN varZXC;	
+END;
+
+-- Возвращает тип валюты
+CREATE FUNCTION GetTypeOfCurrency(IN currency CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE currency
+		WHEN '964' THEN 'PAD'
+		WHEN '962' THEN 'PAT'
+		WHEN '959' THEN 'AUR'
+		WHEN '961' THEN 'ARG'
+		ELSE ''			
+	END;
+END;
+
+CREATE FUNCTION GetTypeOfCurrencyIMA(IN currency CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE currency
+		WHEN '964' THEN 'XPD'
+		WHEN '962' THEN 'XPT'
+		WHEN '959' THEN 'XAU'
+		WHEN '961' THEN 'XAG'
+		ELSE ''			
+	END;
+END;
+
+-- Возвращает тип валюты
+CREATE FUNCTION GetCurrency(IN currency CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE currency
+		WHEN 'Тенге' THEN 'KZT'
+		WHEN 'Рубль' THEN 'RUB'
+		WHEN '959' THEN 'AUR'
+		WHEN '961' THEN 'ARG'
+		ELSE ''			
+	END;
+END;
+
+-- Возвращает вид элемента
+CREATE FUNCTION GetNameOfCurrency(IN currency CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE currency
+		WHEN 'XPD' THEN 'Палладий'
+		WHEN 'XPT' THEN 'Платина'
+		WHEN 'XAU' THEN 'Золото'
+		WHEN 'XAG' THEN 'Серебро'
+		ELSE ''			
+	END;
+END;
+
+-- Возвращает вид элемента
+CREATE FUNCTION GetStatusOfCurrency(IN status CHARACTER, IN blocked CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF status = 'OPEN' AND blocked = 'Y' THEN
+		RETURN 'Arrested';
+	ELSEIF status ='CLOSE' AND blocked = 'Y' THEN
+		RETURN 'Closed';
+	ELSEIF status = 'OPEN' AND blocked = 'N' THEN
+		RETURN 'Opened';
+	ELSEIF status = 'CLOSE' AND blocked = 'N' THEN
+		RETURN 'Closed';
+	ELSEIF status = 'BLOCKED' THEN
+		RETURN 'Arrested';				
+	END IF;	
+END;
+
+
+CREATE FUNCTION DateExpiryFunc(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE vAT01 CHARACTER;
+	DECLARE vAT02 CHARACTER;
+
+	SET vAT01 = SUBSTRING(param FROM 3 FOR 2);
+	SET vAT02 = SUBSTRING(param FROM 6 FOR 2);
+	
+	DECLARE date_format CHARACTER;							 				
+	SET date_format = vAT01 || vAT02;
+	RETURN date_format;
+END;
+
+CREATE PROCEDURE removeChar(IN name CHARACTER, OUT output CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.removeString";

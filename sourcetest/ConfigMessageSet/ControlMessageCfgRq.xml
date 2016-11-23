@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tns:ControlMessage xmlns:tns="http://www.croc.ru/sbrf/router/config/xml/ControlMessage" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.croc.ru/sbrf/router/config/xml/ControlMessage ControlMessage.xsd ">
+  	<tns:ConfigRequest>
+	  <tns:Router>router1</tns:Router>
+	  <tns:RequestedBy>admin1</tns:RequestedBy>
+	</tns:ConfigRequest>
+</tns:ControlMessage>
+

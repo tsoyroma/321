@@ -1,0 +1,833 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmAggregateReply.msgnode="ComIbmAggregateReply.msgnode" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmLabel.msgnode="ComIbmLabel.msgnode" xmlns:ComIbmMQInput.msgnode="ComIbmMQInput.msgnode" xmlns:ComIbmMQOutput.msgnode="ComIbmMQOutput.msgnode" xmlns:ComIbmRouteToLabel.msgnode="ComIbmRouteToLabel.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow" xmlns:ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow="ru/croc/sbrf/bp/common/flow/ErrorHandlerSubflow.msgflow"
+    xmlns:ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_TimeoutAggrSubflow.msgflow="ru/croc/sbrf/bp/common/flow/TimeoutAggrSubflow.msgflow" xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbkz/adapters/pragmanew/flow/ResponseForESB.msgflow"
+    nsPrefix="ru_croc_sbkz_adapters_pragmanew_flow_ResponseForESB.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.AggrName" name="AggrName" lowerBound="1" defaultValueLiteral="A_PRAGMA_NEW_INPUT">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.AggrName_TSM" name="AggrName_TSM" lowerBound="1" defaultValueLiteral="A_PRAGMA_NEW_TSM">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="ResponseForESB" bundleName="ru/croc/sbkz/adapters/pragmanew/flow/ResponseForESB" pluginId="AdaptersKZ"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/AdaptersKZ/icons/full/obj16/ResponseForESB.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/AdaptersKZ/icons/full/obj30/ResponseForESB.gif"/>
+    <composition>
+      <nodes xmi:type="ComIbmMQInput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="-34,88" queueName="ESB.PRAGMANEW.RESPONSE" messageDomainProperty="XMLNSC">
+        <translation xmi:type="utility:ConstantString" string="ESB.PRAGMANEW.RESPONSE"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_2" location="154,88" EventReceiverProp="A_PRAGMA_NEW" EventSourceProp="PRAGMA_NEW">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflow"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateReply.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_3" location="448,79">
+        <translation xmi:type="utility:ConstantString" string="Aggregate Reply"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_4" location="546,80" CurrentOperation="Получен ответ от МАБПК Прагма" CurrentEventSource="PRAGMA_NEW" CurrentEventReceiver="A_PRAGMA_NEW" IsAggregate="true" SourceQueue="ESB.PRAGMANEW.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="PRAGMA_NEW -> A_PRAGMA_NEW"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_5" location="755,80" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_RetrieveHeader.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="RetrieveHeader"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_6" location="970,81" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_Route.Main" computeMode="destination">
+        <translation xmi:type="utility:ConstantString" string="Route"/>
+      </nodes>
+      <nodes xmi:type="ComIbmRouteToLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_7" location="1115,82">
+        <translation xmi:type="utility:ConstantString" string="Route To Label"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_8" location="8,174" labelName="KZBlackListRs">
+        <translation xmi:type="utility:ConstantString" string="KZBlackListRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_9" location="134,174" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO1.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO1"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_11" location="625,386" CurrentOperation="Сообщение обработано адаптером МАБПК Прагма и передано для дальнейшей обработки" CurrentEventSource="A_PRAGMA_NEW" CurrentEventReceiver="ESB" SourceQueue="ESB.PRAGMANEW.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="A_PRAGMA_NEW -> ESB"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_TimeoutAggrSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_12" location="523,7" EventSource="PRAGMA_NEW" EventReceiver="A_PRAGMA_NEW" QueueName="ESB.PRAGMANEW.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="TimeoutAggrSubflow"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_13" location="456,382" destinationMode="list">
+        <translation xmi:type="utility:ConstantString" string="QRESPONSE"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_10" location="-23,242" labelName="KZGetPersonInfoByAttrRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetPersonInfoByAttrRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_14" location="134,242" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO2.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO2"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_15" location="-20,310" labelName="ReportServiceResponses">
+        <translation xmi:type="utility:ConstantString" string="ReportServiceResponses"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_16" location="134,310" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO3.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO3"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_17" location="-22,382" labelName="KZGetTransactionsInfoRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetTransactionsInfoRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_18" location="134,382" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO4.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO4"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_19" location="-19,450" labelName="KZGetPersonInfoByIDRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetPersonInfoByIDRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_20" location="134,450" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO5.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO5"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_21" location="-28,513" labelName="KZSendPrivateClientDataRs">
+        <translation xmi:type="utility:ConstantString" string="KZSendPrivateClientDataRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_22" location="134,513" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO6.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO6"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_23" location="-43,576" labelName="KZGetPrivateClientAccountListRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetPrivateClientAccountListRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_24" location="134,576" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO7.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO7"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_25" location="-18,647" labelName="KZGetCurrencyRateRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetCurrencyRateRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_26" location="113,647" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_CurrRate.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_CurrRate"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_27" location="85,3459" labelName="KZLegalPayDocRs">
+        <translation xmi:type="utility:ConstantString" string="KZLegalPayDocRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_28" location="295,3459" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_PayDoc.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_PayDoc"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_29" location="665,9" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ProcessTimeout.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="ProcessTimeout"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_30" location="757,10" CurrentOperation="Обработка таймаута ответа МАБПК" CurrentEventSource="PRAGMA_NEW" CurrentEventReceiver="A_PRAGMA_NEW" SourceQueue="ESB.PRAGMANEW.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="PRAGMA_NEW -> A_PRAGMA_NEW TIMEOUT"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_31" location="-33,719" labelName="KZLegalGetPayDocStatusRs">
+        <translation xmi:type="utility:ConstantString" string="KZLegalGetPayDocStatusRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_32" location="121,719" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_Status.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_Status"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_33" location="-51,786" labelName="KZLegalGetAccountStatementRs">
+        <translation xmi:type="utility:ConstantString" string="KZLegalGetAccountStatementRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_34" location="122,790" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_Statement.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_Statement"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_35" location="-53,1055" labelName="KZTechnicalRequestProviderRq_XTX008">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX008"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_36" location="233,2176" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO10.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO10"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_37" location="159,936" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO8.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO8"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_38" location="-17,2176" labelName="KZPaymentProviderRq_XTX002">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX002"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_39" location="-56,936" labelName="KZTechnicalRequestProviderRq_XTX001">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX001"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_40" location="-18,2292" labelName="KZPaymentProviderRq_XTX009">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX009"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_41" location="180,1055" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO9.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO9"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_42" location="242,2292" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO11.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO11"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_43" location="-28,863" labelName="KZPrivateMoneyTransferRs">
+        <translation xmi:type="utility:ConstantString" string="KZPrivateMoneyTransferRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_44" location="127,863" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_Transfer.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_Transfer"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_45" location="82,3516" labelName="KZLegalCurrOperRs">
+        <translation xmi:type="utility:ConstantString" string="KZLegalCurrOperRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_47" location="77,3574" labelName="KZLegalCanPayDocRs">
+        <translation xmi:type="utility:ConstantString" string="KZLegalCanPayDocRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_46" location="-53,1112" labelName="KZTechnicalRequestProviderRq_XTX011">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX011"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_48" location="180,1112" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO12.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO12"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_49" location="-44,1609" labelName="KZTechnicalRequestProviderRq_XTX027">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX027"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_50" location="223,1609" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO13.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO13"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_51" location="-19,2408" labelName="KZPaymentProviderRq_XTX012">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX012"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_52" location="240,2408" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO14.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO14"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_53" location="28,2823" labelName="KZPaymentProviderRq_XTX028">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX028"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_54" location="279,2823" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO15.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO15"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_55" location="75,3633" labelName="KZGetCalcLoanDeptRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetCalcLoanDeptRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_56" location="294,3633" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_GetCalcLoan.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_GetCalcLoan"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_57" location="-19,2350" labelName="KZPaymentProviderRq_XTX010">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX010"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_58" location="240,2350" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO16.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO16"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_59" location="-57,1284" labelName="KZTechnicalRequestProviderRq_XTX018_1">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX018_1"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_60" location="175,1284" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX018_1.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX018_1"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_61" location="32,2713" labelName="KZPaymentProviderRq_XTX026">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX026"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_62" location="31,2769" labelName="KZPaymentProviderRq_XTX030">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX030"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_63" location="255,2713" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX026.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX026"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_64" location="196,1492" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX025.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX025"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_65" location="-44,1492" labelName="KZTechnicalRequestProviderRq_XTX025">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX025"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_66" location="-46,1551" labelName="KZTechnicalRequestProviderRq_XTX029">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX029"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_67" location="85,3691" labelName="KZGetCardInfoRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetCardInfoRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_68" location="296,3691" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_GetCardInfo.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_GetCardInfo"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_69" location="66,3747" labelName="KZGetScheduleEffRateRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetScheduleEffRateRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_70" location="324,3747" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO17.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO17"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_71" location="182,1341" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX018_2.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX018_2"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_72" location="-57,1341" labelName="KZTechnicalRequestProviderRq_XTX018_2">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX018_2"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_73" location="-19,2594" labelName="KZPaymentProviderRq_XTX019">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX019"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_74" location="250,2594" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX019.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX019"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_75" location="-20,2465" labelName="KZPaymentProviderRq_XTX014">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX014"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_76" location="225,2465" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX014.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX014"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_77" location="-54,1169" labelName="KZTechnicalRequestProviderRq_XTX013">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX013"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_78" location="170,1169" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX013.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX013"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_79" location="69,3803" labelName="KZGetCrossCurrRateRs">
+        <translation xmi:type="utility:ConstantString" string="lKZGetCrossCurrRateRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_80" location="295,3803" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_CrossCurrRate.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_CrossCurrRate"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_81" location="51,3858" labelName="KZPrivateMoneyTransferCanRs">
+        <translation xmi:type="utility:ConstantString" string="KZPrivateMoneyTransferCanRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_82" location="298,3858" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_TransferCancel.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_TransferCancel"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_83" location="42,3914" labelName="KZGetPrivateClientPayScheduleRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetPrivateClientPayScheduleRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_84" location="336,3914" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO18.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO18"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_85" location="82,3973" labelName="KZGetDepInfoRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetDepInfoRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_86" location="319,3973" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_GetDepInfo.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_GetDepInfo"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_87" location="-54,999" labelName="KZTechnicalRequestProviderRq_XTX003">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX003"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_88" location="159,999" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX003.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX003"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_89" location="219,2234" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX004.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX004"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_90" location="-17,2234" labelName="KZPaymentProviderRq_XTX004">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX004"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_91" location="-53,1228" labelName="KZTechnicalRequestProviderRq_XTX016">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX016"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_92" location="173,1228" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX016.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX016"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_93" location="227,2521" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX017.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX017"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_94" location="-20,2521" labelName="KZPaymentProviderRq_XTX017">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX017"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_95" location="75,4029" labelName="KZCheckPersonIdRs">
+        <translation xmi:type="utility:ConstantString" string="KZCheckPersonIdRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_96" location="312,4029" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_CheckPersonId.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_CheckPersonId"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_97" location="60,4087" labelName="KZGetBackOfficeDateNfRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetBackOfficeDateNfRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_98" location="313,4087" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_BackOfficeDate.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_BackOfficeDate"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_99" location="316,4145" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_SalaryTurnover.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_SalaryTurnover"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_100" location="65,4145" labelName="KZGetSalaryTurnoverRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetSalaryTurnoverRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_101" location="71,4203" labelName="KZGetCreditHistoryRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetCreditHistoryRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_102" location="321,4203" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_CreditHistory.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_CreditHistory"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_103" location="64,4261" labelName="KZGetLegalInfoByAttrRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetLegalInfoByAttrRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_104" location="325,4261" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_GetLegalInfo.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_GetLegalInfo"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_105" location="61,4317" labelName="KZMngSMSInfoServiceRs">
+        <translation xmi:type="utility:ConstantString" string="KZMngSMSInfoServiceRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_106" location="352,4317" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_SMS.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_SMS"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_107" location="69,4375" labelName="KZComplexPayDocRs">
+        <translation xmi:type="utility:ConstantString" string="KZComplexPayDocRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_108" location="363,4375" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO19.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO19"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_109" location="84,4432" labelName="KZSAPSaldoRs">
+        <translation xmi:type="utility:ConstantString" string="KZSAPSaldoRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_110" location="350,4432" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_SAPSaldo.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_SAPSaldo"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_111" location="60,4491" labelName="KZGetLegalProfitabilityRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetLegalProfitabilityRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_112" location="372,4491" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_Profit.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_Profit"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_113" location="32,2652" labelName="KZPaymentProviderRq_XTX024">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX024"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_114" location="251,2652" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX024.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX024"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_115" location="193,1418" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX23.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX23"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_116" location="-51,1418" labelName="KZTechnicalRequestProviderRq_XTX023">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX023"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_117" location="-44,1676" labelName="KZTechnicalRequestProviderRq_XTX052">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX052"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_118" location="207,1676" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX052.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX052"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_119" location="28,2889" labelName="KZPaymentProviderRq_XTX053">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX053"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_120" location="263,2889" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX053.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX053"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_121" location="-46,1738" labelName="KZTechnicalRequestProviderRq_XTX046">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX046"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_122" location="210,1738" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX046.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX046"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_123" location="28,2953" labelName="KZPaymentProviderRq_XTX047">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX047"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_124" location="265,2953" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX047.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX047"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_125" location="-52,1796" labelName="KZTechnicalRequestProviderRq_XTX044">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX044"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_126" location="210,1796" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX044.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX044"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_127" location="29,3023" labelName="KZPaymentProviderRq_XTX045">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX045"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_128" location="271,3023" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX045.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX045"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_129" location="-46,1858" labelName="KZTechnicalRequestProviderRq_XTX050">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX050"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_130" location="218,1858" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX050.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX050"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_131" location="27,3091" labelName="KZPaymentProviderRq_XTX051">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX051"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_132" location="275,3091" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX051.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX051"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_133" location="-45,1917" labelName="KZTechnicalRequestProviderRq_XTX056">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX056"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_134" location="217,1917" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX056.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX056"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_135" location="27,3157" labelName="KZPaymentProviderRq_XTX057">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX057"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_136" location="284,3157" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX057.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX057"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_137" location="-48,1977" labelName="KZTechnicalRequestProviderRq_XTX048">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX048"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_138" location="217,1977" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX048.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX048"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_139" location="29,3221" labelName="KZPaymentProviderRq_XTX049">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX049"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_140" location="287,3221" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX049.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX049"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_141" location="-49,2037" labelName="KZTechnicalRequestProviderRq_XTX042">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX042"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_142" location="218,2037" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX042.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX042"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_143" location="29,3282" labelName="KZPaymentProviderRq_XTX043">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX043"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_144" location="293,3282" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX043.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX043"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_145" location="-48,2098" labelName="KZTechnicalRequestProviderRq_XTX054">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX054"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_146" location="220,2098" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX054.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX054"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_147" location="30,3343" labelName="KZPaymentProviderRq_XTX055">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX055"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_148" location="293,3343" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX055.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX055"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_149" location="73,4555" labelName="KZGetPersonInfoTest">
+        <translation xmi:type="utility:ConstantString" string="KZGetPersonInfoTest"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_150" location="356,4555" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_PersonInfo.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_PersonInfo"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_151" location="78,4666" labelName="KZADMFinRequest">
+        <translation xmi:type="utility:ConstantString" string="KZADMFinRequest"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_152" location="361,4666" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_ADM002.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_ADM002"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_155" location="79,4610" labelName="KZADMTechRequest">
+        <translation xmi:type="utility:ConstantString" string="KZADMTechRequest"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_156" location="362,4610" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_ADM001.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_ADM001"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_153" location="78,4718" labelName="KZResponseGESV">
+        <translation xmi:type="utility:ConstantString" string="KZResponseGESV"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_154" location="369,4717" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_ResponseGESV.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_ResponseGESV"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_157" location="367,4768" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_GSLResponse.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_GSLResponse"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_158" location="76,4769" labelName="KZGSLResponse">
+        <translation xmi:type="utility:ConstantString" string="KZGSLResponse"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_159" location="361,4820" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_BankAccountResponse.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_BankAccountResponse"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_160" location="70,4821" labelName="KZBankAccountResponse">
+        <translation xmi:type="utility:ConstantString" string="KZBankAccountResponse"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_161" location="89,4884" labelName="KZGetCurrencyRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetCurrencyRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_162" location="379,4884" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_CurrencyResponse.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_CurrencyResponse"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_163" location="87,4958" labelName="KZGetBackOfficeRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetBackOfficeRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_164" location="392,4958" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_GetBackOffice.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_GetBackOffice"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_165" location="69,5031" labelName="KZGetCreditHistoryCorpRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetCreditHistoryCorpRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_166" location="389,5031" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_CreditHistoryCorp.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_CreditHistoryCorp"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_167" location="104,5085" labelName="KZSBDKQP">
+        <translation xmi:type="utility:ConstantString" string="KZSBDKQP"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_168" location="424,5087" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_SBDKQP.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_SBDKQP"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_169" location="61,5148" labelName="KZPaymentProviderRq_XTX061">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX061"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_170" location="318,5148" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX061.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX061"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_171" location="53,5217" labelName="KZTechnicalRequestProviderRq_XTX060">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX060"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_172" location="315,5217" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX060.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX060"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_173" location="332,5295" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX063.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX063"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_174" location="75,5295" labelName="KZPaymentProviderRq_XTX063">
+        <translation xmi:type="utility:ConstantString" string="KZPaymentProviderRq_XTX063"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_175" location="67,5364" labelName="KZTechnicalRequestProviderRq_XTX062">
+        <translation xmi:type="utility:ConstantString" string="KZTechnicalRequestProviderRq_XTX062"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_176" location="329,5364" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_XTX062.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_XTX062"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_181" location="114,5612" labelName="KZDepChkAddRs">
+        <translation xmi:type="utility:ConstantString" string="KZDepChkAddRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_182" location="405,5612" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_KZDepChkAddRs.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_KZDepChkAddRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_183" location="108,5681" labelName="KZNewDepAddFillRs">
+        <translation xmi:type="utility:ConstantString" string="KZNewDepAddFillRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_184" location="408,5681" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_KZNewDepAddFillRs.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_KZNewDepAddFillRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_177" location="82,5428" labelName="KZGetContractListRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetContractListRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_178" location="344,5428" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_KZGetContractListRs.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_KZGetContractListRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_179" location="90,5489" labelName="KZGetClientInfoRs">
+        <translation xmi:type="utility:ConstantString" string="KZGetClientInfoRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_180" location="362,5488" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_GetClientInfo.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_GetClientInfo"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_185" location="284,84" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_DefineServices.Main" computeMode="destinationAndMessage">
+        <translation xmi:type="utility:ConstantString" string="DefineServices"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateReply.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_186" location="450,203">
+        <translation xmi:type="utility:ConstantString" string="Aggregate Reply_TSM"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_187" location="96,5547" labelName="KZDepositSyncRs">
+        <translation xmi:type="utility:ConstantString" string="KZDepositSyncRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_188" location="365,5546" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_DepositSyncRs.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_DepositSyncRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_189" location="120,5757" labelName="KZDepositStatusRs">
+        <translation xmi:type="utility:ConstantString" string="KZDepositStatusRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_190" location="389,5756" computeExpression="esql://routine/ru.croc.sbkz.adapters.pragmanew.esql#ResponseForESB_ConvertNewPragma2MDO_KZDepositStatusRs.Main">
+        <translation xmi:type="utility:ConstantString" string="ConvertNewPragma2MDO_KZDepositStatusRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_191" location="569,5844" labelName="OrganizationGetClient">
+        <translation xmi:type="utility:ConstantString" string="OrganizationGetClient"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_192" location="575,5918" labelName="OrgSync_CRM">
+        <translation xmi:type="utility:ConstantString" string="OrgSync_CRM"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_193" location="603,5993" labelName="Report-Rent">
+        <translation xmi:type="utility:ConstantString" string="Report-Rent"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_194" location="612,6051" labelName="QIWI_AcctGetStatement">
+        <translation xmi:type="utility:ConstantString" string="QIWI_AcctGetStatement"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_195" location="741,6115" labelName="OpenAccountRs">
+        <translation xmi:type="utility:ConstantString" string="OpenAccountRs"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_196" location="659,6166" labelName="PersonGetPensionInfo">
+        <translation xmi:type="utility:ConstantString" string="PersonGetPensionInfo"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.catch" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_12" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.unknown" targetTerminalName="InTerminal.Input">
+        <bendPoints>31,-55,-55,16</bendPoints>
+      </connections>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_12" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.timeout" targetTerminalName="InTerminal.Input1">
+        <bendPoints>53,-40,-33,31</bendPoints>
+      </connections>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_8" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_10" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_6" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_11" targetNode="FCMComposite_1_9" sourceNode="FCMComposite_1_8" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_12" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_9" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_13" targetNode="FCMComposite_1_11" sourceNode="FCMComposite_1_13" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_14" targetNode="FCMComposite_1_14" sourceNode="FCMComposite_1_10" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_15" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_14" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_16" targetNode="FCMComposite_1_16" sourceNode="FCMComposite_1_15" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_17" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_16" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_18" targetNode="FCMComposite_1_18" sourceNode="FCMComposite_1_17" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_19" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_18" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_20" targetNode="FCMComposite_1_20" sourceNode="FCMComposite_1_19" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_21" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_20" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_22" targetNode="FCMComposite_1_22" sourceNode="FCMComposite_1_21" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_23" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_22" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_24" targetNode="FCMComposite_1_24" sourceNode="FCMComposite_1_23" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_25" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_24" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_28" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_9" targetNode="FCMComposite_1_26" sourceNode="FCMComposite_1_25" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_26" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_26" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_27" targetNode="FCMComposite_1_28" sourceNode="FCMComposite_1_27" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_29" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_28" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_30" targetNode="FCMComposite_1_29" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.timeout" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_33" targetNode="FCMComposite_1_30" sourceNode="FCMComposite_1_29" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_34" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_30" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_35" targetNode="FCMComposite_1_32" sourceNode="FCMComposite_1_31" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_36" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_32" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_31" targetNode="FCMComposite_1_34" sourceNode="FCMComposite_1_33" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_32" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_34" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_37" targetNode="FCMComposite_1_41" sourceNode="FCMComposite_1_35" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_38" targetNode="FCMComposite_1_36" sourceNode="FCMComposite_1_38" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_39" targetNode="FCMComposite_1_37" sourceNode="FCMComposite_1_39" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_40" targetNode="FCMComposite_1_42" sourceNode="FCMComposite_1_40" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_41" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_37" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_42" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_41" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_43" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_36" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_44" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_42" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_45" targetNode="FCMComposite_1_44" sourceNode="FCMComposite_1_43" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_46" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_44" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_51" targetNode="FCMComposite_1_28" sourceNode="FCMComposite_1_45" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_52" targetNode="FCMComposite_1_28" sourceNode="FCMComposite_1_47" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_47" targetNode="FCMComposite_1_48" sourceNode="FCMComposite_1_46" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_48" targetNode="FCMComposite_1_50" sourceNode="FCMComposite_1_49" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_49" targetNode="FCMComposite_1_52" sourceNode="FCMComposite_1_51" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_50" targetNode="FCMComposite_1_54" sourceNode="FCMComposite_1_53" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_53" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_48" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_54" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_52" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_55" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_54" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_56" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_50" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_57" targetNode="FCMComposite_1_56" sourceNode="FCMComposite_1_55" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_58" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_56" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_59" targetNode="FCMComposite_1_58" sourceNode="FCMComposite_1_57" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_60" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_58" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_61" targetNode="FCMComposite_1_60" sourceNode="FCMComposite_1_59" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_62" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_60" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_63" targetNode="FCMComposite_1_63" sourceNode="FCMComposite_1_61" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_64" targetNode="FCMComposite_1_63" sourceNode="FCMComposite_1_62" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_65" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_63" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_66" targetNode="FCMComposite_1_64" sourceNode="FCMComposite_1_65" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_67" targetNode="FCMComposite_1_64" sourceNode="FCMComposite_1_66" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_68" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_64" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_69" targetNode="FCMComposite_1_68" sourceNode="FCMComposite_1_67" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_70" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_68" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_71" targetNode="FCMComposite_1_70" sourceNode="FCMComposite_1_69" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_72" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_70" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_73" targetNode="FCMComposite_1_71" sourceNode="FCMComposite_1_72" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_74" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_71" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_75" targetNode="FCMComposite_1_74" sourceNode="FCMComposite_1_73" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_76" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_74" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_77" targetNode="FCMComposite_1_76" sourceNode="FCMComposite_1_75" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_78" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_76" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_79" targetNode="FCMComposite_1_78" sourceNode="FCMComposite_1_77" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_80" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_78" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_81" targetNode="FCMComposite_1_80" sourceNode="FCMComposite_1_79" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_82" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_80" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_83" targetNode="FCMComposite_1_82" sourceNode="FCMComposite_1_81" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_84" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_82" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_85" targetNode="FCMComposite_1_84" sourceNode="FCMComposite_1_83" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_86" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_84" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_87" targetNode="FCMComposite_1_86" sourceNode="FCMComposite_1_85" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_88" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_86" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_89" targetNode="FCMComposite_1_88" sourceNode="FCMComposite_1_87" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_90" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_88" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_91" targetNode="FCMComposite_1_89" sourceNode="FCMComposite_1_90" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_92" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_89" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_93" targetNode="FCMComposite_1_92" sourceNode="FCMComposite_1_91" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_94" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_92" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_95" targetNode="FCMComposite_1_93" sourceNode="FCMComposite_1_94" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_96" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_93" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_97" targetNode="FCMComposite_1_96" sourceNode="FCMComposite_1_95" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_98" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_96" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_99" targetNode="FCMComposite_1_98" sourceNode="FCMComposite_1_97" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_100" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_98" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_101" targetNode="FCMComposite_1_99" sourceNode="FCMComposite_1_100" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_102" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_99" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_103" targetNode="FCMComposite_1_102" sourceNode="FCMComposite_1_101" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_104" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_102" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_105" targetNode="FCMComposite_1_104" sourceNode="FCMComposite_1_103" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_106" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_104" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_107" targetNode="FCMComposite_1_106" sourceNode="FCMComposite_1_105" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_108" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_106" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_109" targetNode="FCMComposite_1_108" sourceNode="FCMComposite_1_107" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_110" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_108" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_111" targetNode="FCMComposite_1_110" sourceNode="FCMComposite_1_109" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_112" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_110" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_113" targetNode="FCMComposite_1_112" sourceNode="FCMComposite_1_111" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_114" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_112" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_115" targetNode="FCMComposite_1_114" sourceNode="FCMComposite_1_113" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_116" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_114" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_117" targetNode="FCMComposite_1_115" sourceNode="FCMComposite_1_116" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_118" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_115" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_119" targetNode="FCMComposite_1_118" sourceNode="FCMComposite_1_117" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_120" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_118" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_121" targetNode="FCMComposite_1_120" sourceNode="FCMComposite_1_119" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_122" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_120" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_123" targetNode="FCMComposite_1_122" sourceNode="FCMComposite_1_121" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_124" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_122" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_125" targetNode="FCMComposite_1_124" sourceNode="FCMComposite_1_123" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_126" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_124" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_127" targetNode="FCMComposite_1_126" sourceNode="FCMComposite_1_125" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_128" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_126" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_129" targetNode="FCMComposite_1_128" sourceNode="FCMComposite_1_127" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_130" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_128" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_131" targetNode="FCMComposite_1_130" sourceNode="FCMComposite_1_129" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_132" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_130" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_133" targetNode="FCMComposite_1_132" sourceNode="FCMComposite_1_131" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_134" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_132" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_135" targetNode="FCMComposite_1_134" sourceNode="FCMComposite_1_133" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_136" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_134" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_137" targetNode="FCMComposite_1_136" sourceNode="FCMComposite_1_135" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_138" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_136" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_139" targetNode="FCMComposite_1_138" sourceNode="FCMComposite_1_137" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_140" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_138" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_141" targetNode="FCMComposite_1_140" sourceNode="FCMComposite_1_139" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_142" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_140" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_143" targetNode="FCMComposite_1_142" sourceNode="FCMComposite_1_141" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_144" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_142" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_145" targetNode="FCMComposite_1_144" sourceNode="FCMComposite_1_143" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_146" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_144" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_147" targetNode="FCMComposite_1_146" sourceNode="FCMComposite_1_145" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_148" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_146" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_149" targetNode="FCMComposite_1_148" sourceNode="FCMComposite_1_147" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_150" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_148" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_151" targetNode="FCMComposite_1_150" sourceNode="FCMComposite_1_149" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_152" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_150" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_153" targetNode="FCMComposite_1_152" sourceNode="FCMComposite_1_151" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_154" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_152" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_157" targetNode="FCMComposite_1_156" sourceNode="FCMComposite_1_155" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_158" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_156" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_155" targetNode="FCMComposite_1_154" sourceNode="FCMComposite_1_153" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_156" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_154" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_159" targetNode="FCMComposite_1_157" sourceNode="FCMComposite_1_158" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_160" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_157" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_161" targetNode="FCMComposite_1_159" sourceNode="FCMComposite_1_160" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_162" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_159" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_163" targetNode="FCMComposite_1_162" sourceNode="FCMComposite_1_161" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_164" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_162" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_165" targetNode="FCMComposite_1_164" sourceNode="FCMComposite_1_163" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_166" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_164" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_167" targetNode="FCMComposite_1_166" sourceNode="FCMComposite_1_165" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_168" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_166" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_169" targetNode="FCMComposite_1_168" sourceNode="FCMComposite_1_167" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_170" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_168" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_171" targetNode="FCMComposite_1_170" sourceNode="FCMComposite_1_169" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_172" targetNode="FCMComposite_1_172" sourceNode="FCMComposite_1_171" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_173" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_172" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_174" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_170" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_175" targetNode="FCMComposite_1_176" sourceNode="FCMComposite_1_175" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_176" targetNode="FCMComposite_1_173" sourceNode="FCMComposite_1_174" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_177" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_173" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_178" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_176" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_183" targetNode="FCMComposite_1_182" sourceNode="FCMComposite_1_181" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_184" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_182" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_185" targetNode="FCMComposite_1_184" sourceNode="FCMComposite_1_183" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_186" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_184" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_178" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_179" targetNode="FCMComposite_1_178" sourceNode="FCMComposite_1_177" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_180" targetNode="FCMComposite_1_180" sourceNode="FCMComposite_1_179" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_181" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_180" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_182" targetNode="FCMComposite_1_185" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_185" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_185" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_187" targetNode="FCMComposite_1_186" sourceNode="FCMComposite_1_185" sourceTerminalName="OutTerminal.out1" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_188" targetNode="FCMComposite_1_29" sourceNode="FCMComposite_1_186" sourceTerminalName="OutTerminal.timeout" targetTerminalName="InTerminal.in">
+        <bendPoints>194,-55,-15,139</bendPoints>
+      </connections>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_189" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_186" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_190" targetNode="FCMComposite_1_12" sourceNode="FCMComposite_1_186" sourceTerminalName="OutTerminal.unknown" targetTerminalName="InTerminal.Input">
+        <bendPoints>-46,-185,-125,11</bendPoints>
+      </connections>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_191" targetNode="FCMComposite_1_12" sourceNode="FCMComposite_1_186" sourceTerminalName="OutTerminal.timeout" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_192" targetNode="FCMComposite_1_188" sourceNode="FCMComposite_1_187" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_193" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_188" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_194" targetNode="FCMComposite_1_190" sourceNode="FCMComposite_1_189" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_195" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_190" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_196" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_191" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_197" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_192" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_198" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_193" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_199" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_194" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_200" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_195" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_201" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_196" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.Basic" configurable="true" describedAttribute="Property.AggrName">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.AggrName" bundleName="ru/croc/sbkz/adapters/pragmanew/flow/ResponseForESB" pluginId="AdaptersKZ"/>
+        <propertyDescriptor groupName="Group.Basic" configurable="true" describedAttribute="Property.AggrName_TSM">
+          <propertyName xmi:type="utility:TranslatableString" key="Property.AggrName_TSM" bundleName="ru/croc/sbkz/adapters/pragmanew/flow/ResponseForESB" pluginId="AdaptersKZ"/>
+        </propertyDescriptor>
+      </propertyDescriptor>
+    </propertyOrganizer>
+    <attributeLinks promotedAttribute="Property.AggrName" overriddenNodes="FCMComposite_1_3">
+      <overriddenAttribute href="ComIbmAggregateReply.msgnode#Property.aggregateName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.AggrName_TSM" overriddenNodes="FCMComposite_1_186">
+      <overriddenAttribute href="ComIbmAggregateReply.msgnode#Property.aggregateName"/>
+    </attributeLinks>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

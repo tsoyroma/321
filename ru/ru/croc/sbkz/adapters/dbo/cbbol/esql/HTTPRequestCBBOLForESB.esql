@@ -1,0 +1,99 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.dbo.cbbol.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.adapters.dbo.esql;
+
+CREATE COMPUTE MODULE HTTPRequestCBBOLForESB_SetEnvironment
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE inRef REFERENCE TO InputRoot;
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE env REFERENCE TO Environment;
+		
+		DECLARE doIfx REFERENCE TO OutputRoot;
+		
+		CALL CopyWholeMessage(InputRoot,OutputRoot);
+		-- дальнейшее взаимодействие происходит по MQ, поэтому убираем заголовок HTTP
+		SET OutputRoot.HTTPInputHeader = null;	
+		
+		-- сохраним идентификатор запроса для дальнейшего ответа
+		SET Environment.UserProperties.ReplyIdentifier	= InputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier;
+		
+		SET Environment.UserProperties.RqUID			= InputBody.*[<].(XMLNSC.Attribute)ID;
+		SET Environment.UserProperties.SPName			= 'DBO';
+		SET Environment.UserProperties.Operation		= FIELDNAME(InputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestCBBOLForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'STATEMENT_RQ' THEN
+			SET labelName = 'STATEMENT_RQ';
+		WHEN 'OpenAccount' THEN
+			SET labelName = 'OpenAccount';
+		WHEN 'OpenAccountDetailsRequest' THEN
+			SET labelName = 'OpenAccountDetailsRequest';	
+		ELSE
+			-- Неизвестный тип сообщения 	
+			THROW USER EXCEPTION VALUES ('Unknown format XML in HTTPRequestCBBOLForESB', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestCBBOLForESB_STATEMENT_RQ
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CALL FillMDOStandardElementsRq(InputRoot, OutputRoot, 'KZLegalGetAccountStatementRq');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:STATEMENT_RQ;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZLegalGetAccountStatementRq;
+    	
+		SET outRef.(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+		
+		SET outRef.AcctReq.AcctId 					= inRef.ACCOUNTS.ACCOUNT;
+		SET outRef.AcctReq.BankInfo.banks:BankId 	= inRef.ACCOUNTS.BIC;
+		SET outRef.DateStart						= inRef.DATEFROM;
+		SET outRef.DateEnd							= inRef.DATETO;
+		SET outRef.IsExtStatement					= 'Y';
+		SET outRef.IsTurnovers						= 'Y';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestCBBOLForESB_FillMqRfh2usr_CBBOL
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+

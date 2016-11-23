@@ -1,0 +1,20 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.bl.esql
+
+/**
+ * Восстановление атрибута BLStatus из ответа Прагмы
+ **/
+CREATE COMPUTE MODULE BlackListAMLResponse_RestorePragmaBLStatus
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE env REFERENCE TO Environment;
+		DECLARE inRef REFERENCE TO InputRoot;
+		CALL CopyEntireMessage();
+		SET OutputRoot.XMLNSC.KZBlackListRs.BLStatus = Environment.Variables.Source.MQRFH2.usr.BLStatus;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

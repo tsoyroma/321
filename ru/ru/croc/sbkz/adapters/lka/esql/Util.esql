@@ -1,0 +1,17 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.lka.esql
+
+CREATE PROCEDURE FillStandartMDORq(
+		IN InputRoot REFERENCE, 
+		IN OutputRoot REFERENCE, 
+		IN serviceCode CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF OutputRoot.XMLNSC NAME serviceCode;
+	DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+	
+	SET outRoot.RqUID = InputRoot.XMLNSC.*[<].MsgId;
+	SET outRoot.MessageType = serviceCode;
+	SET outRoot.RqTm = InputRoot.XMLNSC.*[<].MessageDateTime;
+	SET outRoot.TargetSPName = InputRoot.XMLNSC.*[<].DestinationSystem;
+	
+END;

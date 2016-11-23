@@ -1,0 +1,389 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pshep.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+DECLARE HttpWebServiceUrl EXTERNAL CHARACTER 'UNKNOWN';
+DECLARE HttpWebServiceTimeout EXTERNAL CHARACTER 'UNKNOWN';
+
+--DECLARE NS_BIP_BEE_TYPES CONSTANT CHARACTER 'http://bip.bee.kz/SyncChannel/v10/Types';
+--DECLARE typ	NAMESPACE 'http://bip.bee.kz/SyncChannel/v10/Types';
+
+--DECLARE NS_BIP_BEE_PP CONSTANT CHARACTER 'http://payments.bee.kz/PaymentPackage';
+--DECLARE q1	'http://payments.bee.kz/PaymentPackage';
+
+
+--DECLARE NS_BIP_BEE_BI CONSTANT CHARACTER 'http://payments.bee.kz/BankPaymentInfo';
+--DECLARE bpi	NAMESPACE NS_BIP_BEE_BI;
+
+
+--DECLARE type	NAMESPACE 'q1:PaymentPackageRequestType';
+--DECLARE xsi	NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+
+
+--DECLARE empty	NAMESPACE '';
+
+
+CREATE COMPUTE MODULE RequestForPSHEP_SaveOrigMess
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyEntireMessage();
+		
+		SET OutputRoot.MQRFH2.usr.PragmaEnvelope = OutputRoot.XMLNSC.PragmaEnvelope;	 	
+	 	
+	 	DECLARE bpi2 NAMESPACE 'http://payments.bee.kz/BankPaymentInfo';
+	 	
+	 	DECLARE Operation CHARACTER FIELDVALUE(OutputRoot.XMLNSC.PragmaEnvelope.ServiceCode);
+	 	
+	 	CASE Operation
+	 	WHEN 'RegisterPaymentRequest' THEN
+	 		SET OutputRoot.MQRFH2.usr.PragmaEnvelope.RequestData.bpi2:paymentsList = NULL;
+	 	WHEN 'RefundPaymentRequest' THEN
+	 		SET OutputRoot.MQRFH2.usr.PragmaEnvelope.RequestData.refundPaymentRequest = NULL;
+	 	WHEN 'AuthorizePaymentsRequest' THEN
+	 		SET OutputRoot.MQRFH2.usr.PragmaEnvelope.RequestData.bpi2:authorizePayments = NULL;
+	 	---09.12.15
+	 	WHEN 'SummaryPaymentRequest' THEN
+	 		SET OutputRoot.MQRFH2.usr.PragmaEnvelope.RequestData.bpi2:summaryPayment = NULL;
+	 	WHEN 'GetTreasuryRefundPaymentsRequest' THEN
+	 		SET OutputRoot.MQRFH2.usr.PragmaEnvelope.RequestData.bpi2:treasuryRefundRequest = NULL;		
+	 	ELSE
+			THROW USER EXCEPTION VALUES ('Unknown format XML for PSHEP', Operation);
+		END CASE;
+		
+		SET Environment.UserProperties.Source.MQMD 		= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 	= OutputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 		= InputBody;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForPSHEP_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		Set OutputRoot = InputRoot;
+		
+		DECLARE Operation CHARACTER FIELDVALUE(InputRoot.XMLNSC.PragmaEnvelope.ServiceCode);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'RefundPaymentRequest' THEN
+			SET labelName = 'RefundPaymentRequest';
+		/*WHEN 'RegisterPaymentRequest' THEN
+			SET labelName = 'RegisterPaymentRequest';*/
+		WHEN 'SendPaymentRequest' THEN
+			SET labelName = 'SendPaymentRequest';
+		WHEN 'AuthorizePaymentsRequest' THEN
+			SET labelName = 'AuthorizePaymentsRequest';
+		---09.12.15	
+		WHEN 'SummaryPaymentRequest' THEN
+			SET labelName = 'SummaryPaymentRequest';
+		WHEN 'GetTreasuryRefundPaymentsRequest' THEN
+			SET labelName = 'GetTreasuryRefundPaymentsRequest';		
+		ELSE
+			THROW USER EXCEPTION VALUES ('Unknown format XML in PSHEP(RequestForPSHEP)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForPSHEP_PrepareSOAPBody
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		DECLARE typ	NAMESPACE 'http://bip.bee.kz/SyncChannel/v10/Types';
+		DECLARE type	NAMESPACE 'q1:PaymentPackageRequestType';
+		DECLARE xsi	NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+		DECLARE q1 NAMESPACE	'http://payments.bee.kz/PaymentPackage';
+		DECLARE bpi NAMESPACE 'http://payments.bee.kz/BankPaymentInfo';
+		
+		DECLARE docRoot REFERENCE TO OutputRoot;
+		
+		--CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		
+		--CREATE LASTCHILD OF OutputRoot.XMLNSC AS docRoot NAMESPACE typ NAME 'SendMessage';
+		CREATE FIELD OutputRoot.XMLNSC.typ:SendMessage AS docRoot; --:SendMessage
+		
+		--DECLARE docRoot REFERENCE TO OutputRoot.XMLNSC.typ:SendMessage;
+		
+		--CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		
+		DECLARE xsd NAMESPACE 'http://www.w3.org/2001/XMLSchema';
+		SET docRoot.(XMLNSC.NamespaceDecl)xmlns:xsd = xsd;
+		--SET docRoot.(XMLNSC.NamespaceDecl)xmlns:typ = typ;
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE messageId CHARACTER FIELDVALUE(inRef.MessageUID); 
+		DECLARE serviceId CHARACTER; --FIELDVALUE(inRef.ServiceCode);
+		SET serviceId = 'A.S.I.PSHEP.Gateway.V1';
+		DECLARE messageDate CHARACTER FIELDVALUE(inRef.MessageDateTime); 
+		DECLARE serviceCode CHARACTER FIELDVALUE(inRef.ServiceCode);
+		
+		DECLARE senderId CHARACTER 'sberbank'; --testBank
+		DECLARE password CHARACTER 'ba6779e4'; --testPassword
+		
+		SET docRoot.request.requestInfo.messageId = messageId;
+		SET docRoot.request.requestInfo.serviceId = serviceId;-- TO ASK: what to assign here
+		SET docRoot.request.requestInfo.messageDate = messageDate;
+		SET docRoot.request.requestInfo.sender.senderId = senderId;
+		SET docRoot.request.requestInfo.sender.password = password;
+		
+		
+		
+		DECLARE methodName CHARACTER '';
+		DECLARE data CHARACTER;
+		
+		SET docRoot.request.requestData.data.(XMLNSC.NamespaceDecl)xmlns:q1 = q1;
+		SET docRoot.request.requestData.data.(XMLNSC.NamespaceDecl)xsi:type = type;
+		SET docRoot.request.requestData.data.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+		
+		CASE serviceCode
+		WHEN 'RefundPaymentRequest' THEN
+			SET methodName = 'refundpayment';
+			SET docRoot.request.requestData.data.q1:methodName = methodName;
+			
+			SET docRoot.request.requestData.data.(XMLNSC.CDataField)q1:requestData =
+					CAST(ASBITSTREAM(InputRoot.XMLNSC.*[<].*:RequestData.refundPaymentRequest.bpi:refundPaymentInfo 
+						ENCODING 546 CCSID 1208 OPTIONS FolderBitStream)
+				 	AS CHARACTER CCSID 1208 ENCODING 546
+				);
+			
+		/*WHEN 'RegisterPaymentRequest' THEN 
+			SET methodName = 'registerpayments';
+			SET docRoot.request.requestData.data.q1:methodName = methodName;
+			
+			SET docRoot.request.requestData.data.(XMLNSC.CDataField)q1:requestData =
+					CAST(ASBITSTREAM(InputRoot.XMLNSC.*[<].*:RequestData.bpi:paymentsList 
+						ENCODING 546 CCSID 1208 OPTIONS FolderBitStream)
+				 	AS CHARACTER CCSID 1208 ENCODING 546
+				);
+		*/
+		
+		WHEN 'SendPaymentRequest' THEN 
+			SET methodName = 'sendpayments';
+			SET docRoot.request.requestData.data.q1:methodName = methodName;
+			
+			SET docRoot.request.requestData.data.(XMLNSC.CDataField)q1:requestData =
+					CAST(ASBITSTREAM(InputRoot.XMLNSC.*[<].*:RequestData.bpi:paymentsList 
+						ENCODING 546 CCSID 1208 OPTIONS FolderBitStream)
+				 	AS CHARACTER CCSID 1208 ENCODING 546
+				);
+			
+		WHEN 'AuthorizePaymentsRequest' THEN
+			SET methodName = 'authorizepayments';
+			
+			SET docRoot.request.requestData.data.q1:methodName = methodName;
+	
+			SET docRoot.request.requestData.data.(XMLNSC.CDataField)q1:requestData =
+					CAST(ASBITSTREAM(InputRoot.XMLNSC.*[<].*:RequestData.bpi:authorizePayments 
+						ENCODING 546 CCSID 1208 OPTIONS FolderBitStream)
+				 	AS CHARACTER CCSID 1208 ENCODING 546
+				);
+		
+		---09.12.15		
+		WHEN 'SummaryPaymentRequest' THEN
+			SET methodName = 'sendsummarypayment';
+			
+			SET docRoot.request.requestData.data.q1:methodName = methodName;
+	
+			SET docRoot.request.requestData.data.(XMLNSC.CDataField)q1:requestData =
+					CAST(ASBITSTREAM(InputRoot.XMLNSC.*[<].*:RequestData.bpi:summaryPayments.bpi:summaryPayment
+						ENCODING 546 CCSID 1208 OPTIONS FolderBitStream)
+				 	AS CHARACTER CCSID 1208 ENCODING 546
+				);	
+		WHEN 'GetTreasuryRefundPaymentsRequest' THEN
+			SET methodName = 'gettreasuryrefundpayments';
+			
+			SET docRoot.request.requestData.data.q1:methodName = methodName;
+	
+			SET docRoot.request.requestData.data.(XMLNSC.CDataField)q1:requestData =
+					CAST(ASBITSTREAM(InputRoot.XMLNSC.*[<].*:RequestData.bpi:treasuryRefundRequest
+						ENCODING 546 CCSID 1208 OPTIONS FolderBitStream)
+				 	AS CHARACTER CCSID 1208 ENCODING 546
+				);					
+	
+		ELSE
+			THROW USER EXCEPTION VALUES ('Unknown format XML in PSHEP(RequestForPSHEP_PrepareSOAPBody)', methodName);
+		END CASE;
+		
+		
+		
+		
+		SET OutputRoot.XMLNSC.PragmaEnvelope = NULL;
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+		--SET OutputLocalEnvironment.Destination.SOAP.Request.WSA.Action						= '';
+		SET OutputRoot.HTTPRequestHeader.SOAPAction = '';
+		
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForPSHEP_RetrieveHeader
+	
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE typ	NAMESPACE 'http://bip.bee.kz/SyncChannel/v10/Types';
+		DECLARE q1 NAMESPACE	'http://payments.bee.kz/BankPaymentInfo';
+		DECLARE xsi NAMESPACE	'http://www.w3.org/2001/XMLSchema-instance';
+		DECLARE empty	NAMESPACE '';
+		
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+ 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+	
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		CALL SetMQReplyDestination(Environment.UserProperties.Source, OutputLocalEnvironment);
+		
+		SET OutputRoot.XMLNSC.PragmaEnvelope = Environment.UserProperties.Source.MQRFH2.usr.PragmaEnvelope;
+		
+		SET OutputRoot.XMLNSC.PragmaEnvelope.RequestData = null;
+		
+		
+		IF Environment.UserProperties.Source.MQRFH2.usr.PragmaEnvelope.ServiceCode = 'RegisterPaymentRequest' THEN
+			SET OutputRoot.XMLNSC.PragmaEnvelope.ServiceCode = 'RegisterPaymentResponse';
+		ELSEIF Environment.UserProperties.Source.MQRFH2.usr.PragmaEnvelope.ServiceCode = 'RefundPaymentRequest' THEN
+			SET OutputRoot.XMLNSC.PragmaEnvelope.ServiceCode = 'RefundPaymentResponse';
+		ELSEIF Environment.UserProperties.Source.MQRFH2.usr.PragmaEnvelope.ServiceCode = 'AuthorizePaymentsRequest' THEN
+			SET OutputRoot.XMLNSC.PragmaEnvelope.ServiceCode = 'AuthorizePaymentsResponse';
+		---09.12.15	
+		ELSEIF Environment.UserProperties.Source.MQRFH2.usr.PragmaEnvelope.ServiceCode = 'SummaryPaymentRequest' THEN
+			SET OutputRoot.XMLNSC.PragmaEnvelope.ServiceCode = 'SummaryPaymentResponse';
+		ELSEIF Environment.UserProperties.Source.MQRFH2.usr.PragmaEnvelope.ServiceCode = 'GetTreasuryRefundPaymentsRequest' THEN
+			SET OutputRoot.XMLNSC.PragmaEnvelope.ServiceCode = 'GetTreasuryRefundPaymentsResponse';			
+		END IF;
+	/*
+		SET OutputRoot.XMLNSC.PragmaEnvelope.q1:data = 
+			InputRoot.XMLNSC.typ:SendMessageResponse.empty:response.empty:responseData.empty:data;
+			
+			WHEN 'RefundPaymentRequest' THEN
+			SET labelName = 'RefundPaymentRequest';
+		WHEN 'RegisterPaymentRequest' THEN
+			SET labelName = 'RegisterPaymentRequest';
+		WHEN 'AuthorizePaymentsRequest' THEN
+			SET labelName = 'AuthorizePaymentsRequest';
+		*/
+		
+		/*DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.PragmaEnvelope AS outRef NAMESPACE q1 NAME 'data';		
+		SET outRef.bpi:data.(XMLNSC.NamespaceDecl)xmlns:q1 = q1;
+		SET outRef.responseData = 
+			InputRoot.XMLNSC.typ:SendMessageResponse.empty:response.empty:responseData.empty:data;
+		*/	
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		DECLARE ServiceCode CHARACTER FIELDVALUE(outRef.ServiceCode);
+		
+		CASE ServiceCode
+		WHEN 'RegisterPaymentResponse' THEN
+		SET outRef.responseData.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+		SET outRef.responseData.q1:data.(XMLNSC.NamespaceDecl)xmlns:q1 = q1;
+		SET outRef.responseData.q1:data = 
+			InputRoot.XMLNSC.typ:SendMessageResponse.empty:response.empty:responseData.empty:data;	
+		
+		WHEN 'AuthorizePaymentsResponse' THEN
+		SET outRef.responseData.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+		SET outRef.responseData.q1:data.(XMLNSC.NamespaceDecl)xmlns:q1 = q1;
+		SET outRef.responseData.q1:data = 
+			InputRoot.XMLNSC.typ:SendMessageResponse.empty:response.empty:responseData.empty:data;	
+			
+		WHEN 'RefundPaymentResponse' THEN
+		SET outRef.responseData.refundData.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+		SET outRef.responseData.refundData.q1:data.(XMLNSC.NamespaceDecl)xmlns:q1 = q1;
+		SET outRef.responseData.refundData.q1:data = 
+			InputRoot.XMLNSC.typ:SendMessageResponse.empty:response.empty:responseData.empty:data;	
+		---09.12.15	
+		WHEN 'SummaryPaymentResponse' THEN
+		SET outRef.responseData.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+		SET outRef.responseData.summaryPaymentData.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+		SET outRef.responseData.summaryPaymentData.q1:data = 
+			InputRoot.XMLNSC.typ:SendMessageResponse.empty:response.empty:responseData.empty:data;
+			
+		WHEN 'GetTreasuryRefundPaymentsResponse' THEN
+		SET outRef.responseData.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+		SET outRef.responseData.q1:data.(XMLNSC.NamespaceDecl)xmlns:q1 = q1;
+		SET outRef.responseData.q1:data = 
+			InputRoot.XMLNSC.typ:SendMessageResponse.empty:response.empty:responseData.empty:data;				
+		END CASE;
+			
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForPSHEP_AttachToSOAPBody
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		--CALL CopyMessageHeaders();
+		DECLARE typ2	NAMESPACE 'http://bip.bee.kz/SyncChannel/v10/Types';
+		
+		SET OutputRoot.SOAP.Body.typ2:SendMessage = InputRoot.XMLNSC.typ2:SendMessage;
+		
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+		
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+END MODULE;

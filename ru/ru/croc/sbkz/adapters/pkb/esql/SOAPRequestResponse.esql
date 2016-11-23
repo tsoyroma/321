@@ -1,0 +1,63 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pkb.esql
+
+-- Внешняя переменная для указания URL веб-сервиса
+DECLARE HttpWebServiceUrl EXTERNAL CHARACTER;
+-- Внешняя переменная для указания таймаута веб-сервиса
+DECLARE HttpWebServiceTimeout EXTERNAL CHARACTER;
+-- Адрес прокси-сервера для ПКБ
+DECLARE HttpProxyAddress EXTERNAL CHARACTER;
+
+/**
+ * Добавление SOAP обертки для SOAP сообщения
+ **/
+CREATE COMPUTE MODULE SOAPRequestResponse_SOAPEnvelope
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE envPart REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+
+		-- заполнение полей в кастомном хедере
+		CREATE FIELD OutputRoot.XMLNSC.soap_env:Envelope.soap_env:Header.ws_credit:CigWsHeader AS envPart;
+		SET envPart.ws_credit:Culture 		= Environment.UserProperties.SOAPHeaderData.Culture;
+		SET envPart.ws_credit:Password 		= Environment.UserProperties.SOAPHeaderData.Password;
+		SET envPart.ws_credit:SecurityToken = Environment.UserProperties.SOAPHeaderData.SecToken;
+		SET envPart.ws_credit:UserId 		= Environment.UserProperties.SOAPHeaderData.UserId;
+		SET envPart.ws_credit:UserName 		= Environment.UserProperties.SOAPHeaderData.UserName;
+		SET envPart.ws_credit:Version 		= Environment.UserProperties.SOAPHeaderData.Version;
+		
+		CREATE FIELD OutputRoot.XMLNSC.soap_env:Envelope.soap_env:Body AS envPart;
+		
+		CREATE LASTCHILD OF envPart NAMESPACE FIELDNAMESPACE(InputRoot.XMLNSC.*:*[<]) NAME FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		SET envPart.*:*[<] = InputRoot.XMLNSC.*:*[<];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Устанавливает нужную метку для выполнения
+ * запроса к выбранной операции веб-сервиса на основе
+ * соглашения об именовании операции также, как и коневой тег 
+ * в SOAP:Body (модель сообщения document/literal).
+ * 
+ **/
+CREATE COMPUTE MODULE SOAPRequestResponse_SetOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Operation 
+				= FIELDNAME(InputRoot.XMLNSC.soap_env:Envelope.soap_env:Body.*[<]);
+		
+		-- Установка параметров веб-сервиса для SoapRequest
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+		-- Установка параметр прокси-сервера
+		IF HttpProxyAddress IS NOT NULL AND TRIM(HttpProxyAddress) <> '' AND TRIM(HttpProxyAddress) <> 'NO' THEN
+			SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.ProxyURL = HttpProxyAddress;
+		END IF;
+		RETURN TRUE;
+	END;
+END MODULE;

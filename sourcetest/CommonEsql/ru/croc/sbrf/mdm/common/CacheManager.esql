@@ -1,0 +1,470 @@
+BROKER SCHEMA ru.croc.sbrf.mdm.common
+
+-- кэш для хранения считанных данных
+DECLARE TableCache SHARED ROW;
+
+-- язык по умолчанию (английский)
+DECLARE LANG_TP_CD CONSTANT INTEGER 100;
+
+-- инициализация кеша кодов качества
+CREATE PROCEDURE InitDqcCache( )
+BEGIN
+	IF EXISTS(TableCache.CDSBDQCFACTOR[])
+		AND TableCache.CDSBDQCFACTOR.loaded > CURRENT_TIMESTAMP - INTERVAL '30' MINUTE THEN
+		RETURN;
+	END IF;
+
+	--Освобождаем кэш
+	DELETE FIELD TableCache.CDSBDQCFACTOR;
+
+	-- читаем таблицу CDCONTMETHTP
+	SET  TableCache.CDSBDQCFACTOR.rows[] = PASSTHRU('
+		SELECT F.PATH_TO_QC, T.DQC_VALUE, T.SB_DQC_VALIDATION_TP_CD, T.SB_DQC_ST_TP_CD 
+		FROM CDSBDQCFACTORFLDTP F 
+		INNER JOIN CDSBDQCFACTOR T ON T.SB_DQC_FACTOR_FLD_TP_CD = F.SB_DQC_FACTOR_FLD_TP_CD
+	');
+ 	-- запоминаем время загрузки
+	SET TableCache.CDSBDQCFACTOR.loaded = CURRENT_TIMESTAMP;   	   	 	
+END;
+
+-- инициализация кеша контактных методов
+CREATE PROCEDURE InitContMethCache()
+BEGIN
+	IF EXISTS(TableCache.CDCONTMETHTP[])
+		AND TableCache.CDCONTMETHTP.loaded > CURRENT_TIMESTAMP - INTERVAL '30' MINUTE THEN
+		RETURN;
+	END IF;
+
+	--Освобождаем кэш
+	DELETE FIELD TableCache.CDCONTMETHTP;
+
+	-- читаем таблицу CDCONTMETHTP
+	SET  TableCache.CDCONTMETHTP.rows[] = (
+   		SELECT T.CONT_METH_TP_CD, T.CONT_METH_CAT_CD
+   		FROM Database.CDCONTMETHTP as T
+   		WHERE T.LANG_TP_CD = LANG_TP_CD
+   	 ); 
+ 	-- запоминаем время загрузки
+	SET TableCache.CDCONTMETHTP.loaded = CURRENT_TIMESTAMP;   	   	 	
+END;
+
+-- инициализация кеша отношений к контрактам
+CREATE PROCEDURE InitContractRelCache()
+BEGIN
+	IF EXISTS(TableCache.CDCONTRACTRELTP[])
+		AND TableCache.CDCONTRACTRELTP.loaded > CURRENT_TIMESTAMP - INTERVAL '30' MINUTE THEN
+		RETURN;
+	END IF;
+
+	--Освобождаем кэш
+	DELETE FIELD TableCache.CDCONTRACTRELTP;
+
+	-- читаем таблицу CDCONTRACTRELTP
+	SET  TableCache.CDCONTRACTRELTP.rows[] = (
+   		SELECT T.CONTR_REL_TP_CD, T.TO_FROM_NAME
+   		FROM Database.CDCONTRACTRELTP as T
+   		WHERE T.LANG_TP_CD = LANG_TP_CD
+   	 ); 
+ 	-- запоминаем время загрузки
+	SET TableCache.CDCONTRACTRELTP.loaded = CURRENT_TIMESTAMP;   	   	 
+END;
+
+-- инициализация кеша отношений
+CREATE PROCEDURE InitRelCache()
+BEGIN
+	IF EXISTS(TableCache.CDRELTP[])
+		AND TableCache.CDRELTP.loaded > CURRENT_TIMESTAMP - INTERVAL '30' MINUTE THEN
+		RETURN;
+	END IF;
+
+	--Освобождаем кэш
+	DELETE FIELD TableCache.CDRELTP;
+
+	-- читаем таблицу CDRELTP
+	SET  TableCache.CDRELTP.rows[] = (
+   		SELECT T.REL_TP_CD, T.TO_FROM_NAME
+   		FROM Database.CDRELTP as T
+   		WHERE T.LANG_TP_CD = LANG_TP_CD
+   	 ); 
+ 	-- запоминаем время загрузки
+	SET TableCache.CDRELTP.loaded = CURRENT_TIMESTAMP;   	   	 
+END;
+
+-- инициализация кеша систем
+CREATE PROCEDURE InitAdminSysCache()
+BEGIN
+	IF EXISTS(TableCache.CDADMINSYSTP[]) 
+	   AND TableCache.CDADMINSYSTP.loaded > CURRENT_TIMESTAMP - INTERVAL '30' MINUTE THEN
+		RETURN;
+	END IF;
+
+	--Освобождаем кэш
+	DELETE FIELD TableCache.CDADMINSYSTP;
+
+	-- читаем таблицу CDADMINSYSTP
+	SET  TableCache.CDADMINSYSTP.rows[] = (
+   		SELECT TRIM(CAST(T.ADMIN_SYS_TP_CD AS CHARACTER FORMAT '0')) AS ADMIN_SYS_TP_CD, T.NAME
+   		FROM Database.CDADMINSYSTP as T
+   		WHERE T.LANG_TP_CD = LANG_TP_CD
+   	); 
+ 	-- запоминаем время загрузки
+	SET TableCache.CDADMINSYSTP.loaded = CURRENT_TIMESTAMP;   	
+END;
+
+-- инициализация кеша систем
+CREATE PROCEDURE InitCountryCache()
+BEGIN
+	IF EXISTS(TableCache.CDCOUNTRYTP[]) 
+	   AND TableCache.CDCOUNTRYTP.loaded > CURRENT_TIMESTAMP - INTERVAL '30' MINUTE THEN
+		RETURN;
+	END IF;
+
+	--Освобождаем кэш
+	DELETE FIELD TableCache.CDCOUNTRYTP;
+
+	-- читаем таблицу CDCOUNTRYTP
+	SET  TableCache.CDCOUNTRYTP.rows[] = (
+   		SELECT TRIM(CAST(T.COUNTRY_TP_CD AS CHARACTER FORMAT '0')) AS COUNTRY_TP_CD, T.NAME
+   		FROM Database.CDCOUNTRYTP as T
+   		WHERE T.LANG_TP_CD = LANG_TP_CD
+   	); 
+ 	-- запоминаем время загрузки
+	SET TableCache.CDCOUNTRYTP.loaded = CURRENT_TIMESTAMP;   	
+END;
+
+-- инициализация кеша токенов
+CREATE PROCEDURE InitAccessTokenCache()
+BEGIN
+	IF EXISTS(TableCache.ACCESSTOKEN[])
+		AND TableCache.ACCESSTOKEN.loaded > CURRENT_TIMESTAMP - INTERVAL '30' MINUTE THEN
+		RETURN;
+	END IF;
+
+	--Освобождаем кэш
+	DELETE FIELD TableCache.ACCESSTOKEN;
+
+	-- читаем таблицу
+	SET  TableCache.ACCESSTOKEN.rows[] = (
+		SELECT T.ACCESS_TOKEN_VALUE, T.ACCESS_TOKEN_ID 
+		FROM Database.ACCESSTOKEN as T
+   	); 
+ 	-- запоминаем время загрузки
+	SET TableCache.ACCESSTOKEN.loaded = CURRENT_TIMESTAMP;
+END;
+
+-- инициализация кеша кросс-таблицы токены - внешние системы
+CREATE PROCEDURE InitAccessTokenAdminSysCache()
+BEGIN
+	IF EXISTS(TableCache.ACCESSTOKENADMINSYS[])
+		AND TableCache.ACCESSTOKENADMINSYS.loaded > CURRENT_TIMESTAMP - INTERVAL '30' MINUTE THEN
+		RETURN;
+	END IF;
+
+	--Освобождаем кэш
+	DELETE FIELD TableCache.ACCESSTOKENADMINSYS;
+
+	-- читаем таблицу
+	SET TableCache.ACCESSTOKENADMINSYS.rows[] = (
+		SELECT T.ACCESS_TOKEN_ID, T.ADMIN_SYS_TP_CD, T.LANG_TP_CD, T.DEFAULT_IND FROM Database.ACCESSTOKENADMINSYS AS T
+   	); 
+   	-- запоминаем время загрузки
+	SET TableCache.ACCESSTOKENADMINSYS.loaded = CURRENT_TIMESTAMP;
+END;
+
+-- инициализация кэша типов отношений LOB-ов
+CREATE PROCEDURE InitLobRelTypeCache()
+BEGIN
+	IF EXISTS(TableCache.CDLOBRELTP[])
+		AND TableCache.CDLOBRELTP.loaded > CURRENT_TIMESTAMP - INTERVAL '30' MINUTE THEN
+		RETURN;
+	END IF;
+
+	--Освобождаем кэш
+	DELETE FIELD TableCache.CDLOBRELTP;
+
+	-- читаем таблицу
+	SET  TableCache.CDLOBRELTP.rows[] = (
+		SELECT T.LANG_TP_CD, T.LOB_REL_TP_CD 
+		FROM Database.CDLOBRELTP as T
+   	); 
+ 	-- запоминаем время загрузки
+	SET TableCache.CDLOBRELTP.loaded = CURRENT_TIMESTAMP;
+END;
+
+-- инициализация кэша LOB-ов
+CREATE PROCEDURE InitLobCache()
+BEGIN
+	IF EXISTS(TableCache.CDLOBTP[])
+		AND TableCache.CDLOBTP.loaded > CURRENT_TIMESTAMP - INTERVAL '30' MINUTE THEN
+		RETURN;
+	END IF;
+
+	--Освобождаем кэш
+	DELETE FIELD TableCache.CDLOBTP;
+
+	-- читаем таблицу
+	SET  TableCache.CDLOBTP.rows[] = (
+		SELECT T.LANG_TP_CD, T.LOB_TP_CD, T.NAME 
+		FROM Database.CDLOBTP as T
+   	); 
+ 	-- запоминаем время загрузки
+	SET TableCache.CDLOBTP.loaded = CURRENT_TIMESTAMP;
+END;
+
+-- инициализация кэша таблицы связей LOB-ов с именами систем
+CREATE PROCEDURE InitLobAdminSysCache( )
+BEGIN
+	IF EXISTS(TableCache.LOBADMINSYS[])
+		AND TableCache.LOBADMINSYS.loaded > CURRENT_TIMESTAMP - INTERVAL '30' MINUTE THEN
+		RETURN;
+	END IF;
+
+	--Освобождаем кэш
+	DELETE FIELD TableCache.LOBADMINSYS;
+
+	-- читаем таблицу
+	SET  TableCache.LOBADMINSYS.rows[] = (
+		SELECT T.LOB_ID, T.ADMIN_SYS_TP_CD, T.LANG_TP_CD, T.DEFAULT_IND
+		FROM Database.LOBADMINSYS as T
+   	); 
+ 	-- запоминаем время загрузки
+	SET TableCache.LOBADMINSYS.loaded = CURRENT_TIMESTAMP;
+END;
+
+
+-- инициализация кэша таблицы перекодировки
+-- sysId		: код системы, для которой требуется инициализация таблицы перекодировки
+-- direction	: направление, для которого требуется инициализация таблицы перекодировки
+CREATE PROCEDURE InitExtKeyCache(IN sysId CHARACTER, IN direction CHARACTER)
+BEGIN
+	IF EXISTS(TableCache.EXTKEY.loaded.{sysId}.{direction}[])
+		AND TableCache.EXTKEY.loaded.{sysId}.{direction} > CURRENT_TIMESTAMP - INTERVAL '24' HOUR THEN
+		RETURN;
+	END IF;	
+		
+	-- читаем таблицу EXTKEY
+	DECLARE sql CHARACTER '
+		SELECT T.ENTITY_ID, CAST(T.ADMIN_SYS_TP_CD AS VARCHAR(10)) AS ADMIN_SYS_TP_CD, T.MDM_ID, T.EXT_ID
+		FROM EXTKEY T
+		WHERE T.LANG_TP_CD = ?
+		AND T.ADMIN_SYS_TP_CD = ?
+		ORDER BY T.ENTITY_ID, T.ADMIN_SYS_TP_CD, COALESCE(T.DEFAULT_IND,''N'') desc';
+	DECLARE tmp ROW;
+	SET tmp.row[] = PASSTHRU(sql VALUES (LANG_TP_CD, CAST(sysId AS INTEGER)));
+
+	-- очистим кэш EXTKEY для указанного идентификатора системы и направления
+	SET TableCache.EXTKEY.{sysId}.{direction} = NULL;
+
+	DECLARE toMdmVal CHARACTER;
+	DECLARE fromMdmVal CHARACTER;
+	-- чтобы было поменьше прямого перебора, преобразуем все в дерево
+	FOR r AS tmp.row[] DO
+		IF direction = 'tomdm' THEN
+			SET toMdmVal = tmp.tree.{r.ENTITY_ID}.{UPPER(r.EXT_ID)};
+
+			IF toMdmVal IS NULL THEN
+				SET tmp.tree.{r.ENTITY_ID}.{UPPER(r.EXT_ID)} = r.MDM_ID;
+			END IF;	
+		ELSEIF direction = 'frommdm' THEN
+			SET fromMdmVal = tmp.tree.{r.ENTITY_ID}.{UPPER(r.MDM_ID)}; 
+			
+			IF fromMdmVal IS NULL THEN
+				SET tmp.tree.{r.ENTITY_ID}.{UPPER(r.MDM_ID)} = r.EXT_ID;
+			END IF;
+		END IF;
+	END FOR;
+
+	SET TableCache.EXTKEY.{sysId}.{direction} = tmp.tree;
+
+	-- запоминаем время загрузки
+	SET TableCache.EXTKEY.loaded.{sysId}.{direction} = CURRENT_TIMESTAMP;
+END;
+
+-- сброс кэша
+CREATE PROCEDURE DropTableCache()
+BEGIN
+	SET TableCache.valid = NULL;
+END;
+
+-- Получение имени токена по его идентификатору
+CREATE FUNCTION GetAccessTokenValueByID(IN atID INTEGER) RETURNS CHARACTER
+BEGIN
+	DECLARE atValue CHARACTER;
+	TABLE_CACHE_LOCK : BEGIN ATOMIC
+		CALL InitAccessTokenCache();
+		SET atValue = THE(SELECT ITEM T.ACCESS_TOKEN_VALUE FROM TableCache.ACCESSTOKEN.rows[] AS T WHERE T.ACCESS_TOKEN_ID  = atID);
+	END TABLE_CACHE_LOCK;
+	RETURN atValue;
+END;
+
+-- Получение имени LOB-a по его идентификатору
+CREATE FUNCTION GetLOBName(IN lobID INTEGER) RETURNS CHARACTER
+BEGIN
+	DECLARE lobName CHARACTER;
+	TABLE_CACHE_LOCK : BEGIN ATOMIC
+		CALL InitLobCache();
+		SET lobName = THE(SELECT ITEM T.NAME FROM TableCache.CDLOBTP.rows[] AS T WHERE T.LOB_TP_CD  = lobID AND T.LANG_TP_CD = LANG_TP_CD);
+	END TABLE_CACHE_LOCK;
+	RETURN lobName;
+END;
+
+-- Получение имени LOB-a по его идентификатору
+CREATE FUNCTION GetLOBId(IN lobName CHARACTER) RETURNS INTEGER
+BEGIN
+	DECLARE lobId INTEGER;
+	TABLE_CACHE_LOCK : BEGIN ATOMIC
+		CALL ru.croc.sbrf.mdm.common.InitLobCache();
+		SET lobId = THE(SELECT ITEM T.LOB_TP_CD FROM TableCache.CDLOBTP.rows[] AS T WHERE T.NAME  = lobName AND T.LANG_TP_CD = LANG_TP_CD);
+	END TABLE_CACHE_LOCK;
+	RETURN lobId;
+END;	
+
+CREATE PROCEDURE SetAccessToken(IN dwlControl REFERENCE, 
+								IN userInfo REFERENCE, 
+								IN spName CHARACTER,
+								IN atPrefix CHARACTER)
+BEGIN
+	CALL SetAccessTokenByUserInfo(dwlControl, userInfo, atPrefix);
+	CALL SetAccessTokenBySPName(dwlControl, spName);
+END;	
+
+-- Установка токенов доступа к данным через UserInfo
+CREATE PROCEDURE SetAccessTokenByUserInfo(IN dwlControl REFERENCE, IN userInfo REFERENCE, IN atPrefix CHARACTER)
+BEGIN
+	-- Если токены уже установлены, то ничего не делаем
+	IF EXISTS(dwlControl.accessTokenCollection[]) THEN
+		RETURN;
+	END IF;
+	
+	DECLARE at CHAR GetAccessTokenValueByUserInfo(userInfo, atPrefix);
+		
+	IF at IS NOT NULL THEN
+		CREATE LASTCHILD OF dwlControl.accessTokenCollection NAME 'groupAccessToken';
+		SET dwlControl.accessTokenCollection.groupAccessToken[<].accessTokenValue = at;
+	END IF;	
+END;
+
+-- Установка токенов доступа к данным через SPName
+CREATE PROCEDURE SetAccessTokenBySPName(IN dwlControl REFERENCE, IN spName CHARACTER)
+BEGIN
+	-- Если токены уже установлены, то ничего не делаем
+	IF EXISTS(dwlControl.accessTokenCollection[]) THEN
+		RETURN;
+	END IF;
+		
+	DECLARE mem ROW;	
+	DECLARE atID INT;
+	
+	DECLARE sysID CHARACTER ru.croc.sbrf.mdm.common.getSysId(spName);
+
+	TABLE_CACHE_LOCK : BEGIN ATOMIC
+		CALL ru.croc.sbrf.mdm.common.InitAccessTokenAdminSysCache();
+		SET mem.atID[] = (SELECT ITEM T.ACCESS_TOKEN_ID FROM TableCache.ACCESSTOKENADMINSYS.rows[] AS T WHERE T.ADMIN_SYS_TP_CD = sysID AND T.LANG_TP_CD = LANG_TP_CD);
+		SET mem.defaultInd[] = (SELECT ITEM T.DEFAULT_IND FROM TableCache.ACCESSTOKENADMINSYS.rows[] AS T WHERE T.ADMIN_SYS_TP_CD = sysID AND T.LANG_TP_CD = LANG_TP_CD);
+	END TABLE_CACHE_LOCK;
+
+	DECLARE K INTEGER 0;
+	DECLARE J INTEGER;
+	SET J = CARDINALITY(mem.atID[]);
+	
+	IF (J > 0) THEN
+		CREATE LASTCHILD OF dwlControl NAME 'accessTokenCollection';
+	END IF;
+		
+	WHILE K < J DO
+		CREATE LASTCHILD OF dwlControl.accessTokenCollection NAME 'groupAccessToken';
+		SET dwlControl.accessTokenCollection.groupAccessToken[<].accessTokenValue = GetAccessTokenValueByID(mem.atID[K + 1]);
+		SET dwlControl.accessTokenCollection.groupAccessToken[<].defaultIndicator = mem.defaultInd[K + 1];
+		SET K = K + 1;
+	END WHILE;
+END;
+
+
+-- Установка токенов доступа к данным при создании объекта
+CREATE FUNCTION GetAccessTokenForCreate(IN userInfo REFERENCE, IN dwlControl REFERENCE, IN atPrefix CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE at CHARACTER GetAccessTokenValueByUserInfo(userInfo, atPrefix);
+	IF at IS NULL THEN
+		RETURN GetAccessTokenByAdminSysTp(dwlControl);
+	ELSE
+		RETURN at;	
+	END IF;	
+END;
+
+-- Получение токена доступа через UserInfo
+CREATE FUNCTION GetAccessTokenValueByUserInfo(IN userInfo REFERENCE, IN atPrefix CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE regionId CHARACTER COALESCE(userInfo.AccessRegionId, userInfo.BankInfo.RegionId);
+	IF regionId IS NOT NULL AND LENGTH(regionId) > 0 THEN
+		IF regionId = '2' THEN
+			SET regionId = '02';
+		END IF;	
+		RETURN atPrefix || 'AT_TB' || regionId;
+	END IF;	
+
+	RETURN NULL;
+END;
+
+-- Установка токенов доступа к данным при создании объекта c использованием имени системы
+CREATE FUNCTION GetAccessTokenByAdminSysTp(IN dwlControl REFERENCE) RETURNS CHARACTER
+BEGIN
+	DECLARE sysID INT;
+	DECLARE atID INT;
+	DECLARE atValue CHARACTER;
+	
+	DECLARE K INTEGER 1;
+	DECLARE J INTEGER;
+	SET J = CARDINALITY(dwlControl.ControlExtensionProperty[]);
+	WHILE K <= J AND sysID IS NULL DO
+		IF (dwlControl.ControlExtensionProperty[K].(XMLNSC.Attribute)name = 'AdminSysTpCd') THEN
+			SET sysID = dwlControl.ControlExtensionProperty[K];
+		END IF;	
+		SET K = K + 1;
+	END WHILE;
+	
+
+	IF sysID IS NULL THEN 
+		-- если не нашли идентификатор системы, то ничего не возвращаем 
+		RETURN NULL;
+	ELSE 
+		TABLE_CACHE_LOCK : BEGIN ATOMIC
+			CALL ru.croc.sbrf.mdm.common.InitAccessTokenAdminSysCache();
+			-- выбираем AT с индикатором по-умолчанию 
+			SET atID = THE(SELECT ITEM T.ACCESS_TOKEN_ID FROM TableCache.ACCESSTOKENADMINSYS.rows[] AS T WHERE T.ADMIN_SYS_TP_CD = sysID AND T.LANG_TP_CD = LANG_TP_CD AND T.DEFAULT_IND = 'Y');
+			-- если дефолтный индикатор нигде не установлен, то выбираем любой AT
+			IF (atID IS NULL) THEN
+				SET atID = THE(SELECT ITEM T.ACCESS_TOKEN_ID FROM TableCache.ACCESSTOKENADMINSYS.rows[] AS T WHERE T.ADMIN_SYS_TP_CD = sysID AND T.LANG_TP_CD = LANG_TP_CD);
+			END IF;	
+		END TABLE_CACHE_LOCK;
+		
+		RETURN ru.croc.sbrf.mdm.common.GetAccessTokenValueByID(atID);
+	END IF;
+END;	
+
+-- Установка LOB (Line of Business) для запроса
+CREATE PROCEDURE SetLOB(IN dwlControl REFERENCE, IN spName CHARACTER)
+BEGIN
+	-- Если токены уже установлены, то ничего не делаем
+	IF EXISTS(dwlControl.lineOfBusiness[]) THEN
+		RETURN;
+	END IF;
+		
+	DECLARE atID INT;
+	DECLARE lobID INT;
+	
+	DECLARE sysID CHARACTER ru.croc.sbrf.mdm.common.getSysId(spName);
+
+	TABLE_CACHE_LOCK : BEGIN ATOMIC
+		CALL ru.croc.sbrf.mdm.common.InitLobAdminSysCache();
+		-- выбираем дефолтный LOB
+		SET lobID = THE(SELECT ITEM T.LOB_ID FROM TableCache.LOBADMINSYS.rows[] AS T WHERE T.ADMIN_SYS_TP_CD = sysID AND T.LANG_TP_CD = LANG_TP_CD AND T.DEFAULT_IND = 'Y');
+		-- если дефолтного нет, то первый попавшийся берем
+		IF lobID IS NULL THEN
+			SET lobID = THE(SELECT ITEM T.LOB_ID FROM TableCache.LOBADMINSYS.rows[] AS T WHERE T.ADMIN_SYS_TP_CD = sysID AND T.LANG_TP_CD = LANG_TP_CD);
+		END IF;	
+	END TABLE_CACHE_LOCK;
+
+	IF lobID IS NOT NULL THEN
+		SET dwlControl.lineOfBusiness = getLOBName(lobID);
+	END IF;
+END;

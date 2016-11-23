@@ -1,0 +1,153 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.epk.esql
+
+PATH ru.croc.sbkz.utils;
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'ORGSYNC' THEN
+			SET labelName = 'KZExpMDMLegalClientDataRq';
+		WHEN 'PERSONSYNC' THEN
+			SET labelName = 'KZExpMDMCompPrivateClientDataRq';
+		WHEN 'CLASSIFIERSYNC' THEN
+			SET labelName = 'KZExpClassifierRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown message format', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Экспорт данных клиента - ЮЛ - ORGSYNC
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertEPK2MDO_ExpLegalClient
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartMDORq(InputRoot, OutputRoot, 'KZExpMDMLegalClientDataRq');		
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:orgs = orgs;		
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;	
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.TargetSPName 		= inRef.DestinationSystem;
+		
+		FOR inRef AS InputRoot.XMLNSC.*[<].RequestData.Clients.Client[] DO
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<] AS outRef NAME 'OrgInfo';			
+			CALL CopyClient2OrgInfo(inRef,outRef);
+		END FOR;
+		
+		SET Environment.UserProperties.TimeStamp = InputRoot.XMLNSC.*[<].RequestData.Clients.Client.Sources.Source.TimeStamp;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Экспорт данных клиента - ФЛ
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertEPK2MDO_ExpPrivateClient
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartMDORq(InputRoot, OutputRoot, 'KZExpMDMCompPrivateClientDataRq');		
+
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.TargetSPName 		= inRef.DestinationSystem;
+		
+		FOR inClient AS InputRoot.XMLNSC.*[<].RequestData.Clients.Client[] DO
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<] AS outRef NAME 'PersonInfo';
+			CALL CopyClient2PersonInfo(inClient, outRef);
+		END FOR;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Заполнение параметров маршрутизации (версия 1)
+ **/
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usrVer1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	--SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+	 	
+	 	-- Маршрутизация через SystemId
+	 	DECLARE targetSystem CHARACTER InputRoot.XMLNSC.*[<].TargetSPName;
+	 	DECLARE systemId CHARACTER NULL;
+	 	
+	 	IF targetSystem IS NOT NULL THEN
+	 		CASE targetSystem
+			WHEN 'MABPK' THEN
+				SET systemId = 'urn:sbkzsystems:newpragma';
+			WHEN 'CRMc' THEN
+				SET systemId = 'urn:sbkzsystems:crm';
+			WHEN 'CRMr' THEN
+				SET systemId = 'urn:sbkzsystems:crmretail';
+			ELSE
+				-- Неизвестный тип сообщения
+				THROW USER EXCEPTION VALUES ('Unknown destination system specified', targetSystem);
+			END CASE;
+			
+			SET OutputRoot.MQRFH2.usr.TypeId	    = 'urn:sbkztypes:esb:adapter';
+			SET OutputRoot.MQRFH2.usr.SystemId	= systemId;
+	 	END IF;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Заполнение параметров маршрутизации (версия 2)
+ **/
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usrVer2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+	 	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Репликация НСИ по подписке: CLASSIFIERSYNC -> KZExpClassifierRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertEPK2MDO_ExpClassifier
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartMDORq(InputRoot, OutputRoot, 'KZExpClassifierRq');		
+
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<].RequestData.Classifiers;
+		
+		CALL CopyClassifiersToMDO(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;

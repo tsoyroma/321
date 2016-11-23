@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?><xsd:schema elementFormDefault="qualified" targetNamespace="http://primesource.kz/" xmlns:http="http://schemas.xmlsoap.org/wsdl/http/" xmlns:mime="http://schemas.xmlsoap.org/wsdl/mime/" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:tm="http://microsoft.com/wsdl/mime/textMatching/" xmlns:tns="http://primesource.kz/" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+      <xsd:element name="Version" type="tns:_Version">
+      </xsd:element>
+      <xsd:element name="VersionResponse" type="tns:_VersionResponse">
+      </xsd:element>
+      <xsd:element name="Out_OnlineSet" type="tns:_Out_OnlineSet">
+      </xsd:element>
+      <xsd:element name="Out_OnlineSetResponse" type="tns:_Out_OnlineSetResponse">
+      </xsd:element>
+      <xsd:complexType name="ResponseClass">
+       <xsd:sequence>
+          <xsd:element maxOccurs="1" minOccurs="0" name="id" type="xsd:string"/>
+          <xsd:element maxOccurs="1" minOccurs="0" name="status" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+    <xsd:complexType name="_Version"/>
+    <xsd:complexType name="_VersionResponse">
+          <xsd:sequence>
+            <xsd:element maxOccurs="1" minOccurs="0" name="VersionResult" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+    <xsd:complexType name="_Out_OnlineSet">
+          <xsd:sequence>
+            <xsd:element maxOccurs="1" minOccurs="0" name="in_BankOperationID" type="xsd:string"/>
+            <xsd:element maxOccurs="1" minOccurs="0" name="in_IssueDBID" type="xsd:string"/>
+            <xsd:element maxOccurs="1" minOccurs="0" name="in_SenderName" type="xsd:string"/>
+            <xsd:element maxOccurs="1" minOccurs="0" name="in_BeneficiaryName" type="xsd:string"/>
+            <xsd:element maxOccurs="1" minOccurs="0" name="in_SenderNameList" type="xsd:string"/>
+            <xsd:element maxOccurs="1" minOccurs="0" name="in_BeneficiaryNameList" type="xsd:string"/>
+            <xsd:element maxOccurs="1" minOccurs="0" name="in_OperationReason" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+    <xsd:complexType name="_Out_OnlineSetResponse">
+          <xsd:sequence>
+            <xsd:element maxOccurs="1" minOccurs="0" name="Out_OnlineSetResult" type="xsd:string"/>
+            <xsd:element maxOccurs="1" minOccurs="0" name="responseClass" type="tns:ResponseClass"/>
+          </xsd:sequence>
+        </xsd:complexType>
+</xsd:schema>

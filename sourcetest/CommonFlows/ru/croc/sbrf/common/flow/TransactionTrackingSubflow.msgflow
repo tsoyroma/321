@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmFilter.msgnode="ComIbmFilter.msgnode" xmlns:ComIbmMQOutput.msgnode="ComIbmMQOutput.msgnode" xmlns:ComIbmPassthru.msgnode="ComIbmPassthru.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow" xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbrf/common/flow/TransactionTrackingSubflow.msgflow"
+    nsPrefix="ru_croc_sbrf_common_flow_TransactionTrackingSubflow.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.EventType" name="EventType" lowerBound="1">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EInt"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.Status" name="Status" defaultValueLiteral="Good">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.NodeId" name="NodeId">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.IsEnabled" name="IsEnabled" defaultValueLiteral="1">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.TransactionName" name="TransactionName">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.ApplicationName" name="ApplicationName">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.ServerName" name="ServerName">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.IsSynchronous" name="IsSynchronous" lowerBound="1">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EBoolean"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.LinkId" name="LinkId">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.IsByEcho" name="IsByEcho" lowerBound="1">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EBoolean"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="TransactionTrackingSubflow" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/CommonFlows/icons/full/obj16/TransactionTrackingSubflow.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/CommonFlows/icons/full/obj30/TransactionTrackingSubflow.gif"/>
+    <version xmi:type="utility:ConstantString" string="ESB_Version_Id"/>
+    <composition>
+      <nodes xmi:type="eflow:FCMSink" xmi:id="OutTerminal.Output" location="218,40">
+        <translation xmi:type="utility:TranslatableString" key="OutTerminal.Output" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+      </nodes>
+      <nodes xmi:type="ComIbmFilter.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_3" location="88,36" filterExpression="esql://routine/ru.croc.sbrf.common.esql#TransactionTrackingSubflow_IsEnable.Main">
+        <translation xmi:type="utility:ConstantString" string="IsEnable"/>
+      </nodes>
+      <nodes xmi:type="eflow:FCMSource" xmi:id="InTerminal.Input" location="28,36">
+        <translation xmi:type="utility:TranslatableString" key="InTerminal.Input" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_4" location="159,100" queueName="EVENT.TRANSACTION.TRACKING">
+        <translation xmi:type="utility:ConstantString" string="EVENT.TRANSACTION.TRACKING"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="153,71" computeExpression="esql://routine/ru.croc.sbrf.common.esql#TransactionTrackingSubflow_FillData.Main">
+        <translation xmi:type="utility:ConstantString" string="FillData"/>
+      </nodes>
+      <nodes xmi:type="ComIbmPassthru.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_2" location="352,96">
+        <translation xmi:type="utility:ConstantString" string="Stub"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="OutTerminal.Output" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.false" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_3" sourceNode="InTerminal.Input" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_1" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.true" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out1" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_8" targetNode="OutTerminal.Output" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.Transaction" configurable="true" userDefined="true" describedAttribute="Property.EventType">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.EventType" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+        <propertyDescriptor groupName="Group.Transaction" configurable="true" userDefined="true" describedAttribute="Property.Status">
+          <propertyName xmi:type="utility:TranslatableString" key="Property.Status" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+          <propertyDescriptor groupName="Group.Transaction" configurable="true" userDefined="true" describedAttribute="Property.NodeId">
+            <propertyName xmi:type="utility:TranslatableString" key="Property.NodeId" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+            <propertyDescriptor groupName="Group.Transaction" configurable="true" userDefined="true" describedAttribute="Property.IsEnabled">
+              <propertyName xmi:type="utility:TranslatableString" key="Property.IsEnabled" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+              <propertyDescriptor groupName="Group.TransactionStart" configurable="true" userDefined="true" describedAttribute="Property.TransactionName">
+                <propertyName xmi:type="utility:TranslatableString" key="Property.TransactionName" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+                <propertyDescriptor groupName="Group.TransactionStart" configurable="true" userDefined="true" describedAttribute="Property.ApplicationName">
+                  <propertyName xmi:type="utility:TranslatableString" key="Property.ApplicationName" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+                  <propertyDescriptor groupName="Group.TransactionStart" configurable="true" userDefined="true" describedAttribute="Property.ServerName">
+                    <propertyName xmi:type="utility:TranslatableString" key="Property.ServerName" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+                    <propertyDescriptor groupName="Group.TransactionSent" configurable="true" userDefined="true" describedAttribute="Property.IsSynchronous">
+                      <propertyName xmi:type="utility:TranslatableString" key="Property.IsSynchronous" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+                      <propertyDescriptor groupName="Group.TransactionSent" configurable="true" userDefined="true" describedAttribute="Property.LinkId">
+                        <propertyName xmi:type="utility:TranslatableString" key="Property.LinkId" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+                        <propertyDescriptor groupName="Group.TransactionSent" configurable="true" userDefined="true" describedAttribute="Property.IsByEcho">
+                          <propertyName xmi:type="utility:TranslatableString" key="Property.IsByEcho" bundleName="ru/croc/sbrf/common/flow/TransactionTrackingSubflow" pluginId="CommonFlows"/>
+                        </propertyDescriptor>
+                      </propertyDescriptor>
+                    </propertyDescriptor>
+                  </propertyDescriptor>
+                </propertyDescriptor>
+              </propertyDescriptor>
+            </propertyDescriptor>
+          </propertyDescriptor>
+        </propertyDescriptor>
+      </propertyDescriptor>
+    </propertyOrganizer>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

@@ -1,0 +1,141 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.aml.esql
+
+PATH ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE SOAPRequestForESB_RestoreMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE inputXml CHARACTER FIELDVALUE(InputRoot.XMLNSC.*:xmlMsgRequest.*:request);
+		DECLARE inputBlob BLOB;
+		DECLARE inRef REFERENCE TO InputRoot;
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE env REFERENCE TO Environment;
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		-- дальнейшее взаимодействие происходит по MQ, поэтому убираем заголовок HTTP
+		SET OutputRoot.HTTPInputHeader = null;
+
+		SET inputBlob = CAST(inputXml AS BLOB CCSID 1208);
+
+		-- преобразуем пришедшее сообщение в виде xml
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') PARSE (inputBlob CCSID 1208);
+
+		-- сохраним идентификатор запроса для дальнейшего ответа
+		SET Environment.UserProperties.ReplyIdentifier	= InputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*:*[<];
+		SET Environment.UserProperties.RqUID			= OutRq.CLIENTCARD.RqUID;
+		SET Environment.UserProperties.RqTm				= OutRq.CLIENTCARD.RqTm;
+		SET Environment.UserProperties.Operation		= FIELDNAME(OutRq);
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName	= Environment.UserProperties.Operation;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForESB_CreateErrorResponseForAML
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		CALL CopyEntireMessage();
+		
+		DECLARE base64Data BLOB ASBITSTREAM(OutputRoot.XMLNSC CCSID 1208);
+		DECLARE base64Field INTEGER XMLNSC.Field + XMLNSC.base64Binary;
+		SET OutputRoot.XMLNSC = null;
+		CREATE LASTCHILD OF OutputRoot DOMAIN 'XMLNSC' NAME 'XMLNSC';
+
+		--отвечаем веб-сервисом
+		CREATE LASTCHILD OF OutputRoot.XMLNSC TYPE base64Field NAMESPACE aml_ws_ns NAME 'xmlResponse' VALUE base64Data;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+/**
+ * Запрос на получение карточки ФЛ      CLIENTCARDS -> KZGetPersonInfoByIDRq
+ * Запрос на получение карточки ЮЛ и ИП CLIENTCARDS -> KZGetLegalInfoByAttrRq
+ **/
+CREATE COMPUTE MODULE SOAPRequestForESB_ConvertAML2MDO_CLIENTCARDS
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:CLIENTCARDS.CLIENTCARD;
+		DECLARE clientType CHARACTER FIELDVALUE(inRef.CLIENT_TYPE);
+		
+		IF clientType = '2' THEN
+			CALL FillMDOStandardElementsRq(inRef, OutputRoot, 'KZGetPersonInfoByIDRq');
+			DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:*[<];
+			CREATE FIELD outRef.PersonInfo;
+			DECLARE idExt REFERENCE TO outRef;
+			DECLARE idMABPK CHARACTER FIELDVALUE(inRef.BSCLIENTID);
+			DECLARE idIIN CHARACTER FIELDVALUE(inRef.CLIENTID);
+			/*
+			IF idIIN IS NOT NULL THEN
+				CREATE LASTCHILD OF outRef.PersonInfo AS idExt NAME 'PersonIdExt';
+				SET idExt.Key 			= 'IIN';
+				SET idExt.Value			= inRef.CLIENTID;
+			END IF;
+			*/
+			IF idMABPK IS NOT NULL THEN
+				CREATE LASTCHILD OF outRef.PersonInfo AS idExt NAME 'PersonIdExt';
+				SET idExt.Key 			= 'MABPK';
+				SET idExt.Value			= inRef.BSCLIENTID;
+			END IF;
+			SET outRef.PersonInfoOnly 	= '1';
+		END IF;
+		
+		IF clientType IN ('1', '3') THEN
+			CALL FillMDOStandardElementsRq(inRef, OutputRoot, 'KZGetLegalInfoByAttrRq');
+---			CALL FillMDOStandardElementsRq(inRef, OutputRoot, 'KZGetLegalInfoByAttrFromAMLRq');
+			
+			DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:*[<];
+			CREATE FIELD outRef.OrgInfo;
+			DECLARE idExt REFERENCE TO outRef;
+			DECLARE idMABPK CHARACTER FIELDVALUE(inRef.BSCLIENTID);
+			DECLARE idIIN CHARACTER FIELDVALUE(inRef.CLIENTID);
+			IF idMABPK IS NOT NULL THEN
+				CREATE LASTCHILD OF outRef.OrgInfo AS idExt NAME 'OrgIdExt';
+				SET idExt.Key 			= 'MABPK';
+				SET idExt.Value			= inRef.BSCLIENTID;
+			END IF;
+			/*
+			IF idIIN IS NOT NULL THEN
+				CREATE LASTCHILD OF outRef.OrgInfo AS idExt NAME 'OrgIdExt';
+				SET idExt.Key 			= 'IIN';
+				SET idExt.Value			= inRef.CLIENTID;				
+			END IF;			
+			*/
+			
+			SET outRef.ServiceAttr.Key  	= 'CLIENTTYPE';
+			SET outRef.ServiceAttr.Value  	= inRef.CLIENT_TYPE;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+	
+END MODULE;
+
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке
+CREATE COMPUTE MODULE SOAPRequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через SystemId в ПМИЛ  	
+	 	SET OutputRoot.MQRFH2.usr.TypeId		= 'urn:sbkztypes:esb:adapter';
+	 	SET OutputRoot.MQRFH2.usr.SystemId		= 'urn:sbkzsystems:newpragma';
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+

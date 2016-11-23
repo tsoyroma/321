@@ -1,0 +1,110 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.bpm.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE RequestForBPM_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'SendMasterDataNf' THEN
+			SET labelName = 'SendMasterDataNf';
+		ELSE
+			SET labelName = 'Other';
+			-- Неизвестный тип сообщения
+			--THROW USER EXCEPTION VALUES ('Unknown service in RequestForBPM', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE FileRequestForBPM_ConvertMDO_SendMasterDataNf
+CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/SAPLM/';
+		DECLARE smdrq NAMESPACE 'http://sbrf.ru/NCP/SAPLM/SendMasterDataRq/1.01/';
+		DECLARE ns1 NAMESPACE 'http://sbrf.ru/NCP/esb/envelope/';
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE ns1 NAME 'Envelope';
+		DECLARE inReq REFERENCE TO InputRoot.XMLNSC.*[<];
+			SET OutputRoot.XMLNSC.ns1:Envelope.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef NAMESPACE ns1 NAME 'Header';
+			SET OutputRoot.XMLNSC.*:Envelope.ns1:Header.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';		 	
+		 	SET oRef.ns1:"message-id" 		= inRef.RqUID; 
+		 	SET oRef.ns1:"request-time" 	= inRef.RqTm;
+		 	SET oRef.ns1:"eis-name" 		= inRef.SPName;
+		 	SET oRef.ns1:"system-id" 		= inRef.SystemId;
+		 	SET oRef.ns1:"operation-name" 	= 'SrvSendMasterData';
+		 	SET oRef.ns1:"operation-version" = '1';
+		 	SET oRef.ns1:"user-id" 			= 'TESTADMINISTRATOR_KAZ';
+		 	SET oRef.ns1:"user-name" 		= 'TESTADMINISTRATOR_KAZ';
+	 	 
+		DECLARE oRef1 REFERENCE TO oRef;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef1 NAMESPACE ns1 NAME 'Body';
+		
+		DECLARE masterdata REFERENCE TO oRef1;
+		CREATE LASTCHILD OF oRef1 AS masterdata NAMESPACE tns NAME 'sendMasterDataRq';
+			SET masterdata.(XMLNSC.NamespaceDecl)xmlns:tns = 'http://sbrf.ru/NCP/SAPLM/';
+			SET masterdata.(XMLNSC.NamespaceDecl)xmlns:smdrq = 'http://sbrf.ru/NCP/SAPLM/SendMasterDataRq/1.01/';
+		
+		DECLARE masterdatalist REFERENCE TO masterdata;
+		CREATE LASTCHILD OF masterdata AS masterdatalist NAMESPACE smdrq NAME 'masterDataList';
+		
+		FOR inmasterdata AS inReq.MasterData[] DO
+			DECLARE masterdatalistitem REFERENCE TO masterdatalist;
+			CREATE LASTCHILD OF masterdatalist AS masterdatalistitem NAMESPACE smdrq NAME 'item';
+			SET masterdatalistitem.smdrq:refType = inmasterdata.RefType;
+			
+			DECLARE masterdataflatlist REFERENCE TO masterdatalistitem;			
+			CREATE LASTCHILD OF masterdatalistitem AS masterdataflatlist NAMESPACE smdrq NAME 'masterDataFlatList';
+			
+			FOR indatamain AS inmasterdata.DataMain[] DO
+			DECLARE masterdataflatlistitem REFERENCE TO masterdataflatlist;
+			CREATE LASTCHILD OF masterdataflatlist AS masterdataflatlistitem NAMESPACE smdrq NAME 'item';
+			SET masterdataflatlistitem.smdrq:valueId = indatamain.ValueID;
+			IF EXISTS(indatamain.CompoundKey[]) THEN
+			DECLARE compoundkey REFERENCE TO masterdataflatlistitem;
+			CREATE LASTCHILD OF masterdataflatlistitem AS compoundkey NAMESPACE smdrq NAME 'compoundKeyList';
+				FOR inkompountkey AS indatamain.CompoundKey[] DO
+				DECLARE compoundkeyitem REFERENCE TO compoundkey;
+				CREATE LASTCHILD OF compoundkey AS compoundkeyitem NAMESPACE smdrq NAME 'item';
+				SET compoundkeyitem.fieldName = inkompountkey.FieldName;
+				SET compoundkeyitem.fieldValue = inkompountkey.FieldValue;
+				END FOR;
+			END IF;
+			DECLARE texts REFERENCE TO masterdataflatlistitem;
+			CREATE LASTCHILD OF masterdataflatlistitem AS texts NAMESPACE smdrq NAME 'texts';
+				FOR intexts AS indatamain.Texts[] DO
+				DECLARE textsitem REFERENCE TO texts;
+				CREATE LASTCHILD OF texts AS textsitem NAMESPACE smdrq NAME 'item';
+				SET textsitem.lang		= intexts.Lang;
+				SET textsitem.txtSh		= intexts.ShortText;
+				SET textsitem.txtMd		= intexts.MediumText;
+				SET textsitem.txtLong	= intexts.LongText;
+				END FOR;
+			IF EXISTS(indatamain.AttrData[]) THEN
+				DECLARE attrdata REFERENCE TO masterdataflatlistitem;
+				CREATE LASTCHILD OF masterdataflatlistitem AS attrdata NAMESPACE smdrq NAME 'attrDataList';
+				FOR inattrdata AS indatamain.AttrData[] DO
+				DECLARE attrdataitem REFERENCE TO attrdata;
+				CREATE LASTCHILD OF attrdata AS attrdataitem NAMESPACE smdrq NAME 'item';
+				SET attrdataitem.fieldName = inattrdata.FieldName;
+				SET attrdataitem.fieldValue = inattrdata.FieldValue;
+				END FOR;
+			END IF;
+			END FOR;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

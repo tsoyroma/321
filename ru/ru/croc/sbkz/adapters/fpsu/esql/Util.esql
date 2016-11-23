@@ -1,0 +1,140 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.fpsu.esql
+
+/**
+ * Заполнение стандартных полей МДО в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillMDOStandardElementsRs (IN outRef REFERENCE, IN origRef REFERENCE, IN localEnv REFERENCE)
+BEGIN
+	DECLARE status CHARACTER COALESCE(FIELDVALUE(localEnv.SOAP.*:Envelope.*:Body.*:Fault.*:faultCode),'0');
+	
+	SET outRef.RqUID							= origRef.RqUID;
+	SET outRef.RqTm								= origRef.RqTm;
+	SET outRef.OperUID							= '';
+	SET outRef.SPName							= origRef.SPName;
+	
+	SET outRef.Status.ifxca:StatusCode			= status;
+	SET outRef.Status.ifxca:Severity			= 'Info';
+	SET outRef.Status.ifxca:StatusDesc			= '';		
+END;
+
+DECLARE gs_sbrfIndustryCodToNameMapping SHARED ROW;
+
+CREATE PROCEDURE Internal_CreatesbrfIndustryCodToNameMapping()
+BEGIN
+	IF NOT EXISTS(gs_sbrfIndustryCodToNameMapping.Cur[])THEN
+		
+		SET gs_sbrfIndustryCodToNameMapping.Cur[] = LIST {
+
+				ROW('Agricullture' AS COD, 'Сельское хозяйство' AS ISO),
+				ROW('Oil and Gas' AS COD, 'Нефтегазовая промышленность' AS ISO),
+				ROW('Coal mining' AS COD, 'Угольная промышленность' AS ISO),
+				ROW('Metallurgy' AS COD, 'Металлургическая промышленность' AS ISO),
+				ROW('Chemical' AS COD, 'Химическая промышленность' AS ISO),
+				ROW('Energy' AS COD, 'Энергетика и водоснабжение' AS ISO),				
+				ROW('Mechanical engineering' AS COD, 'Машиностроение' AS ISO),								
+				ROW('Food' AS COD, 'Пищевая промышленность и производство табачных изделий' AS ISO),
+				ROW('Trade' AS COD, 'Торговля (кроме специализированной оптовой)' AS ISO),
+				ROW('Construction' AS COD, 'Строительство и операции с недвижимым имуществом' AS ISO),
+				ROW('Transportation' AS COD, 'Транспорт' AS ISO),
+				ROW('Communications' AS COD, 'Связь и телекоммуникации ' AS ISO),
+				ROW('Finance' AS COD, 'Финансовая деятельность' AS ISO),
+				ROW('Governance' AS COD, 'Государственное управление и обеспечение гражданской безопасности; обязательное социальное обеспечение' AS ISO),
+				ROW('Health and Education' AS COD, 'Здравоохранение, образование' AS ISO),
+				ROW('Leasing' AS COD, 'Деятельность в области лизинга' AS ISO),
+				ROW('Service' AS COD, 'Услуги (кроме специализированных услуг, указанных в других разделах классификатора)' AS ISO),
+				ROW('Wood' AS COD, 'Лесная, деревообрабатывающая и целлюлозно-бумажная промышленность' AS ISO),
+				ROW('Other' AS COD, 'Прочие виды экономической деятельности' AS ISO),
+				ROW('Insurance' AS COD, 'Страховая компания' AS ISO),
+				ROW('OPK' AS COD, 'ОПК' AS ISO),
+				ROW('Bank' AS COD, 'Банк' AS ISO)
+			};
+	END IF;
+END;
+
+--- Справочник Отрасль 
+CREATE FUNCTION funsbrfIndustry(IN codCur CHARACTER) RETURNS CHARACTER
+BEGIN
+	CALL Internal_CreatesbrfIndustryCodToNameMapping();
+	RETURN THE(SELECT ITEM c.ISO FROM gs_sbrfIndustryCodToNameMapping.Cur[] AS c WHERE c.COD = codCur);
+END;
+
+--- Справочник «Тип финансовой отчётности»
+CREATE FUNCTION fun_finReportType(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN 'NFRS' THEN 'Национальный стандарт финансовой отчётности'
+		WHEN 'IFRS' THEN 'Международный стандарт финансовой отчётности'
+	ELSE 'Нет такого типа финансовой отчётности'									
+	END;
+END;
+
+--- Справочник «Тип расчета LGD»
+CREATE FUNCTION funLGDType(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN 'PRODUCT' THEN 'По продукту'
+		WHEN 'DEAL' THEN 'По сделке'
+	ELSE 'Нет такого типа финансовой отчётности'									
+	END;
+END;
+
+CREATE FUNCTION funLGDType2(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN 'По продукту' THEN 'PRODUCT'
+		WHEN 'По сделке' THEN 'DEAL'
+	ELSE 
+		type									
+	END;
+END;
+
+--- Справочник «Тип финализции LGD»
+CREATE FUNCTION funFinLGDType(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN 'Manager' THEN 'аналитиком'
+		WHEN 'Underwriter' THEN 'андеррайтером'
+	ELSE 'Нет такого типа финализции LGD'									
+	END;
+END;
+
+--- Справочник «Статус рейтинга»
+CREATE FUNCTION funStatusRaiting(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN 'ACTUAL' THEN 'Актуальный'
+		WHEN 'CONF_UW_MANAGER' THEN 'Подтверждение Рук.андеррайтера'
+		WHEN 'CALC_BY_UW' THEN 'Рассчитан Андеррайтером'
+		WHEN 'CALC_BY_LO' THEN 'Рассчитан Аналитиком'
+		WHEN 'CALC_REQUIRED' THEN ' '
+		WHEN 'REJECTED' THEN ' '
+	ELSE 'Нет такого статуса рейтинга'									
+	END;
+END;
+
+--- Справочник «Роль» 
+CREATE FUNCTION funSprRole(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN 'LoanOfficer' THEN 'Аналитик'
+		WHEN 'Underwriter' THEN 'Андеррайтер'
+		WHEN 'UnderwriterManager' THEN 'Руководитель Андеррайтера'
+		WHEN 'LoanOfficerManager' THEN 'Руководитель Кредитного инспектора'
+		WHEN 'ClientManager' THEN ' '
+		WHEN 'DecisionMakerCM' THEN ' '
+		WHEN 'DecisionMakerLO' THEN ' '
+		WHEN 'UnderwriterDispatcher' THEN ' '
+		WHEN 'Administrator' THEN ' ' 
+	ELSE 'Нет такой роли'									
+	END;
+END;
+
+CREATE FUNCTION funIsPrimary(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN 'N' THEN 'false'
+		WHEN 'Y' THEN 'true'
+	ELSE 'unknown'									
+	END;
+END;
+

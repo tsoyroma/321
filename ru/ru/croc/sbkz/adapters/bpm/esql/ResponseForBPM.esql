@@ -1,0 +1,767 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.bpm.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Восстановление заголовка исходного сообщения
+CREATE COMPUTE MODULE ResponseForBPM_AddOrigHead
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE ResponseForBPM_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation -- SAPLM
+		WHEN 'GetLimitRs' THEN
+			SET labelName = 'GetLimitRs';
+		WHEN 'CreateLimitRs' THEN
+			SET labelName = 'CreateLimitRs';
+		WHEN 'UpdateLimitRs' THEN
+			SET labelName = 'UpdateLimitRs';
+		WHEN 'UpdateFinTransactionRs' THEN
+			SET labelName = 'UpdateFinTransactionRs';
+		WHEN 'CalcMarkerDebtCapacityRs' THEN
+			SET labelName = 'CalcMarkerDebtCapacityRs';
+		ELSE
+			SET labelName = 'AMRLIRT'; -- АМРЛиРТ 
+			
+			--THROW USER EXCEPTION VALUES ('Unknown format in RequestForESB(TSM)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForBPM_ConvertGetLimitRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/SAPLM/';
+		DECLARE glrs NAMESPACE 'http://sbrf.ru/NCP/SAPLM/GetLimitRs/1.04/';
+		DECLARE ns1 NAMESPACE 'http://sbrf.ru/NCP/esb/envelope/';
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE ns1 NAME 'Envelope';
+		DECLARE inReq REFERENCE TO InputRoot.XMLNSC.*[<];
+			SET OutputRoot.XMLNSC.ns1:Envelope.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef NAMESPACE ns1 NAME 'Header';
+			SET OutputRoot.XMLNSC.*:Envelope.ns1:Header.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';
+		 	SET oRef.ns1:"message-id" 		= inRef.RqUID; 
+		 	SET oRef.ns1:"request-time" 	= inRef.RqTm;
+		 	--SET oRef.ns1:"correlation-id" 	= CAST(LCASE(LEFT(FIELDVALUE(inRef.RqUID) || '000000000000000000000000000000000000000000000', 48)) AS BLOB); 
+		 	SET oRef.ns1:"eis-name" 		= inRef.SPName;
+		 	SET oRef.ns1:"system-id" 		= inRef.SystemId;
+		 	SET oRef.ns1:"operation-name" 	= 'SrvGetLimit';--inRef.OperUID;
+		 	SET oRef.ns1:"operation-version" = '1';
+		 	SET oRef.ns1:"user-id" 			= 'TESTADMINISTRATOR_KAZ';
+		 	SET oRef.ns1:"user-name" 		= 'TESTADMINISTRATOR_KAZ';
+		 	
+		DECLARE oRef1 REFERENCE TO oRef;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef1 NAMESPACE ns1 NAME 'Body';
+		
+		DECLARE getlimitrs REFERENCE TO oRef1;
+		CREATE LASTCHILD OF oRef1 AS getlimitrs NAMESPACE tns NAME 'getLimitRs';
+			SET getlimitrs.(XMLNSC.NamespaceDecl)xmlns:tns = 'http://sbrf.ru/NCP/SAPLM/';
+			SET getlimitrs.(XMLNSC.NamespaceDecl)xmlns:glrs = 'http://sbrf.ru/NCP/SAPLM/GetLimitRs/1.04/';
+		
+		DECLARE limitdata REFERENCE TO getlimitrs;
+		CREATE LASTCHILD OF getlimitrs AS limitdata NAMESPACE glrs NAME 'limitData';
+		
+		FOR inlimdata AS inReq.LimData[] DO
+		--IF EXISTS(inReq.LimData[]) THEN	
+
+			DECLARE limitdataitem REFERENCE TO limitdata;
+			CREATE LASTCHILD OF limitdata AS limitdataitem NAMESPACE glrs NAME 'item';
+						
+			DECLARE inithead REFERENCE TO limitdataitem;
+			CREATE LASTCHILD OF limitdataitem AS inithead NAMESPACE glrs NAME 'limitHead';		
+				SET	inithead.glrs:sector 	= inlimdata.LimitHead.LimitSector;
+				SET	inithead.glrs:type		= inlimdata.LimitHead.LimitType;
+				SET	inithead.glrs:validFrom	= inlimdata.LimitHead.LimitValidFrom;
+				SET	inithead.glrs:validTo	= inlimdata.LimitHead.LimitValidTo;
+				SET	inithead.glrs:currency	= inlimdata.LimitHead.LimitCurrencyMIso;
+				SET	inithead.glrs:comment	= inlimdata.LimitHead.LimitText;
+						
+			DECLARE limitchars REFERENCE TO limitdataitem;
+			CREATE LASTCHILD OF limitdataitem AS limitchars NAMESPACE glrs NAME 'limitChars';	
+			FOR inlimchars AS inlimdata.LimitChars[] DO
+					DECLARE limitcharsitem REFERENCE TO limitchars; 
+					CREATE LASTCHILD OF limitchars AS limitcharsitem NAMESPACE glrs NAME 'item';
+	
+					SET limitcharsitem.glrs:fieldName	= inlimchars.Name;
+					SET limitcharsitem.glrs:fieldValue	= true_false(inlimchars.Value);
+					SET limitcharsitem.glrs:fieldText	= inlimchars.Description;
+					
+					IF inlimchars.Name = '/BA1/C20BPART' THEN
+					SET limitcharsitem.glrs:fieldName	= inlimchars.Name;
+					SET limitcharsitem.glrs:fieldValue	= SUBSTRING(inlimchars.Value AFTER 'CRMKZ_');
+					SET limitcharsitem.glrs:fieldText	= inlimchars.Description;
+					END IF;
+			END FOR;
+
+	
+			DECLARE dat TIMESTAMP;
+			DECLARE valOut CHARACTER;
+			DECLARE valOut2 CHARACTER;
+			DECLARE valOut3 CHARACTER;
+			DECLARE valOut4 CHARACTER;
+			
+			DECLARE valyear CHARACTER;
+			DECLARE valday CHARACTER;
+			DECLARE valmon CHARACTER;
+			
+			IF EXISTS(inlimdata.LimitFChars[]) THEN
+				DECLARE limitfchars REFERENCE TO limitdataitem;
+				CREATE LASTCHILD OF limitdataitem AS limitfchars NAMESPACE glrs NAME 'limitFChars';	
+				FOR inlimfchars AS 	inlimdata.LimitFChars[] DO
+					DECLARE limitfcharsitem REFERENCE TO limitfchars;
+					CREATE LASTCHILD OF limitfchars AS limitfcharsitem NAMESPACE glrs NAME 'item';
+	
+					SET limitfcharsitem.glrs:fieldName	= inlimfchars.Name;
+					SET limitfcharsitem.glrs:fieldValue	= inlimfchars.Value;
+					SET limitfcharsitem.glrs:fieldText	= inlimfchars.Description;
+	
+					IF inlimfchars.Name = '/BIC/ZUPDTMSTM' and LENGTH(inlimfchars.Value) > 17 THEN -- Метка времени изменения  
+					
+						SET limitfcharsitem.glrs:fieldName	= inlimfchars.Name;
+						SET valOut  = RIGHT(inlimfchars.Value, 17);
+						SET valOut2 = LEFT(inlimfchars.Value, 8);
+						SET valyear = SUBSTRING(valOut2 FROM 1 FOR 4); 
+						SET valmon = SUBSTRING(valOut2 FROM 5 FOR 2);
+						SET valday = SUBSTRING(valOut2 FROM 7 FOR 2);
+						SET valOut3 = valyear || '-' || valmon || '-' || valday;
+						--SET valOut3	= CAST(CAST(valOut2 AS DATE FORMAT 'yyyyMMdd') AS CHARACTER FORMAT 'yyyy-MM-dd');
+						SET valOut4	= valOut3 || 'T00:00:00.000';
+						SET limitfcharsitem.glrs:fieldValue	= ' ';--valOut4;
+						SET limitfcharsitem.glrs:fieldText	= inlimfchars.Description;											
+					END IF;
+					 
+					IF inlimfchars.Name = 'DYN_FL_PROD_ALW' THEN
+						SET limitfcharsitem.glrs:fieldName	= inlimfchars.Name;
+						SET limitfcharsitem.glrs:fieldValue	= true_false(inlimfchars.Value);
+						SET limitfcharsitem.glrs:fieldText	= inlimfchars.Description;	
+					END IF;
+					
+					IF inlimfchars.Name = '/BIC/ZFLLIMSET' THEN
+						SET limitfcharsitem.glrs:fieldName	= inlimfchars.Name;
+						SET limitfcharsitem.glrs:fieldValue	= true_false(inlimfchars.Value);--valOut4;
+						SET limitfcharsitem.glrs:fieldText	= inlimfchars.Description;	
+					END IF;	
+					IF inlimfchars.Name = '/BIC/ZLIMAVDT' THEN
+						SET limitfcharsitem.glrs:fieldName	= inlimfchars.Name;
+						SET limitfcharsitem.glrs:fieldValue	= CAST(CAST(inlimfchars.Value AS DATE FORMAT 'yyyyMMdd') AS CHARACTER FORMAT 'yyyy-MM-dd');--valOut4;
+						SET limitfcharsitem.glrs:fieldText	= inlimfchars.Description;	
+					END IF; 	
+					IF inlimfchars.Name = '/BIC/ZLIMFLEXC' THEN
+						SET limitfcharsitem.glrs:fieldName	= inlimfchars.Name;
+						SET limitfcharsitem.glrs:fieldValue	= true_false(inlimfchars.Value);--valOut4;
+						SET limitfcharsitem.glrs:fieldText	= inlimfchars.Description;	
+					END IF; 	
+					IF inlimfchars.Name = '/BIC/ZFLGENAGR' THEN
+						SET limitfcharsitem.glrs:fieldName	= inlimfchars.Name;
+						SET limitfcharsitem.glrs:fieldValue	= true_false(inlimfchars.Value);--valOut4;
+						SET limitfcharsitem.glrs:fieldText	= inlimfchars.Description;	
+					END IF; 	
+					IF inlimfchars.Name = 'DYN_FL_PROD_ALW' THEN
+						SET limitfcharsitem.glrs:fieldName	= inlimfchars.Name;
+						SET limitfcharsitem.glrs:fieldValue	= true_false(inlimfchars.Value);--valOut4;
+						SET limitfcharsitem.glrs:fieldText	= inlimfchars.Description;	
+					END IF; 											
+				END FOR;	
+			END IF;
+			
+			IF EXISTS(inlimdata.LimitPos[]) THEN
+				DECLARE limitpositions REFERENCE TO limitdataitem;
+				CREATE LASTCHILD OF limitdataitem AS limitpositions NAMESPACE glrs NAME 'limitPositions';	
+	
+				FOR inlimpos AS inlimdata.LimitPos[] DO
+					DECLARE limitpositionsitem REFERENCE TO limitpositions;
+					CREATE LASTCHILD OF limitpositions AS limitpositionsitem NAMESPACE glrs NAME 'item';
+					SET limitpositionsitem.glrs:category	= inlimpos.LimitCategory;
+					SET limitpositionsitem.glrs:validFrom	= inlimpos.PosValidFrom;
+					SET limitpositionsitem.glrs:validTo		= inlimpos.PosValidTo;
+					SET limitpositionsitem.glrs:amount		= inlimpos.LimitAmount;
+					SET limitpositionsitem.glrs:currency	= inlimpos.LimitCurrencyIso;
+					SET limitpositionsitem.glrs:comment		= inlimpos.LimitPosText;
+				END FOR;
+			ELSE 			
+				DECLARE limitpositions REFERENCE TO limitdataitem;
+				CREATE LASTCHILD OF limitdataitem AS limitpositions NAMESPACE glrs NAME 'limitPositions';	
+			END IF;
+			
+			--IF EXISTS(inlimdata.LimitUtlSum[]) THEN
+				DECLARE limitutlsum REFERENCE TO limitdataitem;
+				CREATE LASTCHILD OF limitdataitem AS limitutlsum NAMESPACE glrs NAME 'limitUtlSum';	
+				SET limitutlsum.glrs:sector				= inlimdata.LimitUtlSum.LimitSector;	 
+				SET limitutlsum.glrs:type				= inlimdata.LimitUtlSum.LimitType;
+				SET limitutlsum.glrs:status				= inlimdata.LimitUtlSum.Status;
+				SET limitutlsum.glrs:dateValue			= inlimdata.LimitUtlSum.DateValue;
+				SET limitutlsum.glrs:utilAmountSum		= inlimdata.LimitUtlSum.UtilAmountSum;
+				SET limitutlsum.glrs:utilCurrencySum	= inlimdata.LimitUtlSum.UtilCurrencySum;
+			--END IF;
+			
+			IF EXISTS(inlimdata.LimitUtlSngl[]) THEN
+				DECLARE limitutlsngl REFERENCE TO limitdataitem;		
+				CREATE LASTCHILD OF limitdataitem AS limitutlsngl NAMESPACE glrs NAME 'limitUtlSngl';	
+				FOR inlimutl AS inlimdata.LimitUtlSngl[] DO
+					DECLARE limitutlsnglitem REFERENCE TO limitutlsngl;
+					CREATE LASTCHILD OF limitutlsngl AS limitutlsnglitem NAMESPACE glrs NAME 'item';
+					SET limitutlsnglitem.glrs:objectCategory	= inlimutl.ObjectCategory;
+					SET limitutlsnglitem.glrs:objectNo			= inlimutl.ObjectNo;
+					SET limitutlsnglitem.glrs:objectSubCategory = inlimutl.ObjectSubCategory;
+					SET limitutlsnglitem.glrs:objectSubNo		= inlimutl.ObjectSubNo;
+					SET limitutlsnglitem.glrs:limitSector		= inlimutl.LimitSector;
+					SET limitutlsnglitem.glrs:determMethod		= inlimutl.DeterminationMethod;
+					SET limitutlsnglitem.glrs:status			= inlimutl.Status;
+					SET limitutlsnglitem.glrs:utilValidFrom		= inlimutl.UtilValidFrom;
+					SET limitutlsnglitem.glrs:utilValidTo		= inlimutl.UtilValidTo;
+					SET limitutlsnglitem.glrs:utilAmountSum		= inlimutl.UtilAmountSngl;
+					SET limitutlsnglitem.glrs:utilCurrencySngl	= inlimutl.UtilCurrencySngl;
+				END FOR;
+			ELSE
+				DECLARE limitutlsngl REFERENCE TO limitdataitem;		
+				CREATE LASTCHILD OF limitdataitem AS limitutlsngl NAMESPACE glrs NAME 'limitUtlSngl';				
+			END IF;
+			/*
+			IF EXISTS(inlimdata.LimitMChars[]) THEN
+				DECLARE limitmchars REFERENCE TO limitdataitem;
+				CREATE LASTCHILD OF limitdataitem AS limitmchars NAMESPACE glrs NAME 'limitMChars';
+				--FOR inlimitmchars AS inlimdata.LimitMChars[] 	
+				DECLARE limitmcharsitem REFERENCE TO limitmchars;				
+				CREATE LASTCHILD OF limitmchars AS limitmcharsitem NAMESPACE glrs NAME 'item';
+				SET limitmcharsitem.glrs:attrTableType	= inlimdata.LimitMChars.AttrTableType;
+				
+				DECLARE limitmcharsitemnew REFERENCE TO limitmcharsitem ;
+				CREATE LASTCHILD OF limitmcharsitem AS limitmcharsitemnew NAMESPACE glrs NAME 'item';
+				DECLARE defmchars REFERENCE TO limitmcharsitemnew ;
+				CREATE LASTCHILD OF limitmcharsitemnew AS defmchars NAMESPACE glrs NAME 'defMChars';
+				  
+				FOR indefmchars AS inlimdata.LimitMChars.LimitMCharText[] DO
+					DECLARE defmcharsitem REFERENCE TO defmchars;--DefMChars
+					CREATE LASTCHILD OF defmchars AS defmcharsitem NAMESPACE glrs NAME 'item';
+					SET defmcharsitem.glrs:fieldName	= indefmchars.DefMChars.Name;	
+					SET defmcharsitem.glrs:fieldValue	= indefmchars.DefMChars.Value;
+					SET defmcharsitem.glrs:fieldText	= indefmchars.DefMChars.Description;
+				END FOR;
+			ELSE 
+				DECLARE limitmchars REFERENCE TO limitdataitem;
+				CREATE LASTCHILD OF limitdataitem AS limitmchars NAMESPACE glrs NAME 'limitMChars';			
+			END IF;
+			*/
+			DECLARE limitmchars REFERENCE TO limitdataitem;
+			CREATE LASTCHILD OF limitdataitem AS limitmchars NAMESPACE glrs NAME 'limitMChars';
+			FOR inlimitmchars AS inlimdata.LimitMChars[] DO
+				DECLARE limitmcharsitem REFERENCE TO limitmchars;
+				CREATE LASTCHILD OF limitmchars AS limitmcharsitem NAMESPACE glrs NAME 'item';
+				SET limitmcharsitem.glrs:attrTableType	= inlimitmchars.AttrTableType;
+				
+				DECLARE limitmcharsitemnew REFERENCE TO limitmcharsitem ;
+				CREATE LASTCHILD OF limitmcharsitem AS limitmcharsitemnew NAMESPACE glrs NAME 'item';
+				DECLARE defmchars REFERENCE TO limitmcharsitemnew ;
+				CREATE LASTCHILD OF limitmcharsitemnew AS defmchars NAMESPACE glrs NAME 'defMChars';
+					FOR indefmchars AS inlimitmchars.LimitMCharText[] DO
+						DECLARE defmcharsitem REFERENCE TO defmchars;--DefMChars
+						CREATE LASTCHILD OF defmchars AS defmcharsitem NAMESPACE glrs NAME 'item';
+						SET defmcharsitem.glrs:fieldName	= indefmchars.DefMChars.Name;	
+						SET defmcharsitem.glrs:fieldValue	= indefmchars.DefMChars.Value;
+						SET defmcharsitem.glrs:fieldText	= indefmchars.DefMChars.Description;
+					END FOR;
+			END FOR;
+			
+			IF EXISTS(inlimdata.LimitNotes[]) THEN
+				DECLARE limitnotes REFERENCE TO limitdataitem;
+				CREATE LASTCHILD OF limitdataitem AS limitnotes NAMESPACE glrs NAME 'limitNotes';
+				FOR inlimnotes AS inlimdata.LimitNotes[] DO
+					DECLARE limitnotesitem REFERENCE TO limitnotes;
+					CREATE LASTCHILD OF limitnotes AS limitnotesitem NAMESPACE glrs NAME 'item';
+					SET limitnotesitem.glrs:lang	= inlimnotes.Lang;	
+					SET limitnotesitem.glrs:type	= inlimnotes.Type;
+					SET limitnotesitem.glrs:text	= inlimnotes.Text;
+				END FOR;
+			ELSE 
+				DECLARE limitnotes REFERENCE TO limitdataitem;
+				CREATE LASTCHILD OF limitdataitem AS limitnotes NAMESPACE glrs NAME 'limitNotes';
+			END IF;
+			
+			IF EXISTS(inlimdata.LimitValues[]) THEN
+				DECLARE limitvalues REFERENCE TO limitdataitem;
+				CREATE LASTCHILD OF limitdataitem AS limitvalues NAMESPACE glrs NAME 'limitValues';
+				SET limitvalues.glrs:limitAmount		= inlimdata.LimitValues.LimitAmount;
+				SET limitvalues.glrs:limitCurrency		= inlimdata.LimitValues.LimitAmountCurrency_ISO;
+				SET limitvalues.glrs:utilAmount			= inlimdata.LimitValues.LimitUtilAmount;
+				SET limitvalues.glrs:limitAmountFree	= inlimdata.LimitValues.LimitAmountFree;
+				SET limitvalues.glrs:limitUtilAmountReq	= inlimdata.LimitValues.LimitUtilAmount_Req;
+				SET limitvalues.glrs:limitAmountFreeReq	= inlimdata.LimitValues.LimitAmountFree_Req;
+			ELSE 
+				DECLARE limitvalues REFERENCE TO limitdataitem;
+				CREATE LASTCHILD OF limitdataitem AS limitvalues NAMESPACE glrs NAME 'limitValues';
+			END IF;
+		--END IF;
+		END FOR;
+		
+		DECLARE generallog REFERENCE TO getlimitrs;
+		CREATE LASTCHILD OF getlimitrs AS generallog NAMESPACE glrs NAME 'generalLog';
+		FOR inlog AS inReq.Log[] DO
+			DECLARE generallogitem REFERENCE TO generallog;
+			CREATE LASTCHILD OF generallog AS generallogitem NAMESPACE glrs NAME 'item';
+			SET generallogitem.glrs:type 		= inlog.Type;
+			SET generallogitem.glrs:id			= inlog.ID;
+			SET generallogitem.glrs:"number"	= inlog."Number";
+			SET generallogitem.glrs:message		= inlog.Message;
+			SET generallogitem.glrs:logNo		= inlog.LogNo;
+			SET generallogitem.glrs:logMsgNo	= inlog.LogMsgNo;
+			SET generallogitem.glrs:messageV1	= inlog.MessageV1;
+			SET generallogitem.glrs:messageV2	= inlog.MessageV2;
+			SET generallogitem.glrs:messageV3	= inlog.MessageV3;
+			SET generallogitem.glrs:messageV4	= inlog.MessageV4;
+			SET generallogitem.glrs:parameter	= inlog.Parameter;
+			SET generallogitem.glrs:row			= inlog.Row;
+			SET generallogitem.glrs:field		= inlog.Field;
+			SET generallogitem.glrs:system		= inlog.System;
+		END FOR;
+		
+		SET OutputRoot.MQMD.CorrelId = CAST(LCASE(LEFT(FIELDVALUE(inRef.RqUID) || '000000000000000000000000000000000000000000000', 48)) AS BLOB); 
+
+		RETURN TRUE; 
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForBPM_ConvertCreateLimitRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/SAPLM/';
+		DECLARE clrs NAMESPACE 'http://sbrf.ru/NCP/SAPLM/CreateLimitRs/1.01/';
+		---DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+		DECLARE ns1 NAMESPACE 'http://sbrf.ru/NCP/esb/envelope/';
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE ns1 NAME 'Envelope';
+		DECLARE inReq REFERENCE TO InputRoot.XMLNSC.*[<];
+			SET OutputRoot.XMLNSC.ns1:Envelope.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef NAMESPACE ns1 NAME 'Header';
+			SET OutputRoot.XMLNSC.*:Envelope.ns1:Header.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';		 	
+		 	SET oRef.ns1:"message-id" 		= inRef.RqUID; 
+		 	SET oRef.ns1:"request-time" 	= inRef.RqTm;
+		 	--SET oRef.ns1:"correlation-id" 	= CAST(LCASE(LEFT(FIELDVALUE(inRef.RqUID) || '000000000000000000000000000000000000000000000', 48)) AS BLOB); 
+		 	SET oRef.ns1:"eis-name" 		= inRef.SPName;
+		 	SET oRef.ns1:"system-id" 		= inRef.SystemId;
+		 	SET oRef.ns1:"operation-name" 	= 'SrvCreateLimit';--inRef.OperUID;
+		 	SET oRef.ns1:"operation-version" = '1';
+		 	SET oRef.ns1:"user-id" 			= 'TESTADMINISTRATOR_KAZ';
+		 	SET oRef.ns1:"user-name" 		= 'TESTADMINISTRATOR_KAZ';
+	 	 
+		DECLARE oRef1 REFERENCE TO oRef;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef1 NAMESPACE ns1 NAME 'Body';
+		
+		DECLARE createlimitrs REFERENCE TO oRef1;
+		CREATE LASTCHILD OF oRef1 AS createlimitrs NAMESPACE tns NAME 'createLimitRs';
+			SET createlimitrs.(XMLNSC.NamespaceDecl)xmlns:tns = 'http://sbrf.ru/NCP/SAPLM/';
+			SET createlimitrs.(XMLNSC.NamespaceDecl)xmlns:clrs = 'http://sbrf.ru/NCP/SAPLM/CreateLimitRs/1.01/';
+		---SET createlimitrs.(XMLNSC.NamespaceDecl)xmlns:xsi = 'http://www.w3.org/2001/XMLSchema-instance';
+		
+		DECLARE operlog REFERENCE TO createlimitrs;
+		CREATE LASTCHILD OF createlimitrs AS operlog NAMESPACE clrs NAME 'operationLog';
+		
+		IF EXISTS(inReq.OperationLog.GeneralLog[]) THEN			
+			DECLARE generlog REFERENCE TO operlog;
+			CREATE LASTCHILD OF operlog AS generlog NAMESPACE clrs NAME 'generalLog';
+			FOR ingenerallog AS inReq.OperationLog.GeneralLog[] DO
+				DECLARE generlogitem REFERENCE TO generlog;
+				CREATE LASTCHILD OF generlog AS generlogitem NAMESPACE clrs NAME 'item';
+					SET generlogitem.clrs:type 		= ingenerallog.Type;
+					SET generlogitem.clrs:id		= ingenerallog.ID;
+					SET generlogitem.clrs:"number"	= ingenerallog."Number";
+					SET generlogitem.clrs:message	= ingenerallog.Message;
+					SET generlogitem.clrs:logNo		= ingenerallog.LogNo;
+					SET generlogitem.clrs:logMsgNo	= ingenerallog.LogMsgNo;
+					SET generlogitem.clrs:messageV1	= ingenerallog.MessageV1;
+					SET generlogitem.clrs:messageV2	= ingenerallog.MessageV2;
+					SET generlogitem.clrs:messageV3	= ingenerallog.MessageV3;
+					SET generlogitem.clrs:messageV4	= ingenerallog.MessageV4;
+					SET generlogitem.clrs:parameter	= ingenerallog.Parameter;
+					SET generlogitem.clrs:row		= ingenerallog.Row;
+					SET generlogitem.clrs:field		= ingenerallog.Field;
+					SET generlogitem.clrs:system	= ingenerallog.System;
+			END FOR;		
+		END IF;
+		
+		IF EXISTS(inReq.OperationLog.ObjectLogs[]) THEN
+			DECLARE objectloglist REFERENCE TO operlog;
+			CREATE LASTCHILD OF operlog AS objectloglist NAMESPACE clrs NAME 'objectLogList';
+			DECLARE objectloglistitem REFERENCE TO objectloglist;
+			CREATE LASTCHILD OF objectloglist AS objectloglistitem NAMESPACE clrs NAME 'item';
+			DECLARE objkey REFERENCE TO objectloglistitem;
+			CREATE LASTCHILD OF objectloglistitem AS objkey NAMESPACE clrs NAME 'objectKey';
+			DECLARE objkeyitem REFERENCE TO objkey;
+			CREATE LASTCHILD OF objkey AS objkeyitem NAMESPACE clrs NAME 'item';
+				SET objkeyitem.clrs:fieldName 	= inReq.OperationLog.ObjectLogs.ObjectKey.Name;
+				SET objkeyitem.clrs:fieldValue	= inReq.OperationLog.ObjectLogs.ObjectKey.Value;
+				
+			DECLARE objectlog REFERENCE TO objectloglistitem;
+			CREATE LASTCHILD OF objectloglistitem AS objectlog NAMESPACE clrs NAME 'objectLog';
+			DECLARE objectlogitem REFERENCE TO objectlog;
+			CREATE LASTCHILD OF objectlog AS objectlogitem NAMESPACE clrs NAME 'item';
+				SET objectlogitem.clrs:type 		= inReq.OperationLog.ObjectLogs.ObjectLog.Type;
+				SET objectlogitem.clrs:id			= inReq.OperationLog.ObjectLogs.ObjectLog.ID;
+				SET objectlogitem.clrs:"number"		= inReq.OperationLog.ObjectLogs.ObjectLog."Number";
+				SET objectlogitem.clrs:message		= inReq.OperationLog.ObjectLogs.ObjectLog.Message;
+				SET objectlogitem.clrs:logNo		= inReq.OperationLog.ObjectLogs.ObjectLog.LogNo;
+				SET objectlogitem.clrs:logMsgNo		= inReq.OperationLog.ObjectLogs.ObjectLog.LogMsgNo;
+				SET objectlogitem.clrs:messageV1	= inReq.OperationLog.ObjectLogs.ObjectLog.MessageV1;
+				SET objectlogitem.clrs:messageV2	= inReq.OperationLog.ObjectLogs.ObjectLog.MessageV2;
+				SET objectlogitem.clrs:messageV3	= inReq.OperationLog.ObjectLogs.ObjectLog.MessageV3;
+				SET objectlogitem.clrs:messageV4	= inReq.OperationLog.ObjectLogs.ObjectLog.MessageV4;
+				SET objectlogitem.clrs:parameter	= inReq.OperationLog.ObjectLogs.ObjectLog.Parameter;
+				SET objectlogitem.clrs:row			= inReq.OperationLog.ObjectLogs.ObjectLog.Row;
+				SET objectlogitem.clrs:field		= inReq.OperationLog.ObjectLogs.ObjectLog.Field;
+				SET objectlogitem.clrs:system		= inReq.OperationLog.ObjectLogs.ObjectLog.System;
+		END IF;	
+			SET OutputRoot.MQMD.CorrelId = CAST(LCASE(LEFT(FIELDVALUE(inRef.RqUID) || '000000000000000000000000000000000000000000000', 48)) AS BLOB); 
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForBPM_ConvertUpdateLimitRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/SAPLM/';
+		DECLARE ulrs NAMESPACE 'http://sbrf.ru/NCP/SAPLM/UpdateLimitRs/1.01/';
+		--DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+		DECLARE ns1 NAMESPACE 'http://sbrf.ru/NCP/esb/envelope/';
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE ns1 NAME 'Envelope';
+		DECLARE inReq REFERENCE TO InputRoot.XMLNSC.*[<];
+			SET OutputRoot.XMLNSC.ns1:Envelope.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef NAMESPACE ns1 NAME 'Header';
+			SET OutputRoot.XMLNSC.*:Envelope.ns1:Header.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';	 	 
+	 	 	SET oRef.ns1:"message-id" 		= inRef.RqUID; 
+		 	SET oRef.ns1:"request-time" 	= inRef.RqTm;
+		 	--SET oRef.ns1:"correlation-id" 	= CAST(LCASE(LEFT(FIELDVALUE(inRef.RqUID) || '000000000000000000000000000000000000000000000', 48)) AS BLOB); 
+		 	SET oRef.ns1:"eis-name" 		= inRef.SPName;
+		 	SET oRef.ns1:"system-id" 		= inRef.SystemId;
+		 	SET oRef.ns1:"operation-name" 	= 'SrvUpdateLimit';--inRef.OperUID;
+		 	SET oRef.ns1:"operation-version" = '1';
+		 	SET oRef.ns1:"user-id" 			= 'TESTADMINISTRATOR_KAZ';
+		 	SET oRef.ns1:"user-name" 		= 'TESTADMINISTRATOR_KAZ';
+	 	 
+		DECLARE oRef1 REFERENCE TO oRef;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef1 NAMESPACE ns1 NAME 'Body';
+		
+		DECLARE createlimitrs REFERENCE TO oRef1;
+		CREATE LASTCHILD OF oRef1 AS createlimitrs NAMESPACE tns NAME 'updateLimitRs';
+			SET createlimitrs.(XMLNSC.NamespaceDecl)xmlns:tns = 'http://sbrf.ru/NCP/SAPLM/';
+			SET createlimitrs.(XMLNSC.NamespaceDecl)xmlns:ulrs = 'http://sbrf.ru/NCP/SAPLM/UpdateLimitRs/1.01/';
+		--SET createlimitrs.(XMLNSC.NamespaceDecl)xmlns:xsi = 'http://www.w3.org/2001/XMLSchema-instance';
+		
+		DECLARE operlog REFERENCE TO createlimitrs;
+		CREATE LASTCHILD OF createlimitrs AS operlog NAMESPACE ulrs NAME 'operationLog';
+				
+		DECLARE generlog REFERENCE TO operlog;
+		CREATE LASTCHILD OF operlog AS generlog NAMESPACE ulrs NAME 'generalLog';
+		DECLARE generlogitem REFERENCE TO generlog;
+
+		FOR inGeneralLog AS inReq.OperationLog.GeneralLog[] DO		
+			CREATE LASTCHILD OF generlog AS generlogitem NAMESPACE ulrs NAME 'item';
+			SET generlogitem.ulrs:type 		= inGeneralLog.Type;
+			SET generlogitem.ulrs:id		= inGeneralLog.ID;
+			SET generlogitem.ulrs:"number"	= inGeneralLog."Number";
+			SET generlogitem.ulrs:message	= inGeneralLog.Message;
+			SET generlogitem.ulrs:logNo		= inGeneralLog.LogNo;
+			SET generlogitem.ulrs:logMsgNo	= inGeneralLog.LogMsgNo;
+			SET generlogitem.ulrs:messageV1	= inGeneralLog.MessageV1;
+			SET generlogitem.ulrs:messageV2	= inGeneralLog.MessageV2;
+			SET generlogitem.ulrs:messageV3	= inGeneralLog.MessageV3;
+			SET generlogitem.ulrs:messageV4	= inGeneralLog.MessageV4;
+			SET generlogitem.ulrs:parameter	= inGeneralLog.Parameter;
+			SET generlogitem.ulrs:row		= inGeneralLog.Row;
+			SET generlogitem.ulrs:field		= inGeneralLog.Field;
+			SET generlogitem.ulrs:system	= inGeneralLog.System;		
+		END FOR;
+		
+		DECLARE objectloglist REFERENCE TO operlog;
+		CREATE LASTCHILD OF operlog AS objectloglist NAMESPACE ulrs NAME 'objectLogList';
+
+		DECLARE objectloglistitem REFERENCE TO objectloglist;
+		DECLARE objkey REFERENCE TO objectloglistitem;
+		DECLARE objLog REFERENCE TO objectloglistitem;
+		DECLARE objkeyitem REFERENCE TO objkey;
+		DECLARE objkeyitem2 REFERENCE TO objLog;
+
+		FOR inObjectLogs AS inReq.OperationLog.ObjectLogs[] DO
+			CREATE LASTCHILD OF objectloglist AS objectloglistitem NAMESPACE ulrs NAME 'item';
+			CREATE LASTCHILD OF objectloglistitem AS objkey NAMESPACE ulrs NAME 'objectKey';
+
+			FOR inObjectKey AS inObjectLogs.ObjectKey[] DO
+
+				CREATE LASTCHILD OF objkey AS objkeyitem NAMESPACE ulrs NAME 'item';
+				SET objkeyitem.ulrs:fieldName 	= inObjectKey.Name;
+				SET objkeyitem.ulrs:fieldValue	= inObjectKey.Value;
+
+			END FOR;
+
+			CREATE LASTCHILD OF objectloglistitem AS objLog NAMESPACE ulrs NAME 'objectLog';
+			FOR inObjectLog AS inObjectLogs.ObjectLog[] DO
+
+				CREATE LASTCHILD OF objLog AS objkeyitem2 NAMESPACE ulrs NAME 'item';
+				SET objkeyitem2.ulrs:type 		= inObjectLog.Type;
+				SET objkeyitem2.ulrs:id			= inObjectLog.ID;
+				SET objkeyitem2.ulrs:"number"	= inObjectLog."Number";
+				SET objkeyitem2.ulrs:message	= inObjectLog.Message;
+				SET objkeyitem2.ulrs:logNo		= inObjectLog.LogNo;
+				SET objkeyitem2.ulrs:logMsgNo	= inObjectLog.LogMsgNo;
+				SET objkeyitem2.ulrs:messageV1	= inObjectLog.MessageV1;
+				SET objkeyitem2.ulrs:messageV2	= inObjectLog.MessageV2;
+				SET objkeyitem2.ulrs:messageV3	= inObjectLog.MessageV3;
+				SET objkeyitem2.ulrs:messageV4	= inObjectLog.MessageV4;
+				SET objkeyitem2.ulrs:parameter	= inObjectLog.Parameter;
+				SET objkeyitem2.ulrs:row		= inObjectLog.Row;
+				SET objkeyitem2.ulrs:field		= inObjectLog.Field;
+				SET objkeyitem2.ulrs:system		= inObjectLog.System;
+
+			END FOR;
+		END FOR;
+
+		SET OutputRoot.MQMD.CorrelId = CAST(LCASE(LEFT(FIELDVALUE(inRef.RqUID) || '000000000000000000000000000000000000000000000', 48)) AS BLOB); 
+
+/*		
+		DECLARE objectlog REFERENCE TO objectloglistitem;
+		CREATE LASTCHILD OF objectloglistitem AS objectlog NAMESPACE ulrs NAME 'objectLog';
+		DECLARE objectlogitem REFERENCE TO objectlog;
+		DECLARE objectKey REFERENCE TO objectlogitem;
+		
+		FOR inObjectLogs AS inReq.OperationLog.ObjectLogs[] DO
+
+			CREATE LASTCHILD OF objectlog AS objectlogitem NAMESPACE ulrs NAME 'item';
+			CREATE LASTCHILD OF objectlogitem AS objectKey NAMESPACE ulrs NAME 'objectKey';
+
+			FOR inObjectKey AS inObjectLogs.ObjectKey[] DO
+
+				CREATE LASTCHILD OF objectlogitem AS objectKey NAMESPACE ulrs NAME 'objectKey';
+				SET objectKey.ulrs:item.ulrs:fieldName 		= COALESCE(inObjectKey.Name,' ');
+				SET objectKey.ulrs:item.ulrs:fieldValue		= COALESCE(inObjectKey.Value,' ');
+
+			END FOR;
+*/
+			
+/*
+			FOR inObjectLog AS inObjectLogs.ObjectLog[] DO
+
+				SET objectlogitem.ulrs:type 		= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.Type,' ');
+				SET objectlogitem.ulrs:id			= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.ID,' ');
+				SET objectlogitem.ulrs:"number"		= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog."Number",' ');
+				SET objectlogitem.ulrs:message		= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.Message,' ');
+				SET objectlogitem.ulrs:logNo		= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.LogNo,' ');
+				SET objectlogitem.ulrs:logMsgNo		= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.LogMsgNo,' ');
+				SET objectlogitem.ulrs:messageV1	= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.MessageV1,' ');
+				SET objectlogitem.ulrs:messageV2	= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.MessageV2,' ');
+				SET objectlogitem.ulrs:messageV3	= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.MessageV3,' ');
+				SET objectlogitem.ulrs:messageV4	= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.MessageV4,' ');
+				SET objectlogitem.ulrs:parameter	= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.Parameter,' ');
+				SET objectlogitem.ulrs:row			= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.Row,'0');
+				SET objectlogitem.ulrs:field		= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.Field,' ');
+				SET objectlogitem.ulrs:system		= COALESCE(inReq.OperationLog.ObjectLogs.ObjectLog.System,' ');
+				SET OutputRoot.MQMD.CorrelId = CAST(LCASE(LEFT(FIELDVALUE(inRef.RqUID) || '000000000000000000000000000000000000000000000', 48)) AS BLOB); 
+
+			END FOR;
+*/
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForBPM_ConvertUpdateFinTransactionRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/SAPLM/';
+		DECLARE uftrs NAMESPACE 'http://sbrf.ru/NCP/SAPLM/UpdateFinTransactionRs/1.03/';
+		--DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+		DECLARE ns1 NAMESPACE 'http://sbrf.ru/NCP/esb/envelope/';
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE ns1 NAME 'Envelope';
+		DECLARE inReq REFERENCE TO InputRoot.XMLNSC.*[<];
+			SET OutputRoot.XMLNSC.ns1:Envelope.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef NAMESPACE ns1 NAME 'Header';
+			SET OutputRoot.XMLNSC.*:Envelope.ns1:Header.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';
+	 	 	SET oRef.ns1:"message-id" 		= inRef.RqUID; 
+		 	SET oRef.ns1:"request-time" 	= inRef.RqTm;
+		 	--SET oRef.ns1:"correlation-id" 	= CAST(LCASE(LEFT(FIELDVALUE(inRef.RqUID) || '000000000000000000000000000000000000000000000', 48)) AS BLOB); 
+		 	SET oRef.ns1:"eis-name" 		= inRef.SPName;
+		 	SET oRef.ns1:"system-id" 		= inRef.SystemId;
+		 	SET oRef.ns1:"operation-name" 	= 'SrvUpdateFinTransaction';--inRef.OperUID;
+		 	SET oRef.ns1:"operation-version" = '1';
+		 	SET oRef.ns1:"user-id" 			= 'TESTADMINISTRATOR_KAZ';
+		 	SET oRef.ns1:"user-name" 		= 'TESTADMINISTRATOR_KAZ';
+		 	
+		DECLARE oRef1 REFERENCE TO oRef;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef1 NAMESPACE ns1 NAME 'Body';
+		
+		DECLARE updatefintransaction REFERENCE TO oRef1;
+		CREATE LASTCHILD OF oRef1 AS updatefintransaction NAMESPACE tns NAME 'updateFinTransactionRs';
+			SET updatefintransaction.(XMLNSC.NamespaceDecl)xmlns:tns = 'http://sbrf.ru/NCP/SAPLM/';
+			SET updatefintransaction.(XMLNSC.NamespaceDecl)xmlns:uftrs = 'http://sbrf.ru/NCP/SAPLM/UpdateFinTransactionRs/1.03/';
+			---SET updatefintransaction.(XMLNSC.NamespaceDecl)xmlns:xsi = 'http://www.w3.org/2001/XMLSchema-instance';
+		
+		DECLARE operlog REFERENCE TO updatefintransaction;
+		CREATE LASTCHILD OF updatefintransaction AS operlog NAMESPACE uftrs NAME 'operationLog';
+				
+		DECLARE generlog REFERENCE TO operlog;
+		CREATE LASTCHILD OF operlog AS generlog NAMESPACE uftrs NAME 'generalLog';
+		
+		IF EXISTS(inReq.OperationLog.GeneralLog[]) THEN
+			FOR ingenlog AS inReq.OperationLog.GeneralLog[] DO
+				DECLARE generlogitem REFERENCE TO generlog;
+				CREATE LASTCHILD OF generlog AS generlogitem NAMESPACE uftrs NAME 'item';
+				SET generlogitem.uftrs:type 		= ingenlog.Type;
+				SET generlogitem.uftrs:id			= ingenlog.ID;
+				SET generlogitem.uftrs:"number"		= ingenlog."Number";
+				SET generlogitem.uftrs:message		= ingenlog.Message;
+				SET generlogitem.uftrs:logNo		= ingenlog.LogNo;
+				SET generlogitem.uftrs:logMsgNo		= ingenlog.LogMsgNo;
+				SET generlogitem.uftrs:messageV1	= ingenlog.MessageV1;
+				SET generlogitem.uftrs:messageV2	= ingenlog.MessageV2;
+				SET generlogitem.uftrs:messageV3	= ingenlog.MessageV3;
+				SET generlogitem.uftrs:messageV4	= ingenlog.MessageV4;
+				SET generlogitem.uftrs:parameter	= ingenlog.Parameter;
+				SET generlogitem.uftrs:row			= ingenlog.Row;
+				SET generlogitem.uftrs:field		= ingenlog.Field;
+				SET generlogitem.uftrs:system		= ingenlog.System;
+			END FOR;
+		END IF;
+		
+		DECLARE objectloglist REFERENCE TO operlog;
+		CREATE LASTCHILD OF operlog AS objectloglist NAMESPACE uftrs NAME 'objectLogList';
+		DECLARE objectloglistitem REFERENCE TO objectloglist;
+		CREATE LASTCHILD OF objectloglist AS objectloglistitem NAMESPACE uftrs NAME 'item';
+		
+		DECLARE objkey REFERENCE TO objectloglistitem;
+		CREATE LASTCHILD OF objectloglistitem AS objkey NAMESPACE uftrs NAME 'objectKey';
+		
+		IF EXISTS(inReq.OperationLog.ObjectLogs.ObjectKey[]) THEN
+			FOR inobjkeys AS inReq.OperationLog.ObjectLogs.ObjectKey[] DO	
+				DECLARE objkeyitem REFERENCE TO objkey;
+				CREATE LASTCHILD OF objkey AS objkeyitem NAMESPACE uftrs NAME 'item';
+				SET objkeyitem.uftrs:fieldName 	= inobjkeys.Name;
+				SET objkeyitem.uftrs:fieldValue	= inobjkeys.Value;
+			END FOR;
+		END IF;
+		
+		DECLARE objectlog REFERENCE TO objectloglistitem;
+		CREATE LASTCHILD OF objectloglistitem AS objectlog NAMESPACE uftrs NAME 'objectLog';
+			FOR inobjlogs AS  inReq.OperationLog.ObjectLogs.ObjectLog[] DO
+				DECLARE objectlogitem REFERENCE TO objectlog;
+				CREATE LASTCHILD OF objectlog AS objectlogitem NAMESPACE uftrs NAME 'item';
+				SET objectlogitem.uftrs:type 		= inobjlogs.Type;
+				SET objectlogitem.uftrs:id			= inobjlogs.ID;
+				SET objectlogitem.uftrs:"number"	= inobjlogs."Number";
+				SET objectlogitem.uftrs:message		= inobjlogs.Message;
+				SET objectlogitem.uftrs:logNo		= inobjlogs.LogNo;
+				SET objectlogitem.uftrs:logMsgNo	= inobjlogs.LogMsgNo;
+				SET objectlogitem.uftrs:messageV1	= inobjlogs.MessageV1;
+				SET objectlogitem.uftrs:messageV2	= inobjlogs.MessageV2;
+				SET objectlogitem.uftrs:messageV3	= inobjlogs.MessageV3;
+				SET objectlogitem.uftrs:messageV4	= inobjlogs.MessageV4;
+				SET objectlogitem.uftrs:parameter	= inobjlogs.Parameter;
+				SET objectlogitem.uftrs:row			= inobjlogs.Row;
+				SET objectlogitem.uftrs:field		= inobjlogs.Field;
+				SET objectlogitem.uftrs:system		= inobjlogs.System;			
+			END FOR;
+			SET OutputRoot.MQMD.CorrelId = CAST(LCASE(LEFT(FIELDVALUE(inRef.RqUID) || '000000000000000000000000000000000000000000000', 48)) AS BLOB); 
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForBPM_ConvertCalcMarkerDebtCapacityRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/SAPLM/';
+		DECLARE cmdcrs NAMESPACE 'http://sbrf.ru/NCP/SAPLM/CalcMarkerDebtCapacityRs/1.01/';		
+		DECLARE ns1 NAMESPACE 'http://sbrf.ru/NCP/esb/envelope/';
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE ns1 NAME 'Envelope';
+		DECLARE inReq REFERENCE TO InputRoot.XMLNSC.*[<];
+			SET OutputRoot.XMLNSC.ns1:Envelope.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef NAMESPACE ns1 NAME 'Header';
+
+	 	 	SET oRef.ns1:"message-id" 		= inRef.RqUID; 
+		 	SET oRef.ns1:"request-time" 	= inRef.RqTm;
+		 	--SET oRef.ns1:"correlation-id" 	= CAST(LCASE(LEFT(FIELDVALUE(inRef.RqUID) || '000000000000000000000000000000000000000000000', 48)) AS BLOB); 
+		 	SET oRef.ns1:"eis-name" 		= inRef.SPName;
+		 	SET oRef.ns1:"system-id" 		= inRef.SystemId;
+		 	SET oRef.ns1:"operation-name" 	= 'SrvСalcMarkerDebtCapacity';--inRef.OperUID;
+		 	SET oRef.ns1:"operation-version" = '1';
+		 	SET oRef.ns1:"user-id" 			= 'TESTADMINISTRATOR_KAZ';
+		 	SET oRef.ns1:"user-name" 		= 'TESTADMINISTRATOR_KAZ';
+	 	 
+	 	 
+		DECLARE oRef1 REFERENCE TO oRef;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef1 NAMESPACE ns1 NAME 'Body';
+		
+		DECLARE calcmaker REFERENCE TO oRef1;
+		CREATE LASTCHILD OF oRef1 AS calcmaker NAMESPACE tns NAME 'calcMarkerDebtCapacityRs';
+			SET calcmaker.(XMLNSC.NamespaceDecl)xmlns:tns = 'http://sbrf.ru/NCP/SAPLM/';
+			SET calcmaker.(XMLNSC.NamespaceDecl)xmlns:cmdcrs = 'http://sbrf.ru/NCP/SAPLM/CalcMarkerDebtCapacityRs/1.01/';
+			
+		DECLARE basicpar REFERENCE TO calcmaker;
+		CREATE LASTCHILD OF calcmaker AS basicpar NAMESPACE cmdcrs NAME 'basicParams';
+			SET basicpar.cmdcrs:bpId				= inReq.BpId;
+			SET basicpar.cmdcrs:dealId				= inReq.DealId;
+			SET basicpar.cmdcrs:dcMarkerCurrency	= inReq.DcMarkerCur;
+			SET basicpar.cmdcrs:dcMarkerCurrentYear = TRIM(inReq.DcMarkerCy);
+			SET basicpar.cmdcrs:dcMarkerNextYear	= TRIM(inReq.DcMarkerNy);
+		
+		DECLARE generlog REFERENCE TO calcmaker;
+		CREATE LASTCHILD OF calcmaker AS generlog NAMESPACE cmdcrs NAME 'generalLog';
+		DECLARE generlogitem REFERENCE TO generlog;
+		CREATE LASTCHILD OF generlog AS generlogitem NAMESPACE cmdcrs NAME 'item';
+			SET generlogitem.cmdcrs:type 		= inReq.Log.Type;
+			SET generlogitem.cmdcrs:id			= inReq.Log.ID;
+			SET generlogitem.cmdcrs:"number"	= inReq.Log."Number";
+			SET generlogitem.cmdcrs:message		= inReq.Log.Message;
+			SET generlogitem.cmdcrs:logNo		= inReq.Log.LogNo;
+			SET generlogitem.cmdcrs:logMsgNo	= inReq.Log.LogMsgNo;
+			SET generlogitem.cmdcrs:messageV1	= inReq.Log.MessageV1;
+			SET generlogitem.cmdcrs:messageV2	= inReq.Log.MessageV2;
+			SET generlogitem.cmdcrs:messageV3	= inReq.Log.MessageV3;
+			SET generlogitem.cmdcrs:messageV4	= inReq.Log.MessageV4;
+			SET generlogitem.cmdcrs:parameter	= inReq.Log.Parameter;
+			SET generlogitem.cmdcrs:row			= inReq.Log.Row;
+			SET generlogitem.cmdcrs:field		= inReq.Log.Field;
+			SET generlogitem.cmdcrs:system		= inReq.Log.System;
+		
+		SET OutputRoot.MQMD.CorrelId = CAST(LCASE(LEFT(FIELDVALUE(inRef.RqUID) || '000000000000000000000000000000000000000000000', 48)) AS BLOB); 
+		RETURN TRUE;
+	END;
+END MODULE;

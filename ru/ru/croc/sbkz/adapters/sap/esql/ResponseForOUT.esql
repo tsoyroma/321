@@ -1,0 +1,58 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sap.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE ResponseForOUT_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZComplexPayDocRs' THEN
+			SET labelName = 'KZComplexPayDocRs';
+		WHEN 'KZSAPSaldoRs' THEN
+			SET labelName = 'KZSAPSaldoRs';
+		WHEN 'KZLegalPayDocRs' THEN
+			SET labelName = 'KZLegalPayDocRs';
+		WHEN 'KZSAPAMOUNTRs' THEN
+			SET labelName = 'KZSAPAMOUNTRs';
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown format XML in SAP(ResponseForOUT)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForOUT_ConvertMDO2SAP_KZSAPAMOUNTRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'FILE';
+		
+		SET outRef.(XMLNSC.Attribute)TYPE			= 'ABC_SAP_PP_STATUS';
+		SET outRef.(XMLNSC.Attribute)MSGUID         = inRef.RqUID;
+ 
+		DECLARE outSTATUS REFERENCE TO outRef;
+
+		CREATE LASTCHILD OF outRef AS outSTATUS NAME 'STATUS';
+		SET outSTATUS.(XMLNSC.Attribute)TYPE		= inRef.TYPE;
+		SET outSTATUS.(XMLNSC.Attribute)MESSAGE		= inRef.MESSAGE;
+		SET outSTATUS.(XMLNSC.Attribute)BELNR_ABC	= '';
+		SET outSTATUS.(XMLNSC.Attribute)BELNR		= inRef.BELNR;
+   
+		RETURN TRUE;
+	END;	
+END MODULE;

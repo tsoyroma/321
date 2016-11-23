@@ -1,0 +1,108 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sap.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Установка ответных заголовков а также получение ответного сообщения из агрегации
+CREATE COMPUTE MODULE ResponseForESB_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE OrigMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+		
+		SET OutputRoot.XMLNSC = InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC;
+
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(OrigMsg, OutputLocalEnvironment);
+	END;
+END MODULE;
+
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE ResponseForESB_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDVALUE(InputRoot.XMLNSC.FILE.(XMLNSC.Attribute)TYPE);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'SAP_ABC_STATUS_PAYMENT' THEN
+			SET labelName = 'SAP_ABC_STATUS_PAYMENT';
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Задание параметров маршрутизации в заголовке MQRFH2.
+ * Случай для запросов с агрегацией. Связка адаптер - ПМИЛ.
+ **/
+CREATE COMPUTE MODULE ResponseForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+	Исходящий статуса загрузки документов в САП
+*/
+CREATE COMPUTE MODULE ResponseForESB_ConvertSAP2MDO_Status
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.FILE;
+		CREATE FIELD OutputRoot.XMLNSC.KZExpPayDocStatusRq AS outRef;
+
+		SET outRef.RqUID		= Environment.UserProperties.RqUID;
+		SET outRef.RqTm			= Environment.UserProperties.RqTm;
+		SET outRef.SPName		= 'SAP';
+		
+		DECLARE outPayDoc REFERENCE TO outRef;
+		FOR inSTATUS AS inRef.STATUS[] DO
+			CREATE LASTCHILD OF outRef AS outPayDoc NAME 'PayDoc';
+			
+			SET outPayDoc.PayDocInfo.DocNum							= FIELDVALUE(inSTATUS.(XMLNSC.Attribute)BELNR_ABC);
+			SET outPayDoc.PayDocInfo.DocRef							= FIELDVALUE(inSTATUS.(XMLNSC.Attribute)BELNR_SAP);
+			SET outPayDoc.DocStatus									= FIELDVALUE(inSTATUS.(XMLNSC.Attribute)TYPE);
+			SET outPayDoc.DocStatusDesc								= FIELDVALUE(inSTATUS.(XMLNSC.Attribute)MESSAGE);
+		END FOR;
+
+		-- временная доработка для интеграции со старой Прагмой
+		IF Environment.UserProperties.IsFromOldPragma = '1' THEN
+			-- Создаем заголовок и вставляем переменные для маршрутизации
+		 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+				CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+		 	END IF;
+
+		 	SET OutputRoot.MQRFH2.usr.TypeId		= 'urn:sbkztypes:esb:adapter';
+		 	SET OutputRoot.MQRFH2.usr.SystemId		= 'urn:sbkzsystems:pragma';
+			
+			PROPAGATE TO TERMINAL 'out1';
+			RETURN FALSE;
+			
+		ELSE
+			RETURN TRUE;
+		END IF;
+	END;
+END MODULE;

@@ -1,0 +1,236 @@
+BROKER SCHEMA ru.croc.sbrf.bp.common.esql
+
+DECLARE EventSource EXTERNAL CHARACTER ' ';
+DECLARE EventReceiver EXTERNAL CHARACTER ' ';
+DECLARE QueueName EXTERNAL CHARACTER ' ';
+-- Код ошибки для сообщений с тайм-аутом
+DECLARE TimeoutErrorCode EXTERNAL CHARACTER '-105';
+
+CREATE COMPUTE MODULE CreateErrorMes
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		-- Если ситуация TIMEOUT	
+		-- Сохраняем исходное сообщение для формирования ответного сообщения 
+		SET OutputLocalEnvironment.OrigTimeoutMess=InputRoot;
+
+		-- Определим кодировку входящего сообщения
+		DECLARE inEncoding INT;
+		DECLARE inCCSID INT; 
+
+		IF NOT EXISTS(InputRoot.MQMD[]) THEN
+			SET inEncoding = InputRoot.Properties.Encoding;
+			SET inCCSID    = InputRoot.Properties.CodedCharSetId;
+		ELSE
+			SET inEncoding = InputRoot.MQMD.Encoding;
+			SET inCCSID    = InputRoot.MQMD.CodedCharSetId;
+		END IF;
+		
+		IF inEncoding IS NULL THEN
+			SET inEncoding = ESB_LOG_ENCODING;
+		END IF;
+		
+		IF inCCSID IS NULL THEN
+			SET inCCSID    = ESB_LOG_CCSID;
+		END IF;
+		
+		-- Создаем заголовок MQMD
+		CALL CreateMQMDHeaderELMess(OutputRoot,inCCSID,inEncoding);		
+
+		IF EXISTS(InputRoot.ComIbmAggregateReplyBody[]) THEN
+			-- Если это тайм-аут аггрегации, то обрабатываем специальным образом (сохраняем сообщение-запрос и сообщения-ответы, которые успели прийти)
+			SET Environment.UserProperties = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties;
+		END IF;
+					
+		-- Сформируем содержимое usr-заголовок
+		DECLARE usrHeader ROW;
+		
+		SET usrHeader.EventDate 	= getLocalTimeStamp();
+		SET usrHeader.EventSource 	= EventSource;
+		SET usrHeader.EventReciever = EventReceiver;
+		SET usrHeader.Operation 	= 'UNKNOWN';
+		SET usrHeader.SourceQueue   = QueueName;
+		SET usrHeader.SourceQM      = Environment.UserProperties.QMgr;
+		SET usrHeader.TargetQueue   = 'UNKNOWN';
+		SET usrHeader.TargetQM	    = 'UNKNOWN';
+		SET usrHeader.ReplyQueue    = 'UNKNOWN';
+		SET usrHeader.ReplyQM	    = 'UNKNOWN';
+
+		-- Устанавливаем отдельно признак, что сообщение пришло по UNKNOWN терминалу
+		IF Environment.Variables.Status = 'UNKNOWN' THEN
+			SET usrHeader.ProcStatus    = 'UNKNOWN';
+		ELSE
+			SET usrHeader.ProcStatus    = 'TIMEOUT';
+		END IF;	
+		-- Для сообщений попадающих в терминалы Timeout или Unknown не генерится исключение
+		SET usrHeader.ErrorText = '';
+		SET usrHeader.RqUID = 
+			NVL(InputBody.*:*[<].RqUID,
+				NVL(InputBody.*:IFX.*:*[<].*:*[<].RqUID,
+					NVL(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.RqUID,
+						NVL(Environment.UserProperties.RqUID,
+							NVL(InputBody.*[<].Head.parentId.MessageId, 
+								NVL(InputBody.*:Envelope.*:Body.*:*[<].*:*[<].CorrelationId, 
+									NVL(InputBody.*:OrigMess.UserProperties.RqUID, 'UNKNOWN')))))));
+
+		-- Создаем заголовок MQRFH2.usr
+		CALL CreateMQRFH2usrHeaderELMess(OutputRoot,usrHeader);			
+
+		-- Добавляем тело сообщения
+		CALL CreateBlobELMess(InputRoot,OutputRoot,inCCSID,inEncoding);
+		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+CREATE COMPUTE MODULE CreateReplyMess
+	-- Текст сообщения: Ошибка обработки, операция не может быть выполнена	
+	DECLARE messDesc BLOB X'D09ED188D0B8D0B1D0BAD0B020D0BED0B1D180D0B0D0B1D0BED182D0BAD0B82C20D0BED0BFD0B5D180D0B0D186D0B8D18F20D0BDD0B520D0BCD0BED0B6D0B5D18220D0B1D18BD182D18C20D0B2D18BD0BFD0BED0BBD0BDD0B5D0BDD0B0';
+	
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE EchoBody ROW;
+		DECLARE RootTag CHARACTER;
+		SET OutputLocalEnvironment=InputLocalEnvironment;
+		-- Либо это таймаут аггрегации, либо операции MqGet
+
+		IF EXISTS(InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.MQMD[]) THEN
+			DECLARE OrigMsg REFERENCE TO InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+
+			SET OutputRoot.MQMD.Encoding		= CAST(OrigMsg.MQMD.Encoding AS INTEGER);
+			SET OutputRoot.MQMD.CodedCharSetId	= CAST(OrigMsg.MQMD.CodedCharSetId AS INTEGER);
+			CALL CopyMQMDReply(OrigMsg, OutputRoot);
+		 	
+		 	SET EchoBody = InputLocalEnvironment.OrigTimeoutMess.ComIbmAggregateReplyBody.ECHO.XMLNSC;
+		ELSEIF EXISTS(InputLocalEnvironment.OrigTimeoutMess.MQMD[]) THEN
+			SET OutputRoot.MQMD = InputLocalEnvironment.OrigTimeoutMess.MQMD;
+			
+			SET EchoBody = InputLocalEnvironment.OrigTimeoutMess.XMLNSC;
+		END IF;
+	
+		CALL SetMQReplyDestination(OutputRoot, OutputLocalEnvironment);
+
+		-- Если EchoBody получить не удалось, дальнейшее не имеет смысла
+		IF NOT EXISTS(EchoBody.*[]) THEN
+			RETURN FALSE;
+		END IF;
+		
+		-- Указываем время жизни соообщения и настройки для перенаправления сообщения при истечении времени жизни в очередь 
+		SET OutputRoot.MQMD.Format   = MQFMT_STRING;
+		SET OutputRoot.MQMD.MsgType  = MQMT_REPLY;
+
+		-- Указываем время жизни соообщения и настройки для перенаправления сообщения при истечении времени жизни в очередь
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+
+		SET OutputRoot.MQMD.CorrelId=
+			COALESCE(CAST(EchoBody.OrigMess.MQMD.MsgId AS BLOB),
+					CAST(InputLocalEnvironment.OrigTimeoutMess.MQMD.MsgId AS BLOB));
+
+		-- Случай для SOAP-адаптеров
+		IF EchoBody.OrigMess.UserProperties.ReplyIdentifier IS NOT NULL THEN
+			SET OutputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier = CAST(EchoBody.OrigMess.UserProperties.ReplyIdentifier AS BLOB);
+		END IF;
+	
+		-- Заполняем для аггрегации. Второй случай для SOAP-адаптеров
+		SET OutputRoot.Properties.ReplyIdentifier=CAST(COALESCE(EchoBody.OrigMess.MQMD.MsgId,EchoBody.OrigMess.UserProperties.ReplyIdentifier) AS BLOB);
+		SET OutputRoot.Properties.ExpirationTime = NULL;
+--		SET OutputRoot.MQRFH2=EchoBody.OrigMess.MQRFH2;
+
+		-- Создаем общее ответное сообщение о тайм-ауте, в зависимости от формата IFX исходного сообщения
+		-- MDM
+		IF EXISTS(EchoBody.OrigMess.UserProperties.Service[]) THEN
+			
+			DECLARE up REFERENCE TO EchoBody.OrigMess.UserProperties;
+			DECLARE outMsg REFERENCE TO OutputRoot;
+			CREATE FIELD OutputRoot.XMLNSC.IFX.{REPLACE(up.Service, 'Rq', 'Rs')} AS outMsg;
+			SET outMsg.RqUID = up.RqUID;
+			SET outMsg.SPName = up.SPName;
+			CREATE FIELD outMsg.{REPLACE(up.Operation, 'Rq', 'Rs')} AS outMsg;
+			SET outMsg.Status.StatusCode = '-400';
+			SET outMsg.Status.StatusDesc = CAST(messDesc AS CHAR CCSID ESB_LOG_CCSID);
+			SET outMsg.RqUID = up.RqUID;
+		
+		-- MDM-Org
+		ELSEIF EXISTS(EchoBody.OrigMess.UserProperties.MDM[]) THEN
+
+			DECLARE up REFERENCE TO EchoBody.OrigMess.UserProperties;
+			DECLARE outMsg REFERENCE TO OutputRoot;
+			CREATE FIELD OutputRoot.XMLNSC.{REPLACE(up.Operation, 'Rq', 'Rs')} AS outMsg;
+			SET outMsg.RqUID = up.RqUID;
+			SET outMsg.RqTm = up.RqTm;
+			SET outMsg.OperUID = up.OperUID;
+			SET outMsg.Status.StatusCode = '-400';
+			SET outMsg.Status.StatusDesc = CAST(messDesc AS CHAR CCSID ESB_LOG_CCSID);
+			
+		-- BP
+		ELSE
+			
+			DECLARE StatusCode,StatusDesc,ServerStatusDesc CHARACTER;
+			SET StatusCode = TimeoutErrorCode;
+			SET StatusDesc = CAST(messDesc AS CHAR CCSID ESB_LOG_CCSID);
+			-- Описание причины ошибки
+			SET ServerStatusDesc = '[ESB][' || TimeoutErrorCode || '][Timeout]';
+			
+			-- Для операции погашения кредита с карты ошибку таймаута от ИАСКа обрабатываем особым образом
+			-- Рассматриваем ее как неизвестное состояние операции
+			IF Environment.Variables.Status = 'IASKTimeout' THEN
+				SET StatusCode = '-599';
+				SET ServerStatusDesc = '[ESB][' || StatusCode || '][Unknown operation status]';
+			END IF;	
+			
+			DECLARE outResponse ROW;
+			CREATE LASTCHILD OF outResponse DOMAIN('XMLNSC') NAME 'XMLNSC';
+			CREATE FIRSTCHILD OF outResponse.XMLNSC NAME 'resp';
+			SET outResponse.XMLNSC.resp.RqUID = COALESCE(EchoBody.OrigMess.Body.*:*[<].RqUID,EchoBody.*:*[<].RqUID,EchoBody.OrigMess.UserProperties.RqUID);
+			SET outResponse.XMLNSC.resp.RqTm = CURRENT_TIMESTAMP;
+			SET outResponse.XMLNSC.resp.OperUID = COALESCE(EchoBody.OrigMess.Body.*:*[<].OperUID,EchoBody.*:*[<].OperUID);
+			SET outResponse.XMLNSC.resp.Status.StatusCode = StatusCode;
+			SET outResponse.XMLNSC.resp.Status.StatusDesc = StatusDesc;
+			SET outResponse.XMLNSC.resp.Status.ServerStatusDesc = ServerStatusDesc;
+
+			IF FIELDNAME(EchoBody.OrigMess.Body.*:*[<]) = 'XferAddRq' THEN
+
+				CREATE LASTCHILD OF outResponse.XMLNSC.resp NAME 'OperName' VALUE EchoBody.OrigMess.Body.XferAddRq.OperName;
+
+			ELSEIF FIELDNAME(EchoBody.OrigMess.Body.*:*[<]) = 'SvcAcctAddRq' THEN
+
+				CREATE LASTCHILD OF outResponse.XMLNSC.resp NAME 'OperType' VALUE EchoBody.OrigMess.Body.SvcAcctAddRq.OperType;	
+
+			END IF;					
+
+			-- В зависимости от запроса формируем ответ с правильным корневым тегом
+			DECLARE respRootTag CHARACTER REPLACE(COALESCE(FIELDNAME(EchoBody.OrigMess.Body.*:*[<]),FIELDNAME(EchoBody.*:*[<])),'Rq','Rs');
+
+			SET OutputRoot.XMLNSC.{respRootTag} = outResponse.XMLNSC.resp; 				
+
+		END IF;
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ *	Проставляем признак - сообщение пришло по UNKNOWN терминалу
+ *  (влияет на дальнейшее логирование в БД)
+ **/
+CREATE COMPUTE MODULE SetUnknownStatus
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.Variables.Status = 'UNKNOWN';	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE FILTER MODULE TimeoutAggrSubflow_IsDisableFlowLogging
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		IF Environment.DisableFlowLogging = TRUE THEN
+			RETURN TRUE;
+		ELSE
+			RETURN FALSE;
+		END IF;
+	END;
+END MODULE;

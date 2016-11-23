@@ -1,0 +1,20 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.hunter.esql
+
+/**
+ * Заполнение стандартных полей МДО в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillMDOStandardElementsRs (IN outRef REFERENCE, IN origRef REFERENCE, IN localEnv REFERENCE)
+BEGIN
+	DECLARE status CHARACTER COALESCE(FIELDVALUE(localEnv.SOAP.*:Envelope.*:Body.*:Fault.*:faultCode),'0');
+	
+	SET outRef.RqUID							= origRef.RqUID;
+	SET outRef.RqTm								= origRef.RqTm;
+	SET outRef.OperUID							= '';
+	SET outRef.SPName							= origRef.SPName;
+	
+	SET outRef.Status.ifxca:StatusCode			= status;
+	SET outRef.Status.ifxca:Severity			= 'Info';
+	SET outRef.Status.ifxca:StatusDesc			= '';
+		
+END;
+

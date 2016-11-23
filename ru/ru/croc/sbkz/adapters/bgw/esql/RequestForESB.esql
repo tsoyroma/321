@@ -1,0 +1,67 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.bgw.esql
+
+PATH	ru.croc.sbkz.utils,
+		ru.croc.sbrf.bp.common.esql;
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].Request.Type);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'balance' THEN
+			SET labelName = 'KZGetTransactionsInfoRq';
+		WHEN 'statement' THEN
+			SET labelName = 'KZGetTransactionsInfoRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown message format', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Заполнение параметров маршрутизации
+ **/
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+	 	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertBGW2MDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetTransactionsInfoRq';
+		DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRoot.RqUID 			= InputRoot.XMLNSC.*[<].STAN;
+		SET outRoot.RqTm 			= getLocalTimeStamp();
+		SET outRoot.SPName			= 'BGW';
+		SET outRoot.AcctInfo.AcctId	= InputRoot.XMLNSC.*[<].Request.Account;
+
+		RETURN TRUE;
+	END;
+END MODULE;

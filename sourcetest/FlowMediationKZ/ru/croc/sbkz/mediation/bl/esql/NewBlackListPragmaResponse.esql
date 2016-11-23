@@ -1,0 +1,173 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.bl.esql
+
+PATH ru.croc.sbkz.mediation.common.esql;
+
+/**
+ * Проверяет состояние клиента, на основе информации,
+ * поступившей от двух Прагм (старой и новой).
+ **/
+CREATE FILTER MODULE NewBlackListPragmaResponse_IsClientInBlackList
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		-- Статусы, пришедшие от двух прагм
+		DECLARE status1 CHARACTER Environment.Variables.Request[1].XMLNSC.*[<].BLStatus;
+		DECLARE status2 CHARACTER Environment.Variables.Request[2].XMLNSC.*[<].BLStatus;
+
+		/* microbiz */ 
+		IF Environment.UserProperties.SPName = 'TransactMB' THEN
+		  RETURN FALSE;
+		END IF;
+		
+		IF status1 IS NULL OR status2 IS NULL THEN
+			THROW USER EXCEPTION VALUES ('Both states should be not null');
+		END IF;
+		
+		IF status1='1' OR status2='1' THEN
+			RETURN TRUE;
+		ELSEIF status1='2' OR status2='2' THEN
+			RETURN FALSE;
+		ELSE
+			RETURN UNKNOWN; 
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Заполнить маршрут в AML.
+ * 
+ **/
+CREATE COMPUTE MODULE NewBlackListPragmaResponse_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		SET systemId 	= 'urn:sbkzsystems:aml';
+		SET adapterType = 'urn:sbkztypes:esb:adapter';
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Константа для указания, что ищем адаптер системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	-- Идентификатор системы, в адаптер которой необходимо отправить запрос
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;
+		-- Сохраняем статус BLStatus, который приходит от Прагм
+--		SET OutputRoot.MQRFH2.usr.BLStatus	= '2';
+		
+---		SET OutputRoot.MQRFH2.usr.BLStatus	= InputRoot.XMLNSC.*[<].BLStatus;
+		SET OutputRoot.MQRFH2.usr.BLStatus	= Environment.Variables.Request[2].XMLNSC.*[<].BLStatus;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Восстанавливает оригинальный запрос в Прагмы,
+ * о проверки клиента на наличие в чёрном списке.
+ **/
+CREATE COMPUTE MODULE NewBlackListPragmaResponse_RestoreOrigRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		SET OutputRoot.XMLNSC = Environment.Variables.Source.XMLNSC;
+
+		SET OutputRoot.XMLNSC.*[<].Status.StatusCode = InputRoot.XMLNSC.*[<].Status.ifxca:StatusCode;
+		SET OutputRoot.XMLNSC.*[<].Status.StatusDesc = InputRoot.XMLNSC.*[<].Status.ifxca:StatusDesc;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Создает сообщение-ответ в вызывающий адаптер, если
+ * результирующий статус наличия клиента в чёрном списке
+ * равен "1".
+ **/
+CREATE COMPUTE MODULE NewBlackListPragmaResponse_CreateResponseWithoutAMLRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		DECLARE tsmuid CHARACTER FIELDVALUE(Environment.Variables.Source.XMLNSC.*[<].TSMUID);
+		
+		SET OutputRoot.XMLNSC = Environment.Variables.Request[1].XMLNSC;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		CREATE NEXTSIBLING OF outRef.RqTm NAME 'TSMUID' VALUE tsmuid;
+		SET outRef.BLStatus = 1;
+		SET outRef.TerrStatus = 0;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Проверяет, что от Прагм не пришли ошибки,
+ * и перенавправляет поток в зависимости от результатов
+ * проверки.
+ **/
+CREATE FILTER MODULE NewBlackListPragmaResponse_IsErrorReturned
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		/* microbiz */ 
+		IF Environment.UserProperties.SPName = 'TransactMB' THEN
+		   RETURN FALSE;
+		END IF;
+		
+		-- Проверка на то, что пришло именно два ответа
+		IF CARDINALITY(Environment.Variables.Request[]) <> 2 THEN
+			SET Environment.UserProperties.ErrCode = STATUS_UNDEFINED;
+			SET Environment.UserProperties.ErrDesc = 'There must be exactly two answers from both Pragma systems';
+			RETURN TRUE;
+		END IF;
+		
+		-- Проверка на то статусы в обоих ответах положительные
+		DECLARE I INTEGER 1;
+		WHILE I <= 2 DO
+			IF Environment.Variables.Request[I].XMLNSC.*[<].Status.ifxca:StatusCode <> '0' THEN
+				SET Environment.UserProperties.ErrCode = STATUS_UNDEFINED;
+				SET Environment.UserProperties.ErrDesc 
+						= Environment.Variables.Request[I].XMLNSC.*[<].Status.ifxca:StatusDesc;
+			RETURN TRUE;
+			END IF;
+			SET I = I+1;
+		END WHILE;
+
+		RETURN FALSE;
+	END;
+END MODULE;
+
+/**
+ * Формирует сообщение об ошибке в для ответа
+ * в вызывающую систему
+ **/
+CREATE COMPUTE MODULE NewBlackListPragmaResponse_CreateErrorResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+
+		-- Сохраняем ссылку на первое из сообщений-ответов,
+		-- из него будем вытаскивать все основные элементы для ответа.
+		DECLARE inRoot REFERENCE TO Environment.Variables.Request[1].XMLNSC.*[<];
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZBlackListRs';
+		DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+		SET outRoot.RqUID 	= inRoot.RqUID;
+		SET outRoot.RqTm 	= inRoot.RqTm;
+		SET outRoot.SPName 	= inRoot.SPName;
+		SET outRoot.Status.ifxca:StatusCode = Environment.UserProperties.ErrCode;
+		SET outRoot.Status.ifxca:StatusDesc = Environment.UserProperties.ErrDesc;
+---		SET outRoot.Status.ifxca:StatusCode = inRoot.ifxca:StatusCode;
+---		SET outRoot.Status.ifxca:StatusDesc = inRoot.ifxca:StatusDesc;
+		SET outRoot.BLStatus 	= 0;
+		SET outRoot.TerrStatus 	= 0;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

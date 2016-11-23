@@ -1,0 +1,270 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.gcvp.esql
+
+-- хост и порт SMTP-сервера
+DECLARE SMTPServer 		EXTERNAL CHARACTER '';
+-- адрес отправки письма
+DECLARE ToAddress 		EXTERNAL CHARACTER '';
+-- адрес отправителя письма
+DECLARE FromAddress 	EXTERNAL CHARACTER '';
+-- адрес получателя ответного письма
+DECLARE ReplyToAddress 	EXTERNAL CHARACTER '';
+-- тема письма
+DECLARE EmailSubject 	EXTERNAL CHARACTER '';
+-- ??? (custom header)
+DECLARE XPriority	 	EXTERNAL CHARACTER '';
+
+
+/**
+ * Преобразование из формата шины в формат GCVP с идентификацией по ИИН
+ * с созданием сообщения в домене MRM и установки параметров формата.
+ */
+CREATE COMPUTE MODULE FileRequestForGCVP_ConvertMDO2GCVPIIN
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MRM');
+		CREATE LASTCHILD OF OutputRoot.MRM NAME 'line';
+		DECLARE OutRq REFERENCE TO OutputRoot.MRM.line;
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetPensionRq;
+		
+		DECLARE fileId CHARACTER Environment.UserProperties.UniqueFileId;
+		
+		SET OutputRoot.Properties.MessageSet    = 'msg.file.GCVP.KZ';
+		SET OutputRoot.Properties.MessageType   = 'requestWithIINIdentity';
+		SET OutputRoot.Properties.MessageFormat = 'CSV';
+		SET OutputRoot.Properties.CodedCharSetId = 1208;
+		
+		SET OutRq.fileName 		= fileId;
+		SET OutRq.requestDate 	= CAST(InpRq.RqTm AS DATE FORMAT XSD_DATE_TIME_FORMAT);
+		SET OutRq.IIN 			= SUBSTRING(InpRq.PersonInfo.PersonId FROM 1 FOR 12);
+		SET OutRq.surName 		= UPPER(SUBSTRING(InpRq.PersonInfo.inds:PersonName.inds:LastName FROM 1 FOR 30));
+		SET OutRq.firstName 	= UPPER(SUBSTRING(InpRq.PersonInfo.inds:PersonName.inds:FirstName FROM 1 FOR 30));
+		SET OutRq.middleName 	= UPPER(SUBSTRING(InpRq.PersonInfo.inds:PersonName.inds:MiddleName FROM 1 FOR 30));
+		SET OutRq.birthDate 	= CAST(InpRq.PersonInfo.inds:BirthDt AS DATE FORMAT XSD_DATE_FORMAT);
+		SET OutRq.persNumber 	= NULL;
+		SET OutRq.persDate 		= NULL;
+		SET OutRq.depositorClaimNum 	= fileId;
+		SET OutRq.depositorClaimDate 	= CAST(InpRq.RqTm AS DATE FORMAT XSD_DATE_TIME_FORMAT);
+		SET OutRq.requestType 	= '1'; --  отчисления за последние полгода, Ср.сумма ОПВ
+		SET OutRq.requestType 	= '4'; --  отчисления за последние 6 месяцев, Ср.сумма ОПВ + Сумма ОПВ 
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+
+/**
+ * Преобразование из формата шины в формат GCVP с идентификацией по ИИН
+ * с созданием сообщения в домене MRM и установки параметров формата.
+ */
+CREATE COMPUTE MODULE FileRequestForGCVP_ConvertMDO2GCVPRNN
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MRM');
+		CREATE LASTCHILD OF OutputRoot.MRM NAME 'line';
+		DECLARE OutRq REFERENCE TO OutputRoot.MRM.line;
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.KZGetPensionRq;
+		
+		DECLARE fileId CHARACTER Environment.UserProperties.UniqueFileId;
+		
+		SET OutputRoot.Properties.MessageSet    = 'msg.file.GCVP.KZ';
+		SET OutputRoot.Properties.MessageType   = 'requestWithSIKIdentity';
+		SET OutputRoot.Properties.MessageFormat = 'CSV';
+		SET OutputRoot.Properties.CodedCharSetId = 1208;
+		
+		SET OutRq.fileName 		= fileId;
+		SET OutRq.requestDate 	= CAST(InpRq.RqTm AS DATE FORMAT XSD_DATE_TIME_FORMAT);
+		SET OutRq.SIK 			= SUBSTRING(InpRq.SIK FROM 1 FOR 16);
+		SET OutRq.surName 		= UPPER(SUBSTRING(InpRq.PersonInfo.inds:PersonName.inds:LastName FROM 1 FOR 30));
+		SET OutRq.firstName 	= UPPER(SUBSTRING(InpRq.PersonInfo.inds:PersonName.inds:FirstName FROM 1 FOR 30));
+		SET OutRq.middleName 	= UPPER(SUBSTRING(InpRq.PersonInfo.inds:PersonName.inds:MiddleName FROM 1 FOR 30));
+		SET OutRq.birthDate 	= CAST(InpRq.PersonInfo.inds:BirthDt AS DATE FORMAT XSD_DATE_FORMAT);
+		SET OutRq.persNumber 	= NULL;
+		SET OutRq.persDate 		= NULL;
+		SET OutRq.IIN 			= NULL;
+		SET OutRq.depositorClaimNum 	= fileId;
+		SET OutRq.depositorClaimDate 	= CAST(InpRq.RqTm AS DATE FORMAT XSD_DATE_TIME_FORMAT);
+		SET OutRq.requestType 	= '1'; --  отчисления за последние полгода, Ср.сумма ОПВ		
+		SET OutRq.requestType 	= '4'; --  отчисления за последние 6 месяцев, Ср.сумма ОПВ + Сумма ОПВ
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+
+/** 
+ * Модуль вызывает внешнюю PL/SQL процедуру для генерации идентификатора
+ * файла и сохранения данных по запросу. Идентификатор сохраняется в 
+ * Environment.UserProperties.UniqueFileId
+ */
+CREATE COMPUTE MODULE FileRequestForGCVP_GenerateFileIdAndSaveRequestInfo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE	rqUid 			CHARACTER;
+		DECLARE tsmUid			CHARACTER;
+		DECLARE personId		CHARACTER;
+		DECLARE personIdType	CHARACTER;
+		DECLARE isIINRequest 	CHARACTER;
+		DECLARE replyQm 		CHARACTER;
+		DECLARE replyQueue 		CHARACTER;
+		DECLARE fileId 			CHARACTER;
+		
+		SET personId 		= InputRoot.XMLNSC.KZGetPensionRq.PersonInfo.PersonId;
+		SET personIdType 	= InputRoot.XMLNSC.KZGetPensionRq.PersonInfo.PersonIdType;
+		-- Определение типа запроса (а, соответственно, и ответа)
+		IF personIdType = '2' OR personIdType = '4' THEN
+			SET isIINRequest = '1';
+		ELSE
+			SET isIINRequest = '0';
+		END IF;
+		CALL GetMQReplyDestination(InputRoot, replyQm, replyQueue);
+		SET rqUid = InputRoot.XMLNSC.*[<].RqUID;
+		SET tsmUid = InputRoot.XMLNSC.*[<].TSMUID;
+		
+		CALL SaveRequestInfoAndReturnFileId(rqUid, tsmUid, personId
+				, personIdType, isIINRequest, replyQm, replyQueue, fileId);
+		
+		SET Environment.UserProperties.UniqueFileId = fileId;
+		SET Environment.UserProperties.IsINNRequest = isIINRequest;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.File.Name = fileId;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Установка адреса почтового SMTP-сервера, а также
+ * заголовков письма для отправки в ГЦВП. Значения
+ * в основном берутся из EXTERNAL переменных.
+ **/
+CREATE COMPUTE MODULE FileRequestForGCVP_SetEmailOptions
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		SET OutputRoot.EmailOutputHeader.To 		= ToAddress;
+		SET OutputRoot.EmailOutputHeader.From 		= FromAddress;
+		SET OutputRoot.EmailOutputHeader."Reply-To" = ReplyToAddress;
+		SET OutputRoot.EmailOutputHeader.Subject 	= EmailSubject;
+		SET OutputRoot.EmailOutputHeader."X-Priority" = XPriority;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.Email.SMTPServer = SMTPServer;
+		SET OutputLocalEnvironment.Destination.Email.Attachment.Content = InputRoot.BLOB.BLOB;
+		SET OutputLocalEnvironment.Destination.Email.Attachment.ContentName 
+				= InputLocalEnvironment.Destination.File.Name;
+		SET OutputLocalEnvironment.Destination.Email.Attachment.ContentType = 'application/octet-stream';
+		SET OutputLocalEnvironment.Destination.Email.Attachment.ContentEncoding = 'base64';
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('BLOB');
+		--SET OutputRoot.BLOB.BLOB = X'20';
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/** 
+ * Проверка типа запроса для ГЦВП.
+ */
+CREATE FILTER MODULE FileRequestForGCVP_IsIINRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		IF Environment.UserProperties.IsINNRequest = '1' THEN
+			RETURN TRUE;
+		ELSE
+			RETURN FALSE;
+		END IF;
+	END;
+END MODULE;
+
+/**
+ * Получение в переданные переменные имя queue-менеджера,
+ * куда надо слать ответ от ГЦВП, и имени очереди.
+ */
+ 
+CREATE PROCEDURE GetMQReplyDestination(
+		IN MQMDRoot 	REFERENCE,
+		OUT replyQm 	CHARACTER,
+		OUT replyQueue 	CHARACTER
+	)
+BEGIN
+	SET replyQm 	= MQMDRoot.MQMD.ReplyToQMgr;
+	SET replyQueue 	= MQMDRoot.MQMD.ReplyToQ;
+END;
+
+/**
+ * Процедура сохранения параметров сообщения в БД, а
+ * также генерации идентификатора в соответствие с
+ * определенным алгоритмом.
+ * Реализована как внешняя процедура PL/SQL.
+ */
+CREATE PROCEDURE SaveRequestInfoAndReturnFileId(
+		IN 	rq_uid 			CHARACTER,
+		IN	tsm_uid			CHARACTER,
+		IN 	person_id 		CHARACTER,
+		IN	person_id_type	CHARACTER,
+		IN 	is_new_format 	CHARACTER,
+		IN 	reply_qm 		CHARACTER,
+		IN 	reply_queue 	CHARACTER,
+		OUT file_id 		CHARACTER
+	)
+LANGUAGE DATABASE
+EXTERNAL NAME "sbkz.gcvp_adapter_kz.save_req_info_and_ret_file_id";
+
+
+/**
+ * Перенаправляет поток вначале в ноду сохранения сообщения
+ * в файл, а после в ветку передачи сообщения как аттачмента
+ * в письме.
+ **/
+CREATE COMPUTE MODULE FileRequestForGCVP_Passthrough
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		-- вначале сохраняем сообщение
+		PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		
+		-- теперь продолжаем обработку как и обычно,
+		-- с последующей отправкой сообщения во вложении.
+		RETURN TRUE;
+	END;
+
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

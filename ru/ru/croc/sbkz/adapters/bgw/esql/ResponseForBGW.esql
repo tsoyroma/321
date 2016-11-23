@@ -1,0 +1,101 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.bgw.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+
+/**
+ * Восстановление MQ-заголовка исходного сообщения
+ **/
+CREATE COMPUTE MODULE ResponseForBGW_AddOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Перенаправление на нужную ветку в соответствии с операцией
+ **/
+CREATE COMPUTE MODULE ResponseForBGW_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.UserProperties.Operation;
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'balance' THEN
+			SET labelName = 'KZGetTransactionsInfoRq';
+		WHEN 'statement' THEN
+			SET labelName = 'KZGetTransactionsInfoRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForBGW_ConvertMDO2BGW1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC');
+		CREATE FIELD OutputRoot.XMLNSC.mBilling;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.mBilling;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.(XMLNSC.Attribute)Version	= '1.3';
+		SET outRef.STAN							= inRef.RqUID;
+		SET outRef.Interface					= 'Pragma-Way4';
+		SET outRef.Response						= CASE WHEN inRef.Status.*:StatusCode = 0 THEN 'OK' ELSE 'ERROR' END;
+		
+		DECLARE endbal CHARACTER;
+		DECLARE endbalcurr CHARACTER;
+		
+		FOR inBalanceRec AS inRef.TransData.AcctTrans.AcctInfo.AcctBalInfo.BalanceRec[] DO
+			IF inBalanceRec.BalType = 'ENDBAL' THEN
+				SET endbal		= inBalanceRec.Amount;
+				SET endbalcurr	= inBalanceRec.AcctCur;
+			END IF;
+		END FOR;
+		
+		SET outRef.Balance								= endbal;
+		SET outRef.Balance.(XMLNSC.Attribute)Currency	= endbalcurr;
+		
+		IF Environment.UserProperties.Operation = 'statement' THEN
+			CREATE FIELD outRef.MiniStatement;
+			DECLARE outItem REFERENCE TO outRef.MiniStatement;
+			DECLARE I INTEGER 0;
+			FOR inTransactionInfo AS inRef.TransData.AcctTrans.TransactionInfo[] DO
+				IF I < 10 THEN
+					CREATE LASTCHILD OF outRef.MiniStatement AS outItem NAME 'Item';
+					DECLARE amt DECIMAL inTransactionInfo.Amt;
+					SET outItem VALUE = CASE inTransactionInfo.Type
+						WHEN 'D' THEN CAST(-amt AS CHARACTER)
+						ELSE inTransactionInfo.Amt
+					END;
+					
+					IF inTransactionInfo.OperationDate <> '' THEN
+						SET outItem.(XMLNSC.Attribute)Date		= CAST(CAST(inTransactionInfo.OperationDate AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'yyyyMMdd');
+					END IF;
+					SET outItem.(XMLNSC.Attribute)Currency	= inTransactionInfo.TransCur;
+					
+					SET I = I + 1;
+				END IF;
+			END FOR;
+			IF NOT EXISTS(outRef.MiniStatement.*[]) THEN
+				SET outRef.MiniStatement = NULL;
+			END IF;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

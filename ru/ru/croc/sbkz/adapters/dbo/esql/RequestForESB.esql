@@ -1,0 +1,450 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.dbo.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]); 
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation 
+		WHEN 'CURRENCYRATES_RQ' THEN 	
+			SET labelName = 'CURRENCYRATES_RQ';
+		WHEN 'PAYDOC' THEN
+			SET labelName = 'PAYDOC';
+		WHEN 'PAYDOCCUR' THEN
+			SET labelName = 'PAYDOCCUR';
+		WHEN 'EXCDOC' THEN
+			SET labelName = 'EXCDOC';
+		WHEN 'STATEMENT_RQ' THEN
+			SET labelName = 'STATEMENT_RQ';
+		WHEN 'STATUS' THEN
+			SET labelName = 'STATUS';
+		WHEN 'CONTRACT_LIST_RQ' THEN
+			SET labelName = 'CONTRACT_LIST_RQ';						
+		WHEN 'DEPOSIT_RQ' THEN
+			SET labelName = 'DEPOSIT_RQ';	
+		WHEN 'StatementCardRequest' THEN
+			SET labelName = 'StatementCardRequest';	
+		WHEN 'OpenAccount' THEN
+			SET labelName = 'OpenAccount';
+		WHEN 'OpenAccountDetailsRequest' THEN
+			SET labelName = 'OpenAccountDetailsRequest';	
+							
+		ELSE
+			--Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES('Unknown message format in RequestForESB(DBO)', Operation);			 	 		 	
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+    END;
+END MODULE;
+
+/**
+ **	Запрос курсов валют	CURRENCYRATES_RQ(DBO) -> KZGetCurrencyRateRq(ESB)
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertDBO2MDO_CurrRate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		CALL FillMDOStandardElementsRq(InputRoot, OutputRoot, 'KZGetCurrencyRateRq');
+		SET OutputRoot.XMLNSC.KZGetCurrencyRateRq.RateDT = InputRoot.XMLNSC.*:CURRENCYRATES_RQ.RATEDATE;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ ** Платежное поручение PAYDOC(DBO) -> KZLegalPayDocRq(ESB)
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertDBO2MDO_PayDoc
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CALL FillMDOStandardElementsRq(InputRoot, OutputRoot, 'KZLegalPayDocRq');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:PAYDOC;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZLegalPayDocRq;
+		
+		CALL CopyPayDocToMDO(inRef,outRef);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ ** Платежное поручение в валюте PAYDOCCUR(DBO) -> KZLegalPayDocRq(ESB)
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertDBO2MDO_PayDocCur
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CALL FillMDOStandardElementsRq(InputRoot, OutputRoot, 'KZLegalPayDocRq');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:PAYDOCCUR;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZLegalPayDocRq;
+		
+		CALL CopyPayDocToMDO(inRef,outRef);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+	
+END MODULE;
+
+/**
+ ** Запрос на конвертацию. u00671 04/02/2014
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertDBO2MDO_CurrOper
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CALL FillMDOStandardElementsRq(InputRoot, OutputRoot, 'KZLegalCurrOperRq');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:EXCDOC;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZLegalCurrOperRq;
+		
+		SET outRef.TransType 						= inRef.TYPE;
+		DECLARE payer REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS payer NAME 'PayerInfo';
+		SET payer.AcctInfo.AcctId 					= inRef.DocumentData.*:Payer.*:Account;
+		SET payer.AcctInfo.AcctCur 					= inRef.DocumentData.*:Payer.*:CURRCODE;
+		SET payer.OrgInfo.orgs:Name					= inRef.DocumentData.*:Payer.*:NAME;
+		DECLARE orgId REFERENCE TO outRef;
+		CREATE LASTCHILD OF payer.OrgInfo AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 								= 'RNN';
+		SET orgId.Value 							= inRef.DocumentData.*:Payer.*:RNN;
+		CREATE LASTCHILD OF payer.OrgInfo AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 								= 'BIC';
+		SET orgId.Value 							= inRef.DocumentData.*:PAYERBIC;
+		CREATE LASTCHILD OF payer.OrgInfo NAME 'OrgAttr';
+		DECLARE person REFERENCE TO outRef;
+		CREATE LASTCHILD OF payer.OrgInfo.OrgAttr AS person NAME 'KeyPerson';
+		SET person.PositionKey						= 'CHIEF';
+		SET person.PersonInfo.inds:FullName			= inRef.DocumentData.*:Payer.*:CHIEF;
+		CREATE LASTCHILD OF payer.OrgInfo.OrgAttr AS person NAME 'KeyPerson';
+		SET person.PositionKey						= 'ACC';
+		SET person.PersonInfo.inds:FullName			= inRef.DocumentData.*:Payer.*:MAINBK;
+		SET payer.OrgInfo.OrgAttr.Resident			= inRef.DocumentData.*:Payer.*:IRS;
+		SET payer.OrgInfo.OrgAttr.EcSector			= inRef.DocumentData.*:Payer.*:SECO;
+		SET payer.ChkPay							= inRef.DocumentData.*:Payer.*:CHKPAY;
+		SET payer.AcctComId.AcctId					= inRef.DocumentData.*:Payer.*:AccountCom;
+		SET payer.AcctComId.AcctCur					= inRef.DocumentData.*:Payer.*:CurrCom;
+		
+		DECLARE receiver REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS receiver NAME 'ReceiverInfo';
+		SET receiver.AcctInfo.AcctId 					= inRef.DocumentData.*:Receiver.*:Account;
+		SET receiver.AcctInfo.AcctCur 					= inRef.DocumentData.*:Receiver.*:CURRCODE;
+		SET receiver.OrgInfo.orgs:Name					= inRef.DocumentData.*:Receiver.*:NAME;
+		SET receiver.OrgInfo.orgs:Name					= inRef.DocumentData.*:Receiver.*:NAME;
+		SET receiver.OrgInfo.orgs:Name					= inRef.DocumentData.*:Receiver.*:NAME;
+		SET receiver.OrgInfo.orgs:CompositeContactInfo.ifxca:ContactInfoType									= 'LegalAddress';
+		SET receiver.OrgInfo.orgs:CompositeContactInfo.ifxca:ContactInfo.ifxca:PostAddr.commons:Addr1			= inRef.DocumentData.*:Receiver.*:ADDRESS;
+		SET receiver.OrgInfo.orgs:CompositeContactInfo.ifxca:ContactInfo.ifxca:PostAddr.commons:Country			= inRef.DocumentData.*:Receiver.*:COUNTRY;
+		SET receiver.OrgInfo.orgs:KPPInfo.ifxca:TaxId	= inRef.DocumentData.*:Receiver.*:KPP;
+		
+		CREATE LASTCHILD OF receiver.OrgInfo AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 								= 'RNN';
+		SET orgId.Value 							= inRef.DocumentData.*:Receiver.*:RNN;
+		CREATE LASTCHILD OF receiver.OrgInfo AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 								= 'BIC';
+		SET orgId.Value 							= inRef.DocumentData.*:RECEIVERBIC;
+		DECLARE orgAttr REFERENCE TO outRef;
+		CREATE LASTCHILD OF payer.OrgInfo AS orgAttr NAME 'OrgAttr';
+		SET orgAttr.Resident						= inRef.DocumentData.*:Receiver.*:IRS;
+		SET orgAttr.EcSector						= inRef.DocumentData.*:Receiver.*:SECO;
+		SET orgAttr.Country							= inRef.DocumentData.*:Receiver.*:COUNTRY;
+		
+		DECLARE bankInfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF payer AS bankInfo NAME 'BankInfo';
+		SET bankInfo.banks:BankId					= inRef.DocumentData.*:BANKRECEIVER.*:Receiverbic;
+		SET bankInfo.banks:CorAcctId				= inRef.DocumentData.*:BANKRECEIVER.*:CorAccount;
+		SET bankInfo.banks:Name						= inRef.DocumentData.*:BANKRECEIVER.*:NAME;
+		SET bankInfo.banks:PostAddr.commons:Addr1	= inRef.DocumentData.*:BANKRECEIVER.*:ADDRESS;
+		SET bankInfo.banks:PostAddr.commons:Country	= inRef.DocumentData.*:BANKRECEIVER.*:COUNTRY;
+		
+		DECLARE payDoc REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		CREATE LASTCHILD OF payDoc AS bankInfo NAME 'CorrBankInfo';
+		SET bankInfo.banks:BankId					= inRef.DocumentData.*:CORRBANK.*:Receiverbic;
+		SET bankInfo.banks:CorAcctId				= inRef.DocumentData.*:CORRBANK.*:CorAccount;
+		SET bankInfo.banks:Name						= inRef.DocumentData.*:CORRBANK.*:NAME;
+		SET bankInfo.banks:PostAddr.commons:Addr1	= inRef.DocumentData.*:CORRBANK.*:ADDRESS;
+		SET bankInfo.banks:PostAddr.commons:Country	= inRef.DocumentData.*:CORRBANK.*:COUNTRY;
+		
+		SET payDoc.PurposeCode						= inRef.DocumentData.*:Details.*:KNP;
+		SET payDoc.OperKind							= inRef.DocumentData.*:Details.*:VO;
+		SET payDoc.DocNum							= inRef.DocumentData.*:Details.*:NUM;
+		SET payDoc.DocDate							= inRef.DocumentData.*:Details.*:DATE;
+		SET payDoc.ContractNum						= inRef.DocumentData.*:Details.*:NumCont;
+		SET payDoc.ContractDate						= inRef.DocumentData.*:Details.*:DateCont;		
+		SET payDoc.ContractUN						= inRef.DocumentData.*:Details.*:UNK;
+		SET payDoc.Invoice							= inRef.DocumentData.*:Details.*:Invoice;
+		SET payDoc.ContractUNDate					= inRef.DocumentData.*:Details.*:DateUnk;
+		SET payDoc.SendMethod						= inRef.DocumentData.*:Details.*:SEND;		
+		SET payDoc.SpecialService					= inRef.DocumentData.*:Details.*:PSO;
+		SET payDoc.IncomeCode						= inRef.DocumentData.*:Details.*:BCLASS;
+		SET payDoc.Urgent							= inRef.DocumentData.*:Details.*:URGENT;
+		SET payDoc.IsLoanPay						= inRef.DocumentData.*:Details.*:LON;		
+		SET payDoc.OperTypeCode						= inRef.DocumentData.*:Details.*:CodeTypeOper;
+		SET payDoc.Assign							= inRef.DocumentData.*:Details.*:ASSIGN;
+		SET payDoc.Note								= inRef.DocumentData.*:Notification;
+		
+		SET payDoc.DocRef							= inRef.DocumentData.OPERREF;
+		SET payDoc.RefDate							= inRef.DocumentData.DATE;
+		SET payDoc.CurrCode							= inRef.DocumentData.CURRCODE;
+		SET payDoc.Amount							= inRef.DocumentData.AMOUNT;
+		SET payDoc.AccAgrNum						= inRef.DocumentData.ACCONT;
+		SET payDoc.AccAgrDate						= inRef.DocumentData.ACCDATE;
+		SET payDoc.CredAgrNum						= inRef.DocumentData.CREDITARG;
+		SET payDoc.AmountCur						= inRef.DocumentData.AMOUNTCUR;
+		SET payDoc.CurrContractNum 					= inRef.DocumentData.CONTRACTNUMBER;
+		RETURN TRUE;
+	END;
+END MODULE; 
+
+/**
+ * Запрос выписки u00671 04/02/2014
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertDBO2MDO_Statement
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CALL FillMDOStandardElementsRq(InputRoot, OutputRoot, 'KZLegalGetAccountStatementRq');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:STATEMENT_RQ;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZLegalGetAccountStatementRq;
+		
+		SET outRef.AcctReq.AcctId 					= inRef.ACCOUNTS.ACCOUNT;
+		SET outRef.AcctReq.BankInfo.banks:BankId 	= inRef.ACCOUNTS.BIC;
+		SET outRef.DateStart						= inRef.DATEFROM;
+		SET outRef.DateEnd							= inRef.DATETO;
+		SET outRef.IsExtStatement					= 'Y';
+		SET outRef.IsTurnovers						= 'Y';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос статуса платежного документа. u07357 21/08/2015
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertDBO2MDO_Status
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		DECLARE typeofdep CHARACTER;
+		DECLARE val1 CHARACTER;
+		SET val1 = FIELDVALUE(InputRoot.XMLNSC.STATUS.DocumentRef.DOCREF);
+		SET typeofdep = SUBSTRING(val1 BEFORE ';');
+			
+		IF typeofdep = '10' THEN
+			CALL CopyMessageHeaders(InputRoot,OutputRoot);
+			CALL FillMDOStandardElementsRq(InputRoot, OutputRoot, 'KZDepositStatusRq');
+			DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZDepositStatusRq;
+			SET outRef.Doc.PayDocInfo.DocRef 		= InputRoot.XMLNSC.STATUS.DocumentRef.DOCREF;
+			SET outRef.Doc.DocType 					= InputRoot.XMLNSC.STATUS.DocumentRef.DOCTYPE;
+			RETURN TRUE;			
+		ELSE 	
+			CALL CopyMessageHeaders(InputRoot,OutputRoot);
+			CALL FillMDOStandardElementsRq(InputRoot, OutputRoot, 'KZLegalGetPayDocStatusRq');
+			DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZLegalGetPayDocStatusRq;
+			SET outRef.Doc.PayDocInfo.DocRef 		= InputRoot.XMLNSC.STATUS.DocumentRef.DOCREF;
+			SET outRef.Doc.DocType 					= InputRoot.XMLNSC.STATUS.DocumentRef.DOCTYPE;
+			RETURN TRUE;
+		END IF;
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+/*
+u07357 09.05.2015
+*/
+CREATE COMPUTE MODULE RequestForESB_ConvertBSS2MDO_CONTRACT_LIST_RQ
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN  
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CALL FillMDOStandardElementsRq(InputRoot, OutputRoot, 'KZGetContractListRq');
+		  
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:CONTRACT_LIST_RQ;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZGetContractListRq;
+		DECLARE conts REFERENCE TO outRef;
+
+		FOR contrac AS inRef.*:BIN[] DO
+			CREATE LASTCHILD OF outRef AS conts NAME 'Contract';
+			SET conts.BIN 			= FIELDVALUE(contrac);
+		END FOR;
+
+		SET Environment.UserProperties.BIN				= conts.BIN;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertDBO2MDO_DEPOSIT_RQ
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN  
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CALL FillMDOStandardElementsRq(InputRoot, OutputRoot, 'KZDepositSyncRq');
+		  
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:DEPOSIT_RQ;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZDepositSyncRq;
+		DECLARE conts REFERENCE TO outRef;
+
+		SET outRef.FILIALID 		= inRef.CLIENTINFO.FILIALID;
+
+		DECLARE ClientInfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS ClientInfo NAME 'ClientInfo';
+		---SET ClientInfo 			= inRef.CLIENTINFO;
+
+		SET ClientInfo.BIN 			= inRef.CLIENTINFO.BIN;
+		SET ClientInfo.NAME 		= inRef.CLIENTINFO.NAME;
+		SET ClientInfo.KOD 			= inRef.CLIENTINFO.KOD;
+		SET ClientInfo.TYPEOWNER	= inRef.CLIENTINFO.TYPEOWNER;
+
+		DECLARE DepositInfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS DepositInfo NAME 'DepositInfo';
+--		SET DepositInfo 						= inRef.DEPOSITINFO;
+		SET DepositInfo.RequestUID 				= FIELDVALUE(InputRoot.XMLNSC.*:*[<].(XMLNSC.Attribute)ID);
+		SET DepositInfo.TYPEDEPOSIT 			= inRef.DEPOSITINFO.TYPEDEPOSIT;
+		
+		SET DepositInfo.CURRENCYDEPOSIT 		= CodToIsoCur(inRef.DEPOSITINFO.CURRENCYDEPOSIT);
+		SET DepositInfo.AMMOUNTDEPOSIT 			= inRef.DEPOSITINFO.AMMOUNTDEPOSIT;
+		SET DepositInfo.PERIODDEPOSIT 			= inRef.DEPOSITINFO.PERIODDEPOSIT;
+		SET DepositInfo.DATEFROM 				= inRef.DEPOSITINFO.DATEFROM;
+		SET DepositInfo.DATETO 					= inRef.DEPOSITINFO.DATETO;
+		SET DepositInfo.MINIMUMBALANCE 			= inRef.DEPOSITINFO.MINIMUMBALANCE;
+		SET DepositInfo.KPN 					= inRef.DEPOSITINFO.KPN;
+		SET DepositInfo.ACCOUNTCOMPENSATION 	= inRef.DEPOSITINFO.ACCOUNTCOMPENSATION;
+		SET DepositInfo.INTERESTPAYMENT 		= inRef.DEPOSITINFO.INTERESTPAYMENT;
+		SET DepositInfo.BIK 					= inRef.DEPOSITINFO.BIK;
+		SET DepositInfo.SIGNATURE 				= inRef.DEPOSITINFO.SIGNATURE;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE RequestForESB_ConvertBSS2MDO_StatementCardRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetOrderingByCardRq';
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:StatementCardRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZGetOrderingByCardRq;
+		
+		SET outRef.RqUID  = FIELDVALUE(inRef.(XMLNSC.Attribute)ID);
+		--SET outRoot.SPName = inRoot.*:SPName;		
+		
+		DECLARE year_number CHARACTER;
+		DECLARE year_day CHARACTER;
+		
+		DECLARE id CHARACTER;
+		DECLARE days CHARACTER;
+		--DECLARE service CHARACTER 'general';
+		
+		SET days = EXTRACT(DAY FROM CURRENT_DATE);
+					  	 	
+		CALL getID(id);
+		
+		SET year_number = EXTRACT(DAYOFYEAR FROM CURRENT_DATE); 
+		SET year_day    = EXTRACT(YEAR FROM CURRENT_DATE);
+		
+		DECLARE lone_year CHARACTER SUBSTRING(year_day FROM 4 FOR 1); 
+		
+		IF LENGTH(year_number) = '2' THEN
+			SET outRef.RegNumber = lone_year || '0' || year_number || '84' || id;--inRoot.*:OperUID;
+		ELSEIF LENGTH(year_number) = '1' THEN
+			SET outRef.RegNumber = lone_year || '00' || year_number || '84' || id;
+		ELSEIF LENGTH(year_number) = '3' THEN
+			SET outRef.RegNumber = lone_year || year_number || '84' || id;--inRoot.*:OperUID;
+		END IF;	
+		
+ 	--	SET outRef.RegNumber  = inRoot.*:OperRRN;			
+		SET outRef.CardNumber = inRef.*:ContractNumber;		
+		SET outRef.FromDate   = inRef.*:DateFrom;
+		SET outRef.ToDate	   = inRef.*:DateTo;	
+
+		/*
+		SET Environment.UserProperties.SystemId   = inRoot.*:CardInfo.*:CardAcctId.*:SystemId;
+		SET Environment.UserProperties.CardNumber = inRoot.*:CardInfo.*:CardAcctId.*:CardAcctIdNum;
+		SET Environment.UserProperties.OperUID	  = inRoot.*:OperUID;
+		*/
+		SET outRef.ServiceAttr.AttrId = 'VERS';
+		SET outRef.ServiceAttr.AttrValue = '00';		
+		SET Environment.UserProperties.RqTm = FIELDVALUE(inRef.(XMLNSC.Attribute)DateTime);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_Convert_CBBOL
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	
+	 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:OpenAccount;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'OpenAccount';
+ 
+		SET outRoot.RqUID								= FIELDVALUE(InputBody.*[<].(XMLNSC.Attribute)ID);
+		SET outRoot.RqTm						= FIELDVALUE (InputBody.*[<].(XMLNSC.Attribute)DateTime);
+		SET outRoot.ServiceCode = 'SbbolOpenAcct';
+		SET outRoot.AccountDetails.ClientBIN				= inRoot.*:ACCOUNTDETAILS.*:ClientBIN;
+		SET outRoot.AccountDetails.AccountCurrency				= inRoot.*:ACCOUNTDETAILS.*:AccountCurrency;
+		SET outRoot.AccountDetails.AccountCommission				= inRoot.*:ACCOUNTDETAILS.*:AccountCommission;
+		SET outRoot.AccountDetails.FilialId				= inRoot.*:ACCOUNTDETAILS.*:FilialId;
+		SET outRoot.AccountDetails.Signature	= inRoot.*:ACCOUNTDETAILS.*:Signature;
+		
+	 	 
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertOpenAcctDetails2CBBOL
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:OpenAccountDetailsRequest;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'OpenAccountDetailsRequest';
+ 
+		SET outRoot.RqUID								= FIELDVALUE(InputBody.*[<].(XMLNSC.Attribute)ID);
+		SET outRoot.RqTm						= FIELDVALUE (InputBody.*[<].(XMLNSC.Attribute)DateTime);
+		SET outRoot.ServiceCode = 'SbbolStatAcct';
+		SET outRoot.DocRef				= inRoot.*:DocRef;
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;

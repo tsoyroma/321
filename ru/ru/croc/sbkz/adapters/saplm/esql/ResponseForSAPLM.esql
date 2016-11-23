@@ -1,0 +1,35 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.saplm.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE ResponseForSAPLM_AddOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForSAPLM_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'GetLimitRs' THEN
+			SET labelName = 'GetLimitRs';
+		WHEN 'PutLimitMasterDataRs' THEN
+			SET labelName = 'PutLimitMasterDataRs';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in ResponseForSAPLM', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

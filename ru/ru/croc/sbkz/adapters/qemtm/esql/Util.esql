@@ -1,0 +1,58 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.qemtm.esql
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE CreateErrorResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+		SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier = CAST(Environment.UserProperties.HTTPRequestIdentifier AS BLOB);
+
+		-- Получение описания ошибки
+		DECLARE sErrDescr CHARACTER;
+		DECLARE sErrNumber CHARACTER;
+		CALL ru.croc.sbrf.mdm.common.GetExcDescription(InputExceptionList, sErrDescr, sErrNumber);
+
+		-- Формирование структуры сообщения-ответа
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'SRUpsert_Output';			
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.SRUpsert_Output;
+
+		SET outRef.ErrorCode		= sErrNumber;
+		SET outRef.ErrorMsg			= sErrDescr;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE CreateTimeoutResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRef REFERENCE TO InputRoot;
+		DECLARE ns NAMESPACE 'http://siebel.com/CustomUI';
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+		--SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier = CAST(Environment.UserProperties.HTTPRequestIdentifier AS BLOB);
+		SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier = CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.HTTPRequestIdentifier AS BLOB);
+		-- Формирование структуры сообщения-ответа
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAMESPACE ns NAME 'SRUpsert_Output';	
+		SET OutputRoot.XMLNSC.ns:SRUpsert_Output.(XMLNSC.NamespaceDecl)xmlns:ns = ns;			
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:SRUpsert_Output;
+		SET outRef.ns:RqUID				= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.RqUID;
+		SET outRef.ns:RqTm				= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.RqTm;
+		SET outRef.ns:ErrorCode			= '0';
+		SET outRef.ns:ErrorMsg			= 'Таймаут во время ожидания ответа от обрабатывающей системы';
+		
+		RETURN TRUE;
+	END;
+END MODULE;

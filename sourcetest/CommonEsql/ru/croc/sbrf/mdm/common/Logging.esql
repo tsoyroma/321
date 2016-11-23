@@ -1,0 +1,44 @@
+BROKER SCHEMA ru.croc.sbrf.mdm.common
+
+-- создает запись в таблице LOG с информацией о событии
+CREATE FUNCTION writeLogRecord(
+	IN eventType CHARACTER, IN requestId CHARACTER, IN requestType CHARACTER,
+	IN requesterName CHARACTER, IN adminSysTpCd CHARACTER, IN adminClientId CHARACTER,
+	IN severity CHARACTER, IN branch CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE logId CHARACTER generateId('log_seq');
+
+	INSERT INTO Database.LOG(
+		LOG_ID, EVENT_DATE, EVENT_TYPE, REQUEST_ID, REQUEST_TYPE, REQUESTER_NAME,
+		ADMIN_SYS_TP_CD, ADMIN_CLIENT_ID, SEVERITY, TX_LOG_ID, BRANCH)
+	VALUES (
+		logId, CURRENT_TIMESTAMP, eventType, requestId, requestType, requesterName,
+		adminSysTpCd, adminClientId, severity, null, branch);
+
+	RETURN logId;
+END;
+
+-- создает запись в таблице LOG_FIELD с информацией о полях
+CREATE PROCEDURE writeLogFieldRecord(
+	IN logId CHARACTER, IN entityType CHARACTER,  IN fieldName CHARACTER,
+	IN fieldValueBefore CHARACTER, IN fieldValueAfter CHARACTER)
+BEGIN
+	DECLARE logFieldId CHARACTER generateId('log_field_seq');
+
+	INSERT INTO Database.LOG_FIELD(
+		LOG_FIELD_ID, LOG_ID, ENTITY_TYPE, ENTITY_ID,
+		FIELD_NAME, FIELD_VALUE_BEFORE, FIELD_VALUE_AFTER)
+	VALUES (
+		logFieldId, logId, entityType, null,
+		fieldName, fieldValueBefore, fieldValueAfter);
+END;
+
+-- генерирует новый идентификатор записи
+CREATE FUNCTION generateId(IN seqName CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE tmp ROW;
+	SET tmp.value[] = PASSTHRU('VALUES NEXT VALUE FOR ' || seqName);
+	DECLARE id CHARACTER CAST(tmp.value."1" AS CHARACTER);
+	RETURN id;
+END;
+

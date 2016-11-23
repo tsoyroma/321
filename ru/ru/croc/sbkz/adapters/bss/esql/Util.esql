@@ -1,0 +1,40 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.bss.esql
+
+DECLARE XSD_DATE_TIME_FORMAT CONSTANT CHARACTER 'IU';
+
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос)
+ **/
+CREATE PROCEDURE FillMDOStandardElementsRq (IN inroot REFERENCE, IN outroot REFERENCE, IN msgType CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF outroot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF outroot.XMLNSC NAME msgType;
+	SET outroot.XMLNSC.*:*[<].(XMLNSC.NamespaceDecl)xmlns:orgs = orgs;	
+	SET outroot.XMLNSC.*:*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+	SET outroot.XMLNSC.*:*[<].(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+	SET outroot.XMLNSC.*:*[<].(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+	SET outroot.XMLNSC.*:*[<].(XMLNSC.NamespaceDecl)xmlns:commons = commons;
+	SET outroot.XMLNSC.*:*[<].RqUID		= FIELDVALUE(inroot.XMLNSC.*:*[<].(XMLNSC.Attribute)ID);
+	SET outroot.XMLNSC.*:*[<].RqTm		= FIELDVALUE(inroot.XMLNSC.*:*[<].(XMLNSC.Attribute)DateTime);
+	SET outroot.XMLNSC.*:*[<].OperUID	= '';
+	SET outroot.XMLNSC.*:*[<].SPName	= 'BSS';
+END;
+
+/**
+ * Заполнение стандартных полей BSS в сообщениях (запрос и ответ)
+ **/
+CREATE PROCEDURE FillBSSStandardElements (IN inroot REFERENCE, IN outroot REFERENCE, IN msgType CHARACTER, IN nameSpace CHARACTER)
+BEGIN
+	DECLARE outRq REFERENCE TO outroot;
+	DECLARE ns2 NAMESPACE nameSpace;
+	
+	CREATE LASTCHILD OF outroot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF outroot.XMLNSC AS outRq NAMESPACE ns2 NAME msgType;
+	
+	SET outRq.(XMLNSC.NamespaceDecl)xmlns:ns2 		= ns2;
+	SET outRq.(XMLNSC.Attribute)ID 					= inroot.XMLNSC.*:*[<].RqUID;
+	SET outRq.(XMLNSC.Attribute)DateTime 			= CAST(inroot.XMLNSC.*:*[<].RqTm AS DATE FORMAT XSD_DATE_TIME_FORMAT);	
+	
+END;
+

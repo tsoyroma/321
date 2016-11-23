@@ -1,0 +1,24 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.common.esql
+
+-- Нужно ли копировать информацию по очереди ответа
+-- из исходного сообщения в echo-сообщения.
+DECLARE IsCopyCorrelationParams EXTERNAL BOOLEAN FALSE;
+
+CREATE COMPUTE MODULE RequestSubflow_RestoreMqCorrelationParams
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		IF IsCopyCorrelationParams THEN
+			SET OutputRoot.MQMD.MsgId = Environment.Variables.InputMQMD.MsgId;
+			SET OutputRoot.MQMD.ReplyToQ = Environment.Variables.InputMQMD.ReplyToQ;
+			SET OutputRoot.MQMD.ReplyToQMgr = Environment.Variables.InputMQMD.ReplyToQMgr;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

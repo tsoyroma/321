@@ -1,0 +1,1571 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pragmanew.esql
+
+PATH ru.croc.sbkz.utils; 
+
+DECLARE PRAGMANEW_DATE_FORMAT CONSTANT CHARACTER 'yyyy-MM-dd';
+
+/**
+ * Заполняет запрос в МАБПК стандартными значениями
+ **/
+CREATE PROCEDURE FillStandartNewPragmaRq(
+		IN InputRoot REFERENCE, 
+		IN OutputRoot REFERENCE, 
+		IN serviceCode CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'PragmaEnvelope';
+	DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+	
+	SET outRoot.MessageUID = InputRoot.XMLNSC.*[<].RqUID;
+	SET outRoot.SystemCode = InputRoot.XMLNSC.*[<].SPName;
+	SET outRoot.ServiceCode = serviceCode;
+	SET outRoot.MessageDateTime = InputRoot.XMLNSC.*[<].RqTm;
+	IF InputRoot.XMLNSC.*[<].SPName = 'Transact' THEN
+		SET outRoot.FilialCode = COALESCE(REPLACE(InputRoot.XMLNSC.*[<].BankInfo.*:RegionId,'TXB',''), '00');
+	ELSE 
+		SET outRoot.FilialCode = COALESCE(InputRoot.XMLNSC.*[<].BankInfo.*:RegionId, '00');
+	END IF;
+END;
+
+
+/**
+ * Заполняет ответ из МАБПК стандартными значениями
+ **/
+CREATE PROCEDURE FillStandartMDORs(
+		IN InputRoot REFERENCE, 
+		IN OutputRoot REFERENCE, 
+		IN serviceCode CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF OutputRoot.XMLNSC NAME serviceCode;
+	DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:orgs = orgs;
+	
+	SET outRoot.RqUID = InputRoot.XMLNSC.*[<].MessageUID;
+	SET outRoot.RqTm = InputRoot.XMLNSC.*[<].MessageDateTime;
+	SET outRoot.SPName = InputRoot.XMLNSC.*[<].SystemCode;
+	
+	IF EXISTS(InputRoot.XMLNSC.*[<].RequestData[]) THEN
+		-- Таймаут
+		SET outRoot.Status.ifxca:StatusCode = '-400';
+		SET outRoot.Status.ifxca:Severity 	= 'Error';
+		SET outRoot.Status.ifxca:StatusDesc = 'Ошибка обработки, операция не может быть выполнена';		
+	ELSE 
+		-- Обычный ответ
+		SET outRoot.Status.ifxca:StatusCode = COALESCE(InputRoot.XMLNSC.*[<].ErrorData.ErrorCode, '0');
+		SET outRoot.Status.ifxca:Severity 	= CASE WHEN outRoot.Status.ifxca:StatusCode <> 0 THEN 'Error' ELSE 'Info' END;
+		SET outRoot.Status.ifxca:StatusDesc = InputRoot.XMLNSC.*[<].ErrorData.ErrorDesc;
+	END IF;
+	
+END;
+
+
+/**
+ * Заполняет запрос из МАБПК стандартными значениями
+ **/
+CREATE PROCEDURE FillStandartMDORq(
+		IN InputRoot REFERENCE, 
+		IN OutputRoot REFERENCE, 
+		IN serviceCode CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF OutputRoot.XMLNSC NAME serviceCode;
+	DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+	
+	SET outRoot.RqUID = InputRoot.XMLNSC.*[<].MessageUID;
+	SET outRoot.RqTm = InputRoot.XMLNSC.*[<].MessageDateTime;
+	SET outRoot.SPName = COALESCE(InputRoot.XMLNSC.*[<].SystemCode, 'MABPK');
+	SET outRoot.TargetSPName = InputRoot.XMLNSC.*[<].DestinationSystem;
+	SET outRoot.BankInfo.banks:RegionId = InputRoot.XMLNSC.*[<].FilialCode;
+END;
+
+
+/**
+ * Заполняет ответ в МАБПК стандартными значениями
+ **/
+CREATE PROCEDURE FillStandartNewPragmaRs(
+		IN InputRoot REFERENCE, 
+		IN OutputRoot REFERENCE, 
+		IN serviceCode CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'PragmaEnvelope';
+	DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+	
+	SET outRoot.MessageUID = InputRoot.XMLNSC.*[<].RqUID;
+	SET outRoot.SystemCode = InputRoot.XMLNSC.*[<].SPName;
+	SET outRoot.ServiceCode = serviceCode;
+	SET outRoot.MessageDateTime = InputRoot.XMLNSC.*[<].RqTm;
+	SET outRoot.FilialCode = COALESCE(InputRoot.XMLNSC.*[<].BankInfo.*:RegionId, '00');
+	CREATE FIELD outRoot.ResponseData;
+	
+	DECLARE status CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].Status.*:StatusCode);
+	IF status IS NOT NULL AND status <> '0' THEN	
+		SET outRoot.ErrorData.ErrorCode = InputRoot.XMLNSC.*[<].Status.*:StatusCode;
+		SET outRoot.ErrorData.ErrorDesc = InputRoot.XMLNSC.*[<].Status.*:StatusDesc;
+		IF NOT EXISTS(outRoot.ErrorData.*[]) THEN
+			SET outRoot.ErrorData = NULL;
+		END IF;
+	END IF;
+END;
+
+
+CREATE FUNCTION recodeDocumentTypeFromNewPragma(IN docType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE UPPER(docType)
+		WHEN 'УДОСТ' THEN '1'
+		WHEN 'ПАСПОРТ' THEN '2'
+		WHEN 'ВИДНАЖИТ' THEN '3'
+		WHEN 'УД.ЛИЦА Б/Г' THEN '4'
+		WHEN 'ДОКНЕРЕЗ' THEN '5'
+		WHEN 'СВИД.РОЖД' THEN '6'
+		WHEN 'СЛУДОСТОВЕР' THEN '7'
+		WHEN 'УДВОВ' THEN '8'
+		WHEN 'УДОСТБЖЦ' THEN '9'
+		WHEN 'ЗАГРПАСПОРТ' THEN '15'
+		WHEN 'НЕОПРЕДЕЛЕН' THEN '16'
+		ELSE docType
+	END;
+END;
+
+CREATE FUNCTION recodeDocumentTypeToNewPragma(IN docType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE docType
+		WHEN '1' THEN 'Удост'
+		WHEN '2' THEN 'Паспорт'
+		WHEN '3' THEN 'ВидНаЖит'
+		WHEN '4' THEN 'Уд.лица б/г'
+		WHEN '5' THEN 'ДокНерез'
+		WHEN '6' THEN 'Свид.Рожд'
+		WHEN '7' THEN 'СлУдостовер'
+		WHEN '8' THEN 'УДВоВ'
+		WHEN '9' THEN 'УдостБжц'
+		ELSE docType
+	END;
+END;
+
+CREATE FUNCTION recodeLegalAddressTypeFromNewPragma(IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN 'Р' THEN 'RegAddress'
+		WHEN 'Ф' THEN 'ActualAddress'
+		ELSE addressType
+	END;
+END;
+
+CREATE FUNCTION recodeAddressTypeFromNewPragma(IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN 'Р' THEN 'Primary'
+		WHEN 'Ф' THEN 'Home'
+		WHEN 'П' THEN 'Secondary'
+		WHEN 'О' THEN 'Work'
+		ELSE addressType
+	END;
+END;
+
+
+CREATE FUNCTION recodeAddressTypeToNewPragma(IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN 'Primary' THEN 'Р'
+		WHEN 'Home' THEN 'Ф'
+		WHEN 'Secondary' THEN 'П'
+		WHEN 'Work' THEN 'О'
+		ELSE addressType
+	END;
+END;
+
+CREATE FUNCTION recodeMaritalStatusFromNewPragma(IN maritalStatus CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE maritalStatus
+		WHEN '1' THEN 'Single'
+		WHEN '2' THEN 'Married'
+		WHEN '3' THEN 'Widow'
+		WHEN '4' THEN 'Divorced'
+		ELSE maritalStatus
+	END;
+END;
+
+CREATE FUNCTION recodeMaritalStatusToNewPragma(IN maritalStatus CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE maritalStatus
+		WHEN 'Single' THEN '1'
+		WHEN 'Married' THEN '2'
+		WHEN 'Widow' THEN '3'
+		WHEN 'Divorced' THEN '4'
+		ELSE maritalStatus
+	END;
+END;
+
+CREATE FUNCTION recodeContactTypeFromNewPragma(IN contactType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE contactType
+		WHEN 'Дом' THEN 'Home'
+		WHEN 'Рабоч' THEN 'Work'
+		WHEN 'Мобил' THEN 'Mobile'
+		WHEN 'Факс' THEN 'DayFax'
+		WHEN 'ДомФакт' THEN 'DayPhone'
+		ELSE contactType
+	END;
+END;
+
+CREATE FUNCTION recodeContactTypeToNewPragma(IN contactType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE contactType
+		WHEN 'Home' THEN 'Дом'
+		WHEN 'DayPhone' THEN 'ДомФакт'
+		WHEN 'Work' THEN 'Рабоч'
+		WHEN 'Mobile' THEN 'Мобил'
+		WHEN 'DayFax' THEN 'Факс'
+		ELSE contactType
+	END;
+END;
+
+CREATE FUNCTION recodeSubjectTypeFromNewPragma(IN subjectType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE subjectType
+		WHEN 'Ч' THEN 'PERS'
+		WHEN 'Ю' THEN 'ORG'
+		ELSE 'CRED'
+	END;
+END;
+
+CREATE FUNCTION recodeSubjectTypeToNewPragma(IN subjectType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE subjectType
+		WHEN 'PERS' THEN 'Ч'
+		WHEN 'ORG' THEN 'Ю'
+		ELSE '-'
+	END;
+END;
+
+CREATE FUNCTION recodeAcceptanceStatusFromNewPragma(IN accStatus CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE UPPER(accStatus)
+		WHEN 'Y' THEN '1'
+		WHEN 'N' THEN '2'
+		WHEN 'TRUE' THEN '1' 	
+		WHEN 'FALSE' THEN '2' 
+		ELSE accStatus
+	END;
+END;
+
+CREATE FUNCTION recodeAcceptanceStatusToNewPragma(IN accStatus CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE UPPER(accStatus)
+		WHEN 'Y' THEN 'true'
+		WHEN 'N' THEN 'false'
+		WHEN '1' THEN 'true' 	
+		WHEN '2' THEN 'false' 
+		ELSE accStatus
+	END;
+END;
+
+CREATE FUNCTION recodeBooleanFromNewPragma(IN str CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE UPPER(str)
+		WHEN 'TRUE' THEN '1'
+		WHEN 'FALSE' THEN '0'
+		ELSE str
+	END;
+END;
+
+CREATE FUNCTION recodeBooleanForNewPragma(IN str CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE UPPER(str)
+		WHEN '1' THEN 'true'
+		WHEN '0' THEN 'false'
+		ELSE str
+	END;
+END;
+
+CREATE FUNCTION recodeProductTypeForPragma(IN pType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE pType
+		WHEN '1' THEN '01'
+		WHEN '2' THEN '02'
+		WHEN '3' THEN '03'
+		WHEN '4' THEN '04'
+		ELSE pType
+	END;
+END;
+
+CREATE FUNCTION recodeRepaymentTypeForPragma(IN rpType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE rpType
+		WHEN 'A' THEN '1'
+		WHEN 'D' THEN '2'
+		ELSE rpType
+	END;
+END;
+
+CREATE FUNCTION parseNewPragmaLinkType(IN linkType CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF CONTAINS(linkType,'.') THEN
+		RETURN SUBSTRING(linkType BEFORE '.');
+	ELSE 
+		RETURN linkType;
+	END IF;
+END;
+
+CREATE FUNCTION parseNewPragmaLinkSubType(IN linkType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN SUBSTRING(linkType AFTER '.');
+END;
+
+-- integrationSystem - код системы, идентификатор в которой передается в Person.IntegrationID
+CREATE PROCEDURE transformPersonDataFromNewPragmaToESB(IN inRef REFERENCE, IN outRef REFERENCE, IN integrationSystem CHARACTER)
+BEGIN
+	SET outRef.inds:PersonName.inds:LastName	= inRef.LastName;
+	SET outRef.inds:PersonName.inds:FirstName	= parseFormerName(inRef.FirstNames);
+	SET outRef.inds:PersonName.inds:MiddleName	= parseLatterName(inRef.FirstNames);
+
+	IF EXISTS(inRef.Addresses.Address[]) THEN
+		CREATE FIELD outRef.inds:ContactInfo;
+	END IF;
+	DECLARE outPostAddr REFERENCE TO outRef;
+	FOR inAddress AS inRef.Addresses.Address[] DO  
+		CREATE LASTCHILD OF outRef.inds:ContactInfo AS outPostAddr NAMESPACE ifxca NAME 'PostAddr';
+		SET outPostAddr.ifxca:Addr1			= inAddress.Unstructured;
+		SET outPostAddr.ifxca:City			= inAddress.City;
+		SET outPostAddr.ifxca:StateProv		= inAddress.Region;
+		SET outPostAddr.ifxca:Area			= inAddress.County;
+		SET outPostAddr.ifxca:PostalCode	= inAddress.ZipCode;
+		SET outPostAddr.ifxca:Country		= inAddress.Country;
+		SET outPostAddr.ifxca:AddrType		= recodeAddressTypeFromNewPragma(inAddress.AddressType);
+		SET outPostAddr.ifxca:Street		= inAddress.Street;
+		SET outPostAddr.ifxca:House			= inAddress.House;
+		SET outPostAddr.ifxca:Building		= inAddress.Building;
+		SET outPostAddr.ifxca:Flat			= inAddress.Apartment;
+	END FOR;
+	
+	SET outRef.inds:BirthDt			= inRef.PersonInformation.BirthDate;
+	SET outRef.inds:Gender			= inRef.PersonInformation.Gender;
+	SET outRef.inds:MaritalStatus	= recodeMaritalStatusFromNewPragma(inRef.PersonInformation.MaritalStatus);
+	
+	IF EXISTS(inRef.Documents.Document[]) THEN
+		CREATE FIELD outRef.inds:IdentityCards;
+	END IF;
+	DECLARE outIdentityCard REFERENCE TO outRef;
+	FOR inDocument AS inRef.Documents.Document[] DO
+		-- часть объектов Document маппится иначе (см. ниже)
+		IF COALESCE(inDocument.RegCountry, '') = '' OR COALESCE(inDocument.RegDate, '') = '' THEN
+			CREATE LASTCHILD OF outRef.inds:IdentityCards AS outIdentityCard NAMESPACE inds NAME 'IdentityCard';
+			SET outIdentityCard.inds:IdType		= recodeDocumentTypeFromNewPragma(inDocument.DocumentType);
+			SET outIdentityCard.inds:IdNum		= inDocument.Number;
+			SET outIdentityCard.inds:IssueDt	= inDocument.IssueDate;
+			SET outIdentityCard.inds:IssuedBy	= inDocument.Issuer;
+			SET outIdentityCard.inds:Code		= inDocument.IssuerCode;
+			SET outIdentityCard.inds:ValidTo	= inDocument.ValidDate;
+		END IF;
+	END FOR;
+	IF NOT EXISTS(outRef.inds:IdentityCards.*:*[]) THEN
+		SET outRef.inds:IdentityCards	= NULL;
+	END IF;
+	
+	SET outRef.inds:BirthPlace		= inRef.PersonInformation.BirthPlace;
+	SET outRef.inds:Resident		= inRef.PersonInformation.Citizenship;
+	SET outRef.inds:Citizenship		= inRef.PersonInformation.Country;
+	
+	IF inRef.Id <> '' THEN
+		CREATE LASTCHILD OF outRef NAME 'PersonIdExt';
+		SET outRef.PersonIdExt[<].Key	= 'MABPK';
+		SET outRef.PersonIdExt[<].Value	= inRef.Id;
+	END IF;
+	IF inRef.IntegrationID <> '' THEN
+		CREATE LASTCHILD OF outRef NAME 'PersonIdExt';
+		SET outRef.PersonIdExt[<].Key	= integrationSystem;
+		SET outRef.PersonIdExt[<].Value	= inRef.IntegrationID;
+	END IF;
+	IF inRef.PersonInformation.IIN <> '' THEN
+		CREATE LASTCHILD OF outRef NAME 'PersonIdExt';
+		SET outRef.PersonIdExt[<].Key	= 'IIN';
+		SET outRef.PersonIdExt[<].Value	= inRef.PersonInformation.IIN;
+	END IF;
+	IF inRef.PersonInformation.RNN <> '' THEN
+		CREATE LASTCHILD OF outRef NAME 'PersonIdExt';
+		SET outRef.PersonIdExt[<].Key	= 'RNN';
+		SET outRef.PersonIdExt[<].Value	= inRef.PersonInformation.RNN;
+	END IF;
+	IF inRef.PersonInformation.SIC <> '' THEN
+		CREATE LASTCHILD OF outRef NAME 'PersonIdExt';
+		SET outRef.PersonIdExt[<].Key	= 'SIC';
+		SET outRef.PersonIdExt[<].Value	= inRef.PersonInformation.SIC;
+	END IF;
+	IF inRef.PersonInformation.UNCP <> '' THEN
+		CREATE LASTCHILD OF outRef NAME 'PersonIdExt';
+		SET outRef.PersonIdExt[<].Key	= 'WAY';
+		SET outRef.PersonIdExt[<].Value	= inRef.PersonInformation.UNCP;
+	END IF;
+	IF inRef.UNK <> '' THEN
+		CREATE LASTCHILD OF outRef NAME 'PersonIdExt';
+		SET outRef.PersonIdExt[<].Key	= 'UNK';
+		SET outRef.PersonIdExt[<].Value	= inRef.UNK;
+	END IF;
+	
+	--SET outRef.ClientType			= inRef.PersonInformation.Subject;
+	SET outRef.ClientType			= 1;
+	SET outRef.SecretWord			= inRef.AdditionalInformation.CodeWord;
+	
+	IF EXISTS(inRef.Contacts.Contact[]) THEN
+		CREATE FIELD outRef.Phones;
+	END IF;
+	DECLARE outPhone REFERENCE TO outRef;
+	DECLARE emailAddr CHARACTER;
+	DECLARE emailIsAllowed CHARACTER;
+	FOR inContact AS inRef.Contacts.Contact[] DO  
+		DECLARE recodedContactType CHARACTER recodeContactTypeFromNewPragma(inContact.Type);
+		
+		IF recodedContactType = 'email' THEN
+			SET emailAddr			= inContact.Contact;
+			SET emailIsAllowed		= inContact.IsAllowed;
+		ELSE
+			CREATE LASTCHILD OF outRef.Phones AS outPhone NAME 'Phone';
+			SET outPhone.PhoneType		= recodedContactType;
+			SET outPhone.PhoneNum		= formatPhoneForESB(FIELDVALUE(inContact.Contact));
+			SET outPhone.Allowed		= inContact.IsAllowed;
+			SET outPhone.From			= inContact.From;
+			SET outPhone.Till			= inContact.Till;
+			SET outPhone.PhoneProvider	= inContact.Operator;
+			SET outPhone.IsActive		= inContact.IsActive;
+		END IF;
+	END FOR;
+	
+	SET outRef.DateOpen					= inRef.AdditionalInformation.Created;
+	
+	IF emailAddr <> '' THEN
+		SET outRef.EMails.EMail.EMailAddr	= emailAddr;
+		SET outRef.EMails.EMail.Allowed		= emailIsAllowed;
+	END IF;
+	
+	SET outRef.ClientCategory		= inRef.AdditionalInformation.Category;
+	SET outRef.LatLastName			= parseFormerName(inRef.ForeignNames);
+	SET outRef.LatFirstName			= parseLatterName(inRef.ForeignNames);
+	
+	IF EXISTS(inRef.Links.Link[]) THEN
+		CREATE FIELD outRef.RelPersons;
+	END IF;
+	DECLARE outRelPerson REFERENCE TO outRef;
+	FOR inLink AS inRef.Links.Link[] DO  
+		CREATE LASTCHILD OF outRef.RelPersons AS outRelPerson NAME 'RelPerson';
+		
+		IF inLink.LinkedSubjectId <> '' THEN
+			SET outRelPerson.RelPersonId.Key	= 'MABPK';
+			SET outRelPerson.RelPersonId.Value	= inLink.LinkedSubjectId;
+		END IF;
+		
+		SET outRelPerson.RelationshipType		= parseNewPragmaLinkType(inLink.LinkType);
+		SET outRelPerson.RelationshipSubtype	= parseNewPragmaLinkSubType(inLink.LinkType);
+		SET outRelPerson.SubjectType			= recodeSubjectTypeFromNewPragma(COALESCE(inLink.LinkedSubjecttype, 'Ч'));
+		SET outRelPerson.StartDate				= inLink.StartDate;
+		SET outRelPerson.EndDate				= inLink.FinishDate;
+	END FOR;
+	
+	SET outRef.IsClient 						= inRef.IsClient;
+	
+	IF inRef.Branch <> '' THEN
+		SET outRef.FirstContactBankInfo.banks:BranchId = inRef.Branch;
+	END IF;
+	
+	SET outRef.IsForeignPP			= inRef.PersonInformation.IsForeignPublicPerson;
+	SET outRef.PersonStatus			= inRef.PersonInformation.ContactStatus;
+	SET outRef.Segment				= inRef.PersonInformation.Segment;
+	SET outRef.StatDivision			= '';
+	SET outRef.ABSManager			= inRef.PersonInformation.ManagerIntID;
+	
+	IF EXISTS(inRef.Documents.Document[]) THEN
+		CREATE FIELD outRef.RegData;
+	END IF;
+	DECLARE outRegRecord REFERENCE TO outRef;
+	FOR inDocument AS inRef.Documents.Document[] DO
+		-- часть объектов Document маппится иначе (см. выше)
+		IF inDocument.RegCountry <> '' AND inDocument.RegDate <> '' THEN
+			CREATE LASTCHILD OF outRef.RegData AS outRegRecord NAME 'RegRecord';
+			SET outRegRecord.RegCountry		= inDocument.RegCountry;
+			SET outRegRecord.RegNumber		= inDocument.Number;
+			SET outRegRecord.RegPlace		= inDocument.RegPlace;
+			SET outRegRecord.RegAgency		= inDocument.IssuerCode;
+			SET outRegRecord.RegDate		= inDocument.RegDate;
+			SET outRegRecord.ExpDate		= inDocument.ValidDate;
+			SET outRegRecord.ReIssueDate	= inDocument.ReuseDate;
+			SET outRegRecord.CertDate		= '';
+			
+			IF inDocument.NativeNumber <> '' THEN
+				SET outRegRecord.IdRec.IdKey	= 'ID';
+				SET outRegRecord.IdRec.IdValue	= inDocument.NativeNumber;
+			END IF;
+		END IF;
+	END FOR;
+	IF NOT EXISTS(outRef.RegData.*[]) THEN
+		SET outRef.RegData	= NULL;
+	END IF;
+	
+	IF EXISTS(inRef.Procuracies.Procuracy[]) THEN
+		CREATE FIELD outRef.AuthorityList;
+	END IF;
+	DECLARE outAuthority REFERENCE TO outRef;
+	FOR inProcuracy AS inRef.Procuracies.Procuracy[] DO
+		CREATE LASTCHILD OF outRef.AuthorityList AS outAuthority NAME 'Authority';
+		SET outAuthority.IsActive		= '';
+		SET outAuthority.WarrantNumber	= inProcuracy.Number;
+		SET outAuthority.RegDate		= inProcuracy.RegistrationDate;
+		SET outAuthority.IssueDate		= inProcuracy.StartDate;
+		SET outAuthority.ExpDate		= inProcuracy.FinishDate;
+		
+		IF inProcuracy.SubjectId <> '' THEN
+			SET outAuthority.AuthPersonId.Key	= 'MABPK';
+			SET outAuthority.AuthPersonId.Value	= inProcuracy.SubjectId;
+		END IF;
+		
+		SET outAuthority.NotaryInfo.NotaryName			= inProcuracy.NotaryName;
+		SET outAuthority.NotaryInfo.NotaryAddress		= inProcuracy.NotaryAddress;
+		SET outAuthority.NotaryInfo.NotaryLicense		= inProcuracy.NotaryLicenseNumber;
+		SET outAuthority.NotaryInfo.NotaryLicenseDate	= inProcuracy.NotaryDate;
+		SET outAuthority.NotaryInfo.NotaryPhone			= inProcuracy.NotaryPhone;
+		IF NOT EXISTS(outAuthority.NotaryInfo.*[]) THEN
+			SET outAuthority.NotaryInfo = NULL;
+		END IF;
+
+		DECLARE outAuthAccount REFERENCE TO outAuthority;
+		FOR inAccount AS inProcuracy.ProcuracyAccounts.ProcuracyAccount[] DO
+			CREATE LASTCHILD OF outAuthority AS outAuthAccount NAME 'AuthAccount';
+			
+			SET outAuthAccount.AccountId		= inAccount.AccountNumber;
+			FOR inCreditential AS inProcuracy.Creditentials.Creditential[] DO
+				CREATE LASTCHILD OF outAuthAccount NAME 'Permission' VALUE inCreditential.CreditentialType;
+			END FOR;
+		END FOR;
+
+		SET outAuthority.NotaryDate	= inProcuracy.NotaryDate;
+	END FOR;
+	
+	SET outRef.IsAccepted 			= recodeAcceptanceStatusFromNewPragma(inRef.IsAccepted);
+	SET outRef.ClientJobTitle		= inRef.AdditionalInformation.WorkPositionHeld;
+	SET outRef.ClientWorkPlace		= inRef.AdditionalInformation.WorkPlace;
+	SET outRef.ClientWorkPlaceCat	= inRef.AdditionalInformation.EmployerCategory;
+	SET outRef.WorkPositionType		= inRef.AdditionalInformation.WorkPositionType;
+	SET outRef.Comment				= inRef.AdditionalInformation.Comment;
+	
+END;
+
+CREATE PROCEDURE transformPersonDataFromESBToNewPragma(IN inRef REFERENCE, IN outRef REFERENCE, IN index INTEGER)
+BEGIN
+	DECLARE id CHARACTER;
+	DECLARE integrationID CHARACTER;
+	DECLARE rnn CHARACTER;
+	DECLARE iin CHARACTER;
+	DECLARE sic CHARACTER;
+	DECLARE uncp CHARACTER;
+	DECLARE unk CHARACTER;
+	
+	FOR inPersonIdExt AS inRef.PersonIdExt[] DO
+		CASE inPersonIdExt.Key
+		WHEN 'MABPK' THEN
+			SET id = inPersonIdExt.Value;
+		WHEN 'CRMROZN' THEN
+			SET integrationID = inPersonIdExt.Value;
+		WHEN 'CIF' THEN
+			SET integrationID = inPersonIdExt.Value;
+		WHEN 'RNN' THEN
+			SET rnn = inPersonIdExt.Value;
+		WHEN 'IIN' THEN
+			SET iin = inPersonIdExt.Value;
+		WHEN 'SIC' THEN
+			SET sic = inPersonIdExt.Value;
+		WHEN 'WAY' THEN
+			SET uncp = inPersonIdExt.Value;
+		WHEN 'UNK' THEN
+			SET unk = inPersonIdExt.Value;
+		END CASE;
+	END FOR;
+	
+	IF id IS NULL AND index IS NOT NULL THEN 
+		SET id = '-' || CAST(index AS CHARACTER);
+	END IF;
+
+	SET outRef.Id				= id;
+	SET outRef.IntegrationID	= integrationID;
+	SET outRef.IsAccepted		= recodeAcceptanceStatusToNewPragma(inRef.IsAccepted);
+	SET outRef.IsClient			= inRef.IsClient;
+	SET outRef.UNK				= unk;
+	SET outRef.Branch			= FIELDVALUE(inRef.FirstContactBankInfo.*:BranchId);
+	SET outRef.BranchName		= '';
+	SET outRef.LastName			= FIELDVALUE(inRef.*:PersonName.*:LastName);
+	SET outRef.FirstNames		= combineFirstNames(inRef.*:PersonName.*:FirstName,
+		inRef.*:PersonName.*:MiddleName);
+	SET outRef.ForeignNames		= combineFirstNames(inRef.LatLastName, inRef.LatFirstName);
+	
+	SET outRef.PersonInformation.Gender					= FIELDVALUE(inRef.*:Gender);
+	SET outRef.PersonInformation.BirthDate				= FIELDVALUE(inRef.*:BirthDt);
+	SET outRef.PersonInformation.BirthPlace				= FIELDVALUE(inRef.*:BirthPlace);
+	SET outRef.PersonInformation.Country				= FIELDVALUE(inRef.*:Citizenship);
+	SET outRef.PersonInformation.RegionCode				= FIELDVALUE(inRef.*:RegionCode);
+	SET outRef.PersonInformation.Citizenship			= FIELDVALUE(inRef.*:Resident);
+	SET outRef.PersonInformation.IsForeignPublicPerson	= inRef.IsForeignPP;
+	SET outRef.PersonInformation.RNN					= rnn;
+	SET outRef.PersonInformation.IIN					= iin;
+	SET outRef.PersonInformation.TaxInspectionCode		= FIELDVALUE(inRef.*:TaxInspCode);
+	SET outRef.PersonInformation.GeoCode				= FIELDVALUE(inRef.*:GeoCode);
+	SET outRef.PersonInformation.ContactStatus			= inRef.PersonStatus;
+	SET outRef.PersonInformation.Segment				= inRef.Segment;
+	SET outRef.PersonInformation.SIC					= sic;
+	SET outRef.PersonInformation.ManagerIntID			= inRef.ABSManager;
+	SET outRef.PersonInformation.Subject				= inRef.ClientType;
+	SET outRef.PersonInformation.MaritalStatus			= recodeMaritalStatusToNewPragma(inRef.MaritalStatus);
+	SET outRef.PersonInformation.UNCP					= uncp;
+
+	CREATE FIELD outRef.Contacts;
+	DECLARE outContact REFERENCE TO outRef;
+	FOR inPhone AS inRef.Phones.Phone[] DO
+		CREATE LASTCHILD OF outRef.Contacts AS outContact NAME 'Contact';
+		SET outContact.Type			= recodeContactTypeToNewPragma(inPhone.PhoneType);
+		SET outContact.Contact		= formatPhoneForNewPragma(FIELDVALUE(inPhone.PhoneNum));
+		SET outContact.Operator		= inPhone.PhoneProvider;
+		SET outContact.IsAllowed	= inPhone.Allowed;
+		SET outContact.IsActive		= inPhone.IsActive;
+		SET outContact.From			= inPhone.From;
+		SET outContact.Till			= inPhone.Till;
+	END FOR;
+	FOR inEMail AS inRef.EMails.EMail[] DO
+		CREATE LASTCHILD OF outRef.Contacts AS outContact NAME 'Contact';
+		SET outContact.Type			= 'email';
+		SET outContact.Contact		= inEMail.EMailAddr;
+		SET outContact.IsAllowed	= inEMail.Allowed;
+		SET outContact.IsActive		= inEMail.Active;
+	END FOR;
+
+	SET outRef.AdditionalInformation.Category			= inRef.ClientCategory;
+	SET outRef.AdditionalInformation.WorkPlace			= inRef.ClientWorkPlace;
+	SET outRef.AdditionalInformation.WorkPositionHeld	= inRef.ClientJobTitle;
+	SET outRef.AdditionalInformation.EmployerCategory	= inRef.ClientWorkPlaceCat;
+	SET outRef.AdditionalInformation.IncomeSource		= inRef.IncomeSource;
+	SET outRef.AdditionalInformation.EconomicSector		= inRef.EcSector;
+	SET outRef.AdditionalInformation.WorkPositionType	= inRef.WorkPositionType;	
+	SET outRef.AdditionalInformation.CodeWord			= inRef.SecretWord;
+	SET outRef.AdditionalInformation.Created			= '';
+	SET outRef.AdditionalInformation.Modified			= inRef.DTModify;
+	SET outRef.AdditionalInformation.Comment			= inRef.Comment;
+
+	CREATE FIELD outRef.Documents;
+	DECLARE outDocument REFERENCE TO outRef.Documents;
+	FOR inIdentityCard AS inRef.*:IdentityCards.*:IdentityCard[] DO
+		CREATE LASTCHILD OF outRef.Documents AS outDocument NAME 'Document';
+		SET outDocument.DocumentType		= recodeDocumentTypeToNewPragma(inIdentityCard.*:IdType);
+		SET outDocument.Number				= FIELDVALUE(inIdentityCard.*:IdNum);
+		SET outDocument.Issuer				= FIELDVALUE(inIdentityCard.*:IssuedBy);
+		SET outDocument.IssueDate			= FIELDVALUE(inIdentityCard.*:IssueDt);
+		SET outDocument.ValidDate			= FIELDVALUE(inIdentityCard.*:ValidTo);
+		SET outDocument.IssuerCode			= FIELDVALUE(inIdentityCard.*:Code);
+	END FOR;
+	FOR inRegRecord AS inRef.RegData.RegRecord[] DO
+		CREATE LASTCHILD OF outRef.Documents AS outDocument NAME 'Document';
+		SET outDocument.RegCountry			= inRegRecord.RegCountry;
+		SET outDocument.RegPlace			= inRegRecord.RegPlace;
+		SET outDocument.RegDate				= inRegRecord.RegDate;
+		SET outDocument.ReuseDate			= inRegRecord.ReIssueDate;
+		DECLARE nativeNumber CHARACTER;
+		FOR inIdRec AS inRegRecord.IdRec[] DO
+			IF inIdRec.IdKey = 'IDC' THEN
+				SET nativeNumber	= inIdRec.IdValue;
+			END IF;
+		END FOR;
+		SET outDocument.NativeNumber		= nativeNumber;
+	END FOR;
+
+	CREATE FIELD outRef.Addresses;
+	DECLARE outAddress REFERENCE TO outRef.Addresses;
+	FOR inPostAddress AS inRef.*:ContactInfo.*:PostAddr[] DO
+		CREATE LASTCHILD OF outRef.Addresses AS outAddress NAME 'Address';
+		SET outAddress.AddressType			= recodeAddressTypeToNewPragma(inPostAddress.*:AddrType);
+		SET outAddress.Country				= FIELDVALUE(inPostAddress.*:Country);
+		SET outAddress.ZipCode				= FIELDVALUE(inPostAddress.*:PostalCode);
+		SET outAddress.County				= FIELDVALUE(inPostAddress.*:Area);
+		SET outAddress.Region				= FIELDVALUE(inPostAddress.*:StateProv);
+		SET outAddress.City					= FIELDVALUE(inPostAddress.*:City);
+		SET outAddress.Settlement			= FIELDVALUE(inPostAddress.*:Place);
+		SET outAddress.Street				= FIELDVALUE(inPostAddress.*:Street);
+		SET outAddress.House				= FIELDVALUE(inPostAddress.*:House);
+		SET outAddress.Building				= FIELDVALUE(inPostAddress.*:Buiding);
+		SET outAddress.Apartment			= FIELDVALUE(inPostAddress.*:Flat);
+		SET outAddress.Unstructured			= FIELDVALUE(inPostAddress.*:Addr1);
+		SET outAddress.DateIn				= FIELDVALUE(inPostAddress.*:StartDt);
+		SET outAddress.DateOut				= FIELDVALUE(inPostAddress.*:EndDt);
+	END FOR;
+	
+	CREATE FIELD outRef.Branches;
+	DECLARE outBranch REFERENCE TO outRef.Branches;
+	FOR inBranch AS inRef.Branch.Branches[] DO
+		CREATE LASTCHILD OF outRef.Branches AS outBranch NAME 'Branch';
+		SET outBranch.BranchCode	= FIELDVALUE(inBranch.BankInfo.*:BranchId);
+		SET outBranch.IsResponsible	= inBranch.IsResp;
+		SET outBranch.StartDate		= inBranch.StartDate;
+		SET outBranch.FinishDate	= inBranch.EndDate;
+	END FOR;
+
+	CREATE FIELD outRef.Links;
+	DECLARE outLink REFERENCE TO outRef.Links;
+	FOR inRelPerson AS inRef.RelPersons.RelPerson[] DO
+		CREATE LASTCHILD OF outRef.Links AS outLink NAME 'Link';
+		DECLARE linkedSubjectId CHARACTER;
+		FOR inRelPersonId AS inRelPerson.RelPersonId[] DO
+			IF inRelPersonId.Key = 'MABPK' THEN
+				SET linkedSubjectId	= inRelPersonId.Value;
+			END IF;
+		END FOR;
+		SET outLink.LinkedSubjectId			= linkedSubjectId;
+		SET outLink.LinkedSubjectType		= inRelPerson.RelationshipType || '.' || inRelPerson.RelationshipSubType;
+		SET outLink.LinkType				= recodeSubjectTypeToNewPragma(inRelPerson.SubjectType);
+		SET outLink.StartDate				= inRelPerson.StartDate;
+		SET outLink.FinishDate				= inRelPerson.EndDate;
+	END FOR;
+	
+	CREATE FIELD outRef.Procuracies;
+	DECLARE outProcuracy REFERENCE TO outRef.Procuracies;
+	FOR inAuthority AS inRef.AuthorityList.Authority[] DO
+		CREATE LASTCHILD OF outRef.Procuracies AS outProcuracy NAME 'Procuracy';
+		SET outProcuracy.Number				= inAuthority.WarrantNumber;
+		SET outProcuracy.RegistrationDate	= inAuthority.RegDate;
+		DECLARE subjectId CHARACTER;
+		FOR inAuthPersonId AS inAuthority.AuthPersonId[] DO
+			IF inAuthPersonId.Key = 'MABPK' THEN
+				SET subjectId	= inAuthPersonId.Value;
+			END IF;
+		END FOR;
+		SET outProcuracy.SubjectId				= subjectId;
+		SET outProcuracy.StartDate				= inAuthority.IssueDate;
+		SET outProcuracy.FinishDate				= inAuthority.ExpDate;
+		SET outProcuracy.NotaryDate				= inAuthority.NotaryInfo.NotaryLicenseDate;
+		SET outProcuracy.NotaryAddress			= inAuthority.NotaryInfo.NotaryAddress;
+		SET outProcuracy.NotaryLicenseNumber	= inAuthority.NotaryInfo.NotaryLicense;
+		SET outProcuracy.NotaryPhone			= inAuthority.NotaryInfo.NotaryPhone;
+		SET outProcuracy.NotaryName				= inAuthority.NotaryInfo.NotaryName;
+		
+		CREATE FIELD outProcuracy.ProcuracyAccounts;
+		FOR inAccountId AS inAuthority.AuthAccount.AccountId[] DO
+			CREATE LASTCHILD OF outProcuracy.ProcuracyAccounts NAME 'ProcuracyAccount';
+			SET outProcuracy.ProcuracyAccounts.ProcuracyAccount[<].AccountNumber	= inAccountId;
+		END FOR;
+		CREATE FIELD outProcuracy.Creditentials;
+		FOR inPermission AS inAuthority.AuthAccount.Permission[] DO
+			CREATE LASTCHILD OF outProcuracy.Creditentials NAME 'Creditential';
+			SET outProcuracy.Creditentials.Creditential[<].CreditentialType			= inPermission;
+		END FOR;
+	END FOR;
+	
+END;
+
+CREATE FUNCTION formatPhoneForESB(IN phone CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN '7' || RIGHT(cleanupPhoneNum(phone),10);
+END;
+
+CREATE FUNCTION formatPhoneForNewPragma(IN phone CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN RIGHT(cleanupPhoneNum(phone),10);
+END;
+
+DECLARE divisionCodeMapping SHARED ROW;
+
+/**
+ * Маппинг идентификаторов подразделений (старый/новый)
+ **/
+CREATE PROCEDURE CreateDivisionCodeMapping()
+BEGIN
+	IF NOT EXISTS(divisionCodeMapping.Division[])THEN
+		
+		SET divisionCodeMapping.Division[] = LIST {
+
+				ROW('TXB99' AS OldDivCode, '399' AS NewDivCode),
+				ROW('547' AS OldDivCode, '274' AS NewDivCode , 
+						  ROW( 
+						  		LIST {
+							  		ROW('876' AS OldSubdivCode, '2' AS NewSubdivCode),
+							  		ROW('A92' AS OldSubdivCode, '6' AS NewSubdivCode),
+							  		ROW('302' AS OldSubdivCode, '7' AS NewSubdivCode) 
+						  		} AS Subdivision[]
+						  ) AS SubdivMap )
+						  , 
+						  
+				ROW('813' AS OldDivCode, '287' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('984' AS OldSubdivCode, '01' AS NewSubdivCode),
+							  		ROW('985' AS OldSubdivCode, '02' AS NewSubdivCode)
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+				
+				ROW('986' AS OldDivCode, '288' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('987' AS OldSubdivCode, '01' AS NewSubdivCode),
+							  		ROW('988' AS OldSubdivCode, '02' AS NewSubdivCode)
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('989' AS OldDivCode, '289' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('990' AS OldSubdivCode, '01' AS NewSubdivCode)
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('TXB00' AS OldDivCode, '300' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('248' AS OldSubdivCode, '40' AS NewSubdivCode),
+							  		ROW('963' AS OldSubdivCode, '25' AS NewSubdivCode),
+							  		ROW('886' AS OldSubdivCode, '24' AS NewSubdivCode),
+							  		ROW('103' AS OldSubdivCode, '31' AS NewSubdivCode), 
+							  		ROW('a02' AS OldSubdivCode, '01' AS NewSubdivCode),
+							  		ROW('A75' AS OldSubdivCode, '02' AS NewSubdivCode),
+							  		ROW('a04' AS OldSubdivCode, '03' AS NewSubdivCode),
+							  		ROW('a03' AS OldSubdivCode, '04' AS NewSubdivCode),							  		
+							  		ROW('a36' AS OldSubdivCode, '05' AS NewSubdivCode),
+							  		ROW('a37' AS OldSubdivCode, '06' AS NewSubdivCode),
+							  		ROW('a38' AS OldSubdivCode, '07' AS NewSubdivCode),							  		
+							  		ROW('a46' AS OldSubdivCode, '08' AS NewSubdivCode),
+							  		ROW('A74' AS OldSubdivCode, '09' AS NewSubdivCode),
+							  		ROW('A66' AS OldSubdivCode, '10' AS NewSubdivCode),
+							  		ROW('A72' AS OldSubdivCode, '11' AS NewSubdivCode),							  		
+							  		ROW('A86' AS OldSubdivCode, '12' AS NewSubdivCode),
+							  		ROW('A85' AS OldSubdivCode, '13' AS NewSubdivCode),
+							  		ROW('A90' AS OldSubdivCode, '14' AS NewSubdivCode),
+							  		ROW('A95' AS OldSubdivCode, '15' AS NewSubdivCode),							  		
+							  		ROW('А96' AS OldSubdivCode, '18' AS NewSubdivCode),
+							  		ROW('A99' AS OldSubdivCode, '19' AS NewSubdivCode),
+							  		ROW('A97' AS OldSubdivCode, '20' AS NewSubdivCode),
+							  		ROW('a14' AS OldSubdivCode, '56' AS NewSubdivCode),							  		
+							  		ROW('A98' AS OldSubdivCode, '22' AS NewSubdivCode),
+							  		ROW('a11' AS OldSubdivCode, '57' AS NewSubdivCode),
+							  		ROW('a13' AS OldSubdivCode, '58' AS NewSubdivCode),
+							  		ROW('A15' AS OldSubdivCode, '59' AS NewSubdivCode),							  		
+							  		ROW('A18' AS OldSubdivCode, '60' AS NewSubdivCode),
+							  		ROW('A19' AS OldSubdivCode, '61' AS NewSubdivCode),
+							  		ROW('A23' AS OldSubdivCode, '62' AS NewSubdivCode),
+							  		ROW('A21' AS OldSubdivCode, '79' AS NewSubdivCode),							  		
+							  		ROW('A22' AS OldSubdivCode, '63' AS NewSubdivCode),
+							  		ROW('A27' AS OldSubdivCode, '65' AS NewSubdivCode),
+							  		ROW('a26' AS OldSubdivCode, '66' AS NewSubdivCode),
+							  		ROW('806' AS OldSubdivCode, '81' AS NewSubdivCode),							  		
+							  		ROW('A32' AS OldSubdivCode, '67' AS NewSubdivCode),
+							  		ROW('807' AS OldSubdivCode, '80' AS NewSubdivCode),
+							  		ROW('A43' AS OldSubdivCode, '68' AS NewSubdivCode),
+							  		ROW('a45' AS OldSubdivCode, '69' AS NewSubdivCode),							  		
+							  		ROW('a50' AS OldSubdivCode, '70' AS NewSubdivCode),
+							  		ROW('a51' AS OldSubdivCode, '71' AS NewSubdivCode),
+							  		ROW('A69' AS OldSubdivCode, '72' AS NewSubdivCode),
+							  		ROW('A77' AS OldSubdivCode, '73' AS NewSubdivCode),							  		
+							  		ROW('A83' AS OldSubdivCode, '76' AS NewSubdivCode),
+							  		ROW('A91' AS OldSubdivCode, '77' AS NewSubdivCode),
+							  		ROW('A88' AS OldSubdivCode, '78' AS NewSubdivCode),
+							  		ROW('A93' AS OldSubdivCode, '82' AS NewSubdivCode),							  		
+							  		ROW('A94' AS OldSubdivCode, '83' AS NewSubdivCode),
+							  		ROW('A80' AS OldSubdivCode, '84' AS NewSubdivCode),
+							  		ROW('A92' AS OldSubdivCode, '85' AS NewSubdivCode),
+							  		ROW('A93' AS OldSubdivCode, '82' AS NewSubdivCode)
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('TXB06' AS OldDivCode, '306' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('801' AS OldSubdivCode, '31' AS NewSubdivCode),
+							  		ROW('806' AS OldSubdivCode, '40' AS NewSubdivCode),
+							  		ROW('883' AS OldSubdivCode, '25' AS NewSubdivCode),
+							  		ROW('884' AS OldSubdivCode, '24' AS NewSubdivCode),							  		
+							  		ROW('B09' AS OldSubdivCode, '57' AS NewSubdivCode),
+							  		ROW('820' AS OldSubdivCode, '58' AS NewSubdivCode),
+							  		ROW('b10' AS OldSubdivCode, '59' AS NewSubdivCode),
+							  		ROW('B11' AS OldSubdivCode, '62' AS NewSubdivCode),							  		
+							  		ROW('B12' AS OldSubdivCode, '63' AS NewSubdivCode),
+							  		ROW('B13' AS OldSubdivCode, '65' AS NewSubdivCode),
+							  		ROW('B14' AS OldSubdivCode, '66' AS NewSubdivCode)
+							  		
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('TXB01' AS OldDivCode, '301' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('103' AS OldSubdivCode, '31' AS NewSubdivCode),
+							  		ROW('805' AS OldSubdivCode, '40' AS NewSubdivCode),
+							  		ROW('883' AS OldSubdivCode, '25' AS NewSubdivCode),
+							  		ROW('884' AS OldSubdivCode, '24' AS NewSubdivCode),								  								  		
+							  		ROW('B06' AS OldSubdivCode, '01' AS NewSubdivCode),
+							  		ROW('B12' AS OldSubdivCode, '02' AS NewSubdivCode),
+							  		ROW('B13' AS OldSubdivCode, '03' AS NewSubdivCode),
+							  		ROW('B17' AS OldSubdivCode, '04' AS NewSubdivCode),							  		
+							  		ROW('B18' AS OldSubdivCode, '05' AS NewSubdivCode),
+							  		ROW('B19' AS OldSubdivCode, '06' AS NewSubdivCode),
+							  		ROW('B20' AS OldSubdivCode, '07' AS NewSubdivCode),							  		
+							  		ROW('B05' AS OldSubdivCode, '56' AS NewSubdivCode),
+							  		ROW('B07' AS OldSubdivCode, '57' AS NewSubdivCode),
+							  		ROW('B11' AS OldSubdivCode, '59' AS NewSubdivCode),
+							  		ROW('B16' AS OldSubdivCode, '60' AS NewSubdivCode),							  		
+							  		ROW('B14' AS OldSubdivCode, '61' AS NewSubdivCode),
+							  		ROW('B15' AS OldSubdivCode, '62' AS NewSubdivCode),
+							  		ROW('B16' AS OldSubdivCode, '60' AS NewSubdivCode),
+							  		ROW('B16' AS OldSubdivCode, '60' AS NewSubdivCode)							  		
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('TXB04' AS OldDivCode, '304' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('801' AS OldSubdivCode, '31' AS NewSubdivCode),
+							  		ROW('808' AS OldSubdivCode, '40' AS NewSubdivCode),
+							  		ROW('809' AS OldSubdivCode, '42' AS NewSubdivCode),
+							  		ROW('883' AS OldSubdivCode, '25' AS NewSubdivCode),								  								  		
+							  		ROW('884' AS OldSubdivCode, '24' AS NewSubdivCode),
+							  		ROW('E03' AS OldSubdivCode, '01' AS NewSubdivCode),
+							  		ROW('E05' AS OldSubdivCode, '02' AS NewSubdivCode),
+							  		ROW('E09' AS OldSubdivCode, '02' AS NewSubdivCode),							  		
+							  		ROW('E10' AS OldSubdivCode, '04' AS NewSubdivCode),
+							  		ROW('E08' AS OldSubdivCode, '56' AS NewSubdivCode)						  		
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('TXB03' AS OldDivCode, '303' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('103' AS OldSubdivCode, '31' AS NewSubdivCode),
+							  		ROW('803' AS OldSubdivCode, '51' AS NewSubdivCode),
+							  		ROW('806' AS OldSubdivCode, '42' AS NewSubdivCode),
+							  		ROW('883' AS OldSubdivCode, '25' AS NewSubdivCode),								  								  		
+							  		ROW('884' AS OldSubdivCode, '24' AS NewSubdivCode),
+							  		ROW('D05' AS OldSubdivCode, '02' AS NewSubdivCode),
+							  		ROW('D03' AS OldSubdivCode, '03' AS NewSubdivCode),
+							  		ROW('D06' AS OldSubdivCode, '04' AS NewSubdivCode),							  		
+							  		ROW('D09' AS OldSubdivCode, '05' AS NewSubdivCode),
+							  		ROW('D07' AS OldSubdivCode, '56' AS NewSubdivCode),	
+							  		ROW('D08' AS OldSubdivCode, '57' AS NewSubdivCode)					  		
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('TXB08' AS OldDivCode, '308' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('802' AS OldSubdivCode, '31' AS NewSubdivCode),
+							  		ROW('810' AS OldSubdivCode, '40' AS NewSubdivCode),
+							  		ROW('883' AS OldSubdivCode, '25' AS NewSubdivCode),								  								  		
+							  		ROW('884' AS OldSubdivCode, '24' AS NewSubdivCode),
+							  		ROW('H03' AS OldSubdivCode, '01' AS NewSubdivCode),
+							  		ROW('H07' AS OldSubdivCode, '02' AS NewSubdivCode),
+							  		ROW('H02' AS OldSubdivCode, '56' AS NewSubdivCode),							  		
+							  		ROW('H04' AS OldSubdivCode, '57' AS NewSubdivCode),
+							  		ROW('H06' AS OldSubdivCode, '59' AS NewSubdivCode)				  		
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('TXB05' AS OldDivCode, '305' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('802' AS OldSubdivCode, '31' AS NewSubdivCode),
+							  		ROW('810' AS OldSubdivCode, '40' AS NewSubdivCode),
+							  		ROW('883' AS OldSubdivCode, '25' AS NewSubdivCode),								  								  		
+							  		ROW('884' AS OldSubdivCode, '24' AS NewSubdivCode),
+							  		ROW('B07' AS OldSubdivCode, '01' AS NewSubdivCode),
+							  		ROW('B08' AS OldSubdivCode, '02' AS NewSubdivCode),
+							  		ROW('B09' AS OldSubdivCode, '03' AS NewSubdivCode)			  		
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('TXB07' AS OldDivCode, '307' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('802' AS OldSubdivCode, '31' AS NewSubdivCode),
+							  		ROW('809' AS OldSubdivCode, '40' AS NewSubdivCode),
+							  		ROW('883' AS OldSubdivCode, '25' AS NewSubdivCode),								  								  		
+							  		ROW('884' AS OldSubdivCode, '24' AS NewSubdivCode),
+							  		ROW('F02' AS OldSubdivCode, '01' AS NewSubdivCode),
+							  		ROW('F03' AS OldSubdivCode, '02' AS NewSubdivCode),
+							  		ROW('F05' AS OldSubdivCode, '03' AS NewSubdivCode),
+							  		ROW('F06' AS OldSubdivCode, '04' AS NewSubdivCode),
+							  		ROW('F04' AS OldSubdivCode, '56' AS NewSubdivCode)			  		
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('TXB02' AS OldDivCode, '302' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('103' AS OldSubdivCode, '31' AS NewSubdivCode),
+							  		ROW('805' AS OldSubdivCode, '40' AS NewSubdivCode),
+							  		ROW('883' AS OldSubdivCode, '25' AS NewSubdivCode),								  								  		
+							  		ROW('884' AS OldSubdivCode, '24' AS NewSubdivCode),
+							  		ROW('C09' AS OldSubdivCode, '01' AS NewSubdivCode),
+							  		ROW('C12' AS OldSubdivCode, '02' AS NewSubdivCode),
+							  		ROW('C13' AS OldSubdivCode, '03' AS NewSubdivCode),
+							  		ROW('C11' AS OldSubdivCode, '57' AS NewSubdivCode),
+							  		ROW('C02' AS OldSubdivCode, '58' AS NewSubdivCode)			  		
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('TXB10' AS OldDivCode, '310' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('801' AS OldSubdivCode, '31' AS NewSubdivCode),
+							  		ROW('810' AS OldSubdivCode, '40' AS NewSubdivCode),
+							  		ROW('883' AS OldSubdivCode, '25' AS NewSubdivCode),								  								  		
+							  		ROW('884' AS OldSubdivCode, '24' AS NewSubdivCode),
+							  		ROW('J03' AS OldSubdivCode, '01' AS NewSubdivCode),
+							  		ROW('J04' AS OldSubdivCode, '02' AS NewSubdivCode),
+							  		ROW('J02' AS OldSubdivCode, '56' AS NewSubdivCode)			  		
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('TXB09' AS OldDivCode, '309' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('802' AS OldSubdivCode, '31' AS NewSubdivCode),
+							  		ROW('810' AS OldSubdivCode, '40' AS NewSubdivCode),
+							  		ROW('883' AS OldSubdivCode, '25' AS NewSubdivCode),								  								  		
+							  		ROW('884' AS OldSubdivCode, '24' AS NewSubdivCode),
+							  		ROW('I02' AS OldSubdivCode, '56' AS NewSubdivCode),
+							  		ROW('I03' AS OldSubdivCode, '01' AS NewSubdivCode),
+							  		ROW('I05' AS OldSubdivCode, '02' AS NewSubdivCode),
+							  		ROW('I04' AS OldSubdivCode, '57' AS NewSubdivCode)			  		
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+						  
+				ROW('TXB11' AS OldDivCode, '311' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('802' AS OldSubdivCode, '31' AS NewSubdivCode),
+							  		ROW('811' AS OldSubdivCode, '40' AS NewSubdivCode),
+							  		ROW('883' AS OldSubdivCode, '25' AS NewSubdivCode),								  								  		
+							  		ROW('884' AS OldSubdivCode, '24' AS NewSubdivCode),
+							  		ROW('К02' AS OldSubdivCode, '01' AS NewSubdivCode)		  		
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap ),
+				
+				ROW('TXB12' AS OldDivCode, '312' AS NewDivCode, 
+						  ROW(
+						  		LIST{
+							  		ROW('103' AS OldSubdivCode, '31' AS NewSubdivCode),
+							  		ROW('248' AS OldSubdivCode, '40' AS NewSubdivCode),
+							  		ROW('883' AS OldSubdivCode, '25' AS NewSubdivCode),								  								  		
+							  		ROW('884' AS OldSubdivCode, '24' AS NewSubdivCode)	  		
+							  		
+						  		} AS Subdivision[]						  
+						  ) AS SubdivMap )
+				
+				};
+	END IF;
+	
+END;
+
+CREATE FUNCTION convDeptOldToNew(IN oldDivId CHARACTER) RETURNS CHARACTER
+BEGIN
+	CALL CreateDivisionCodeMapping();
+	FOR div AS divisionCodeMapping.Division[] DO 
+		IF div.OldDivCode = oldDivId THEN
+			RETURN div.NewDivCode;
+		ELSE 
+			FOR subdiv AS div.SubdivMap.Subdivision[] DO
+				IF subdiv.OldSubdivCode = oldDivId THEN
+					RETURN div.NewDivCode || '/' || subdiv.NewSubdivCode;
+				END IF;
+			END FOR;
+		END IF;
+	END FOR;
+	
+	RETURN NULL;
+END;
+
+CREATE FUNCTION convDeptNewToOld(IN newDiv CHARACTER) RETURNS CHARACTER
+BEGIN
+	CALL CreateDivisionCodeMapping();
+	DECLARE newDivId CHARACTER SUBSTRING(newDiv BEFORE '/');
+	DECLARE newSubdivId CHARACTER SUBSTRING(newDiv AFTER '/');
+	FOR div AS divisionCodeMapping.Division[] DO 
+		IF div.NewDivCode = newDivId THEN
+			IF newSubdivId IS NULL THEN
+				RETURN div.OldDivCode;
+			ELSE 
+				FOR subdiv AS div.SubdivMap.Subdivision[] DO
+					IF subdiv.NewSubdivCode = newSubdivId THEN
+						RETURN div.OldDivCode || '/' || subdiv.OldSubdivCode;
+					END IF;
+				END FOR;
+			END IF;
+		END IF;
+	END FOR;
+END;
+
+-- integrationSystem - код системы, идентификатор в которой передается в Organization.IntegrationID
+CREATE PROCEDURE transformOrgDataFromNewPragmaToESB(IN inRef REFERENCE, IN outRef REFERENCE)
+BEGIN
+	DECLARE economicSector CHARACTER NULL;
+	FOR inSign AS inRef.Signs.Sign[] DO
+		IF inSign.Type = 'EconomicSector' THEN
+			SET economicSector = inSign.Value;
+		END IF;
+	END FOR;
+	
+	SET outRef.orgs:Name				= inRef.FullName;
+	SET outRef.orgs:LegalName			= inRef.OfficialName;
+	SET outRef.orgs:LegalNameEn			= inRef.ForeignName;
+
+	IF EXISTS(inRef.Addresses.Address[]) THEN
+		CREATE FIELD outRef.orgs:CompositeContactInfo;
+		SET outRef.orgs:CompositeContactInfo.ifxca:ContactInfoType	= 'LegalAddress';
+		CREATE FIELD outRef.orgs:CompositeContactInfo.ifxca:ContactInfo;
+	END IF;
+	DECLARE outPostAddr REFERENCE TO outRef;
+	FOR inAddress AS inRef.Addresses.Address[] DO  
+		CREATE LASTCHILD OF outRef.orgs:CompositeContactInfo.ifxca:ContactInfo AS outPostAddr NAMESPACE ifxca NAME 'PostAddr';
+		SET outPostAddr.ifxca:Addr1			= inAddress.Unstructured;
+		SET outPostAddr.ifxca:City			= inAddress.City;
+		SET outPostAddr.ifxca:StateProv		= inAddress.Region;
+		SET outPostAddr.ifxca:PostalCode	= inAddress.ZipCode;
+		SET outPostAddr.ifxca:Country		= inAddress.Country;
+		SET outPostAddr.ifxca:AddrType		= recodeAddressTypeFromNewPragma(inAddress.AddressType);
+		SET outPostAddr.ifxca:Street		= inAddress.Street;
+		SET outPostAddr.ifxca:House			= inAddress.House;
+		SET outPostAddr.ifxca:Building		= inAddress.Building;
+		SET outPostAddr.ifxca:Flat			= inAddress.Apartment;
+	END FOR;
+	
+	SET outRef.orgs:EstablishDt			= inRef.OrganizationInformation.PrimaryRegistrationDate;
+	SET outRef.orgs:NumEmployees		= inRef.OrganizationInformation.NumEmployees;
+
+	DECLARE orgId REFERENCE TO outRef;
+	
+	IF inRef.IntegrationId <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'CIF';
+		SET orgId.Value = inRef.IntegrationId;
+	END IF;
+	IF inRef.OrganizationInformation.BIN <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'BIN';
+		SET orgId.Value = inRef.OrganizationInformation.BIN;
+	END IF;
+	IF inRef.OrganizationInformation.RNN <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'RNN';
+		SET orgId.Value = inRef.OrganizationInformation.RNN;
+	END IF;
+	IF inRef.UNK <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'UNK';
+		SET orgId.Value = inRef.UNK;
+	END IF;
+	IF inRef.OrganizationInformation.OKPO <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'OKPO';
+		SET orgId.Value = inRef.OrganizationInformation.OKPO;
+	END IF;
+	IF inRef.Id <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'MABPK';
+		SET orgId.Value = inRef.Id;
+	END IF;
+	
+	IF inRef.OrganizationAdditionalInformation.Segment <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'Segment';
+		SET orgId.Value = inRef.OrganizationAdditionalInformation.Segment;
+	END IF;
+	
+	FOR inSource AS inRef.Sources.Source[] DO
+		IF inSource.ObjectType = 'ORGANIZATION' THEN
+			CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+			SET orgId.Key		= inSource.SourceSystemCode;
+			SET orgId.Value		= inSource.Surrogate;
+		END IF;
+	END FOR;	
+
+	SET outRef.OrgAttr.KeyPerson[1].PositionKey						= 'CHIEF';
+	SET outRef.OrgAttr.KeyPerson[1].PersonInfo.inds:NameAddrType	= 'Customer';
+	SET outRef.OrgAttr.KeyPerson[1].PersonInfo.inds:FullName		= inRef.OrganizationInformation.ManagerName;
+	SET outRef.OrgAttr.KeyPerson[1].PersonInfo.ClientJobTitle		= inRef.OrganizationInformation.ManagerPositionName;
+	SET outRef.OrgAttr.KeyPerson[2].PositionKey						= 'ACC';
+	SET outRef.OrgAttr.KeyPerson[2].PersonInfo.inds:NameAddrType	= 'Customer';
+	SET outRef.OrgAttr.KeyPerson[2].PersonInfo.inds:FullName		= inRef.OrganizationInformation.AccountantName;
+	SET outRef.OrgAttr.KeyPerson[2].PersonInfo.ClientJobTitle		= inRef.OrganizationInformation.AccountantPositionName;
+	SET outRef.OrgAttr.EcSector										= economicSector;
+	SET outRef.OrgAttr.Country 							= inRef.OrganizationInformation.Country;
+	SET outRef.OrgAttr.NameRegulation 					= inRef.OfficialName;
+	SET outRef.OrgAttr.Form 							= inRef.Form;
+	SET outRef.OrgAttr.ShortName 						= inRef.ShortName;
+	SET outRef.OrgAttr.FullNameKz						= inRef.FullNameKaz;
+	SET outRef.OrgAttr.ShortNameKz						= inRef.ShortNameKaz;
+	SET outRef.OrgAttr.Region 							= inRef.OrganizationInformation.RegionCode;
+	SET outRef.OrgAttr.DocRegNum						= inRef.OrganizationInformation.RegistrationNumber;
+	SET outRef.OrgAttr.DocRegPlace						= inRef.OrganizationInformation.RegistrationIssuer;
+	SET outRef.OrgAttr.DateReReg						= inRef.OrganizationInformation.SecondaryRegistrationDate;
+	SET outRef.OrgAttr.GeoCode 							= inRef.OrganizationInformation.GeoCode;
+	SET outRef.OrgAttr.Trademark						= inRef.OrganizationInformation.Trademark;
+	SET outRef.OrgAttr.Holding 							= inRef.OrganizationInformation.Holding;
+	SET outRef.OrgAttr.RevenueInfo.Amount 				= inRef.OrganizationInformation.Revenue;
+	SET outRef.OrgAttr.RevenueInfo.AmtCurr 				= inRef.OrganizationInformation.RevenueCurrency;
+	SET outRef.OrgAttr.Segment	 						= inRef.OrganizationAdditionalInformation.Segment;
+	SET outRef.OrgAttr.EcActivity 						= inRef.OrganizationAdditionalInformation.EconomicActivity;
+	SET outRef.OrgAttr.Category 						= inRef.OrganizationAdditionalInformation.Category;
+	SET outRef.OrgAttr.Group	 						= inRef.OrganizationAdditionalInformation.Group;
+	SET outRef.OrgAttr.Rating	 						= inRef.OrganizationAdditionalInformation.Rating;
+	SET outRef.OrgAttr.EcActivityCode					= inRef.OrganizationInformation.EconomicActivityCode;
+	SET outRef.OrgAttr.HoldingMembership				= inRef.OrganizationAdditionalInformation.Holding;
+	SET outRef.OrgAttr.FullName							= inRef.FullName;
+	SET outRef.OrgAttr.CustomerStatus					= inRef.CustStatus;
+	SET outRef.OrgAttr.Comment							= inRef.OrganizationAdditionalInformation.Comment;
+	SET outRef.FirstContactBankInfo.banks:BranchId		= inRef.Branch;
+	SET outRef.FirstContactBankInfo.banks:BranchName	= inRef.BranchName;
+	IF NOT EXISTS(outRef.FirstContactBankInfo.*:*[]) THEN
+		SET outRef.FirstContactBankInfo = NULL;
+	END IF;
+	SET outRef.ABSManager 								= inRef.OrganizationInformation.ManagerIntID;
+	IF NOT EXISTS(outRef.OrgAttr.*[]) THEN
+		SET outRef.OrgAttr = NULL;
+	END IF;
+
+	DECLARE branchRef REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef NAME 'Branches';
+	IF inRef.Filial <> '' THEN
+		CREATE LASTCHILD OF outRef.Branches AS branchRef NAME 'Branch';
+		SET branchRef.BankInfo.banks:BranchId = inRef.Filial;
+		SET branchRef.IsResp 				  = 'T';
+	END IF;
+	FOR inSign AS inRef.Signs.Sign[] DO
+		IF inSign.Type = 'BranchList' AND inSign.Value <> COALESCE(inRef.Filial, '') THEN
+			CREATE LASTCHILD OF outRef.Branches AS branchRef NAME 'Branch';
+			SET branchRef.BankInfo.banks:BranchId = inSign.Value;
+			SET branchRef.IsResp 				  = 'F';
+		END IF;
+	END FOR;
+	IF NOT EXISTS(outRef.Branches.*[]) THEN
+		SET outRef.Branches = NULL;
+	END IF;
+
+	SET outRef.DateOpen 				  = inRef.OrganizationAdditionalInformation.Created;
+	SET outRef.DTModify 				  = inRef.OrganizationAdditionalInformation.Modified;
+
+	FOR contact AS inRef.Contacts.Contact[] DO
+		IF contact.Type <> 'email' and contact.Type <> 'www' THEN
+			IF NOT EXISTS(outRef.Phones[]) THEN
+				CREATE LASTCHILD OF outRef NAME 'Phones';				
+			END IF;
+			DECLARE outPhone REFERENCE TO outRef.Phones;
+			CREATE LASTCHILD OF outRef.Phones AS outPhone NAME 'Phone';
+			SET outPhone.PhoneType		= recodeContactTypeFromNewPragma(contact.Type);
+			SET outPhone.PhoneNum		= contact.Contact;
+			SET outPhone.Allowed		= contact.IsAllowed;
+			SET outPhone.From			= contact.From;
+			SET outPhone.Till			= contact.Till;
+			SET outPhone.PhoneProvider	= contact.Operator;
+			SET outPhone.IsActive		= contact.IsActive;
+		END IF;
+	END FOR;
+
+	IF EXISTS(inRef.Links.Link[]) THEN
+		CREATE FIELD outRef.RelPersons;
+		DECLARE outRelPerson REFERENCE TO outRef.RelPersons;
+		FOR inLink AS inRef.Links.Link[] DO  
+			CREATE LASTCHILD OF outRef.RelPersons AS outRelPerson NAME 'RelPerson';
+			
+			SET outRelPerson.RelPerson.Key			= 'MABPK';
+			SET outRelPerson.RelPerson.Value		= inLink.LinkedSubjectId;
+			
+			SET outRelPerson.RelationshipType		= parseNewPragmaLinkType(inLink.LinkType);
+			SET outRelPerson.RelationshipSubType	= parseNewPragmaLinkSubType(inLink.LinkType);
+			SET outRelPerson.SubjectType			= recodeSubjectTypeFromNewPragma(inLink.LinkedObjectType);
+			SET outRelPerson.StartDate				= inLink.StartDate;
+			SET outRelPerson.EndDate				= inLink.FinishDate;
+		END FOR;
+	END IF;
+
+	FOR contact AS inRef.Contacts.Contact[] DO
+		IF contact.Type = 'e-mail' THEN
+			IF NOT EXISTS(outRef.EMails[]) THEN
+				CREATE LASTCHILD OF outRef NAME 'EMails';
+			END IF;
+			DECLARE outEMail REFERENCE TO outRef.EMails;
+			CREATE LASTCHILD OF outRef.EMails AS outEMail NAME 'EMail';
+			SET outEMail.EMailAddr		= contact.Contact;
+			SET outEMail.Active			= contact.IsActive;
+			SET outEMail.Allowed		= contact.IsAllowed;
+		END IF;
+	END FOR;
+
+	DECLARE outSign REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef NAME 'Signs';
+	FOR inSign AS inRef.Signs.Sign[] DO
+		IF checkSignType(inSign.Type) THEN
+			CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';
+			SET outSign.SignType	= inSign.Type;
+			SET outSign.SignId		= inSign.Id;
+			SET outSign.StartDate	= inSign.Since;
+			SET outSign.EndDate		= inSign.Until;
+			SET outSign.Value		= inSign.Value;
+		END IF;
+	END FOR;
+	IF NOT EXISTS(outRef.Signs.*[]) THEN
+		SET outRef.Signs = NULL;
+	END IF;
+	
+	SET outRef.IsEnt 				  = inRef.IsEntrepreneur;
+	SET outRef.IsBank 				  = inRef.IsBank;
+	
+	IF EXISTS(inRef.Procuracies.Procuracy[]) THEN
+		CREATE FIELD outRef.AuthorityList;
+	END IF;
+	DECLARE outAuthority REFERENCE TO outRef;
+	FOR inProcuracy AS inRef.Procuracies.Procuracy[] DO
+		CREATE LASTCHILD OF outRef.AuthorityList AS outAuthority NAME 'Authority';
+		SET outAuthority.IsActive		= '';
+		SET outAuthority.WarrantNumber	= inProcuracy.Number;
+		SET outAuthority.RegDate		= inProcuracy.RegistrationDate;
+		SET outAuthority.IssueDate		= inProcuracy.StartDate;
+		SET outAuthority.ExpDate		= inProcuracy.FinishDate;
+		
+		SET outAuthority.NotaryInfo.NotaryName			= inProcuracy.NotaryName;
+		SET outAuthority.NotaryInfo.NotaryAddress		= inProcuracy.NotaryAddress;
+		SET outAuthority.NotaryInfo.NotaryLicense		= inProcuracy.NotaryLicenseNumber;
+		SET outAuthority.NotaryInfo.NotaryLicenseDate	= inProcuracy.NotaryDate;
+		SET outAuthority.NotaryInfo.NotaryPhone			= inProcuracy.NotaryPhone;
+		IF NOT EXISTS(outAuthority.NotaryInfo.*[]) THEN
+			SET outAuthority.NotaryInfo = NULL;
+		END IF;
+
+		SET outAuthority.NotaryDate	= inProcuracy.NotaryDate;
+		SET outAuthority.ObjectType	= 'PERSON';
+	END FOR;
+
+END;
+
+CREATE FUNCTION checkSignType (IN signType CHARACTER) RETURNS BOOLEAN
+BEGIN
+	IF signType NOT IN (
+		'BranchList',
+		'Segment',
+		'EconomicActivityCode',
+		'Category',
+		'EconomicSector',
+		'Group',
+		'NumEmployees',
+		'Holding',
+		'Rating',
+		'RegionCode',
+		'ManagerPositionName',
+		'AccountantPositionName',
+		'ManagerName',
+		'AccountantName',
+		'RegistrationNumber',
+		'RegistrationIssuer',
+		'EconomicActivity',
+		'OKPO',
+		'Trademark',
+		'Revenue',
+		'RevenueCurrency',
+		'GeoCode',
+		'HoldingCode',
+		'IsBank',
+		'FullNameKaz',
+		'ShortNameKaz',
+		'IsEntrepreneur',
+		'BankBranchName',
+		'SecondaryRegistrationDate' ) THEN
+		RETURN TRUE;
+	END IF;
+	
+	RETURN FALSE;
+END;
+
+CREATE PROCEDURE transformOrgDataFromESBToNewPragma(IN inRef REFERENCE, IN outRef REFERENCE, IN index INTEGER)
+BEGIN
+	DECLARE id CHARACTER;
+	DECLARE integrationID CHARACTER;
+	DECLARE rnn CHARACTER;
+	DECLARE bin CHARACTER;
+	DECLARE okpo CHARACTER;
+	DECLARE unk CHARACTER;
+	
+	FOR inOrgIdExt AS inRef.OrgIdExt[] DO
+		CASE inOrgIdExt.Key
+		WHEN 'MABPK' THEN
+			SET id = inOrgIdExt.Value;
+		WHEN 'CIF' THEN
+			SET integrationID = inOrgIdExt.Value;
+		WHEN 'RNN' THEN
+			SET rnn = inOrgIdExt.Value;
+		WHEN 'BIN' THEN
+			SET bin = inOrgIdExt.Value;
+		WHEN 'OKPO' THEN
+			SET okpo = inOrgIdExt.Value;
+		WHEN 'UNK' THEN
+			SET unk = inOrgIdExt.Value;
+		END CASE;
+	END FOR;
+
+	IF id IS NULL AND index IS NOT NULL THEN 
+		SET id = '-' || CAST(index AS CHARACTER);
+	END IF;
+
+	DECLARE managerPositionName CHARACTER;
+	DECLARE accountantPositionName CHARACTER;
+	DECLARE managerName CHARACTER;
+	DECLARE accountantName CHARACTER;
+
+	FOR inKeyPerson AS inRef.OrgAttr.KeyPerson[] DO
+		IF inKeyPerson.PositionKey = 'CHIEF' THEN
+			SET managerPositionName = inKeyPerson.PersonInfo.ClientJobTitle;
+			SET managerName = FIELDVALUE(inKeyPerson.PersonInfo.*:FullName);
+		END IF;
+		IF inKeyPerson.PositionKey = 'ACC' THEN
+			SET accountantPositionName = inKeyPerson.PersonInfo.ClientJobTitle;
+			SET accountantName = FIELDVALUE(inKeyPerson.PersonInfo.*:FullName);
+		END IF;
+	END FOR;
+	
+	SET outRef.Id				= id;
+	SET outRef.UNK				= unk;
+	SET outRef.IntegrationID	= integrationID;
+	SET outRef.IsClient			= inRef.IsClient;
+	SET outRef.IsEntrepreneur	= inRef.IsEnt;
+	SET outRef.Branch			= inRef.FirstContactBankInfo.*:BranchId;
+	SET outRef.BranchName		= inRef.FirstContactBankInfo.banks:BranchName;
+
+	SET outRef.Form				= inRef.OrgAttr.Form;
+	SET outRef.ForeignName		= inRef.orgs:LegalNameEn;
+	SET outRef.FullName			= inRef.OrgAttr.FullName;
+	SET outRef.ShortName		= inRef.OrgAttr.ShortName;
+	SET outRef.OfficialName		= inRef.orgs:LegalName;
+	SET outRef.IsBank			= inRef.IsBank;
+	SET outRef.FullNameKaz		= inRef.OrgAttr.FullNameKz;
+	SET outRef.ShortNameKaz		= inRef.OrgAttr.ShortNameKz;
+	SET outRef.CustStatus		= inRef.OrgAttr.CustomerStatus;
+
+	SET outRef.OrganizationInformation.RegionCode					= inRef.OrgAttr.Region;
+	SET outRef.OrganizationInformation.Country						= inRef.OrgAttr.Country;
+	SET outRef.OrganizationInformation.RNN							= rnn;
+	SET outRef.OrganizationInformation.BIN							= bin;
+	SET outRef.OrganizationInformation.ManagerPositionName			= managerPositionName;
+	SET outRef.OrganizationInformation.AccountantPositionName		= accountantPositionName;
+	SET outRef.OrganizationInformation.AccountantName				= accountantName;
+	SET outRef.OrganizationInformation.ManagerName					= managerName;
+	SET outRef.OrganizationInformation.PrimaryRegistrationDate		= inRef.orgs:EstablishDt;
+	SET outRef.OrganizationInformation.SecondaryRegistrationDate	= inRef.OrgAttr.DateReReg;
+	SET outRef.OrganizationInformation.RegistrationNumber			= inRef.OrgAttr.DocRegNum;
+	SET outRef.OrganizationInformation.RegistrationIssuer			= inRef.OrgAttr.DocRegPlace;
+	SET outRef.OrganizationInformation.EconomicActivityCode			= inRef.OrgAttr.EcActivityCode;
+	SET outRef.OrganizationInformation.OKPO							= okpo;
+	SET outRef.OrganizationInformation.GeoCode						= inRef.OrgAttr.GeoCode;
+	SET outRef.OrganizationInformation.Trademark					= inRef.OrgAttr.Trademark;
+	SET outRef.OrganizationInformation.Holding						= inRef.OrgAttr.HoldingMembership;
+	SET outRef.OrganizationInformation.Revenue						= inRef.OrgAttr.RevenueInfo.Amount;
+	SET outRef.OrganizationInformation.RevenueCurrency				= inRef.OrgAttr.RevenueInfo.AmtCurr;
+
+	SET outRef.OrganizationAdditionalInformation.Segment			= inRef.OrgAttr.Segment;
+	SET outRef.OrganizationAdditionalInformation.EconomicActivity	= inRef.OrgAttr.EcActivity;
+	SET outRef.OrganizationAdditionalInformation.Category			= inRef.OrgAttr.Category;
+	SET outRef.OrganizationAdditionalInformation.EconomicSector		= inRef.OrgAttr.EcSector;
+	SET outRef.OrganizationAdditionalInformation.Group				= inRef.OrgAttr.Group;
+	SET outRef.OrganizationAdditionalInformation.NumEmployees		= inRef.orgs:NumEmployees;
+	SET outRef.OrganizationAdditionalInformation.Holding			= inRef.OrgAttr.HoldingMembership;
+	SET outRef.OrganizationAdditionalInformation.Rating				= inRef.OrgAttr.Rating;
+	SET outRef.OrganizationAdditionalInformation.Comment			= inRef.OrgAttr.Comment;
+	
+	CREATE FIELD outRef.Contacts;
+	DECLARE outContact REFERENCE TO outRef;
+	FOR inPhone AS inRef.Phones.Phone[] DO
+		CREATE LASTCHILD OF outRef.Contacts AS outContact NAME 'Contact';
+		SET outContact.Type			= recodeContactTypeToNewPragma(inPhone.PhoneType);
+		SET outContact.Contact		= formatPhoneForNewPragma(FIELDVALUE(inPhone.PhoneNum));
+		SET outContact.Operator		= inPhone.PhoneProvider;
+		SET outContact.IsAllowed	= inPhone.Allowed;
+		SET outContact.IsActive		= inPhone.IsActive;
+		SET outContact.From			= inPhone.From;
+		SET outContact.Till			= inPhone.Till;
+	END FOR;
+	FOR inEMail AS inRef.EMails.EMail[] DO
+		CREATE LASTCHILD OF outRef.Contacts AS outContact NAME 'Contact';
+		SET outContact.Type			= 'email';
+		SET outContact.Contact		= inEMail.EMailAddr;
+		SET outContact.IsAllowed	= inEMail.Allowed;
+		SET outContact.IsActive		= inEMail.Active;
+	END FOR;
+	
+	CREATE FIELD outRef.Addresses;
+	DECLARE outAddress REFERENCE TO outRef.Addresses;
+	FOR inPostAddress AS inRef.orgs:CompositeContactInfo.*:ContactInfo.*:PostAddr[] DO
+		CREATE LASTCHILD OF outRef.Addresses AS outAddress NAME 'Address';
+		SET outAddress.AddressType			= recodeAddressTypeToNewPragma(inPostAddress.*:AddrType);
+		SET outAddress.Country				= FIELDVALUE(inPostAddress.*:Country);
+		SET outAddress.ZipCode				= FIELDVALUE(inPostAddress.*:PostalCode);
+		SET outAddress.County				= FIELDVALUE(inPostAddress.*:Area);
+		SET outAddress.Region				= FIELDVALUE(inPostAddress.*:StateProv);
+		SET outAddress.City					= FIELDVALUE(inPostAddress.*:City);
+		SET outAddress.Settlement			= FIELDVALUE(inPostAddress.*:Place);
+		SET outAddress.Street				= FIELDVALUE(inPostAddress.*:Street);
+		SET outAddress.House				= FIELDVALUE(inPostAddress.*:House);
+		SET outAddress.Building				= FIELDVALUE(inPostAddress.*:Buiding);
+		SET outAddress.Apartment			= FIELDVALUE(inPostAddress.*:Flat);
+		SET outAddress.Unstructured			= FIELDVALUE(inPostAddress.*:Addr1);
+		SET outAddress.DateIn				= FIELDVALUE(inPostAddress.*:StartDt);
+		SET outAddress.DateOut				= FIELDVALUE(inPostAddress.*:EndDt);
+	END FOR;
+
+	CREATE FIELD outRef.Branches;
+	DECLARE outBranch REFERENCE TO outRef.Branches;
+	FOR inBranch AS inRef.Branch.Branches[] DO
+		CREATE LASTCHILD OF outRef.Branches AS outBranch NAME 'Branch';
+		SET outBranch.BranchCode	= FIELDVALUE(inBranch.BankInfo.*:BranchId);
+		SET outBranch.IsResponsible	= inBranch.IsResp;
+		SET outBranch.StartDate		= inBranch.StartDate;
+		SET outBranch.FinishDate	= inBranch.EndDate;
+	END FOR;
+
+	CREATE FIELD outRef.Links;
+	DECLARE outLink REFERENCE TO outRef.Links;
+	FOR inRelPerson AS inRef.RelPersons.RelPerson[] DO
+		CREATE LASTCHILD OF outRef.Links AS outLink NAME 'Link';
+		DECLARE linkedSubjectId CHARACTER;
+		FOR inRelPersonId AS inRelPerson.RelPersonId[] DO
+			IF inRelPersonId.Key = 'MABPK' THEN
+				SET linkedSubjectId	= inRelPersonId.Value;
+			END IF;
+		END FOR;
+		SET outLink.LinkedSubjectId			= linkedSubjectId;
+		SET outLink.LinkedSubjectType		= recodeSubjectTypeToNewPragma(inRelPerson.SubjectType);
+		SET outLink.LinkType				= inRelPerson.RelationshipType;
+		SET outLink.StartDate				= inRelPerson.StartDate;
+		SET outLink.FinishDate				= inRelPerson.EndDate;
+	END FOR;
+	
+	CREATE FIELD outRef.Procuracies;
+	DECLARE outProcuracy REFERENCE TO outRef.Procuracies;
+	FOR inAuthority AS inRef.AuthorityList.Authority[] DO
+		CREATE LASTCHILD OF outRef.Procuracies AS outProcuracy NAME 'Procuracy';
+		SET outProcuracy.Number					= inAuthority.WarrantNumber;
+		SET outProcuracy.RegistrationDate		= inAuthority.RegDate;
+		SET outProcuracy.StartDate				= inAuthority.IssueDate;
+		SET outProcuracy.FinishDate				= inAuthority.ExpDate;
+		SET outProcuracy.NotaryDate				= inAuthority.NotaryInfo.NotaryDate;
+		SET outProcuracy.NotaryAddress			= inAuthority.NotaryInfo.NotaryAddress;
+		SET outProcuracy.NotaryLicenseNumber	= inAuthority.NotaryInfo.NotaryLicense;
+		SET outProcuracy.NotaryPhone			= inAuthority.NotaryInfo.NotaryPhone;
+		SET outProcuracy.NotaryName				= inAuthority.NotaryInfo.NotaryName;
+	END FOR;	
+END;

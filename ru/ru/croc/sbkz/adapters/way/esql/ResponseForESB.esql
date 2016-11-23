@@ -1,0 +1,344 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.way.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Установка ответных заголовков а также получение ответного сообщения из агрегации
+CREATE COMPUTE MODULE ResponseForESB_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE OrigMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+		SET Environment.UserProperties = OrigMsg.UserProperties;
+
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+		
+		SET OutputRoot.XMLNSC = InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC;
+		IF NOT EXISTS(OutputRoot.XMLNSC[]) THEN
+			CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC');
+		END IF;
+
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(OrigMsg, OutputLocalEnvironment);
+
+		IF Environment.UserProperties.Operation = '' THEN
+				SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = 'unchanged';
+		END IF;
+	END;
+END MODULE;
+
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE ResponseForESB_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.UserProperties.Operation;
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZGetPersonContractsCardsRq' THEN
+			SET labelName = 'KZGetPersonContractsCardsRs';
+		WHEN 'KZGetPersonContractCardTransactionsRq' THEN
+			SET labelName = 'KZGetPersonContractCardTransactionsRs';
+		WHEN 'KZMngClientProgramRq' THEN
+			SET labelName = 'KZMngClientProgramRs';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_ConvertWAY2MDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+	
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPersonContractsCardsRs';
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:cards = cards;
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:ifxcust = ifxcust;
+	
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		SET outRoot.SPName = 'Way';
+		SET outRoot.Status.ifxca:StatusCode = FIELDVALUE(inRoot."resp_code");
+		SET outRoot.Status.ifxca:Severity = CASE
+			WHEN outRoot.Status.ifxca:StatusCode = '0' THEN 'Info'
+			ELSE 'Error'
+		END;
+		IF outRoot.Status.ifxca:StatusCode <> '0' THEN
+			SET outRoot.Status.ifxca:StatusDesc = FIELDVALUE(inRoot."resp_text");
+		END IF;
+		
+		SET outRoot.PersonInfo.PersonIdExt.Key		= 'WAY';
+		SET outRoot.PersonInfo.PersonIdExt.Value	= inRoot.MsgData.Information.ObjectFor.ClientIDT.ClientInfo.ClientNumber;
+
+		CREATE FIELD outRoot.Contracts;
+		DECLARE outContractInfo REFERENCE TO outRoot.Contracts;
+		FOR inContractRs AS inRoot.MsgData.Information.DataRs.ContractRs[] DO
+			DECLARE contractType CHARACTER '';
+			FOR inParm AS inContractRs.Product.AddInfo.Parm[] DO
+				IF inParm.ParmCode = 'ContractCategory' THEN
+					SET contractType = inParm.Value;
+				END IF;
+			END FOR;
+			
+			IF contractType = 'Account' THEN
+				CREATE LASTCHILD OF outRoot.Contracts AS outContractInfo NAME 'ContractInfo';
+				
+				SET outContractInfo.ContractNumber		= inContractRs.Contract.ContractIDT.ContractNumber;
+				SET outContractInfo.ContractExtId.Key	= 'RBSN';
+				SET outContractInfo.ContractExtId.Value	= inContractRs.Contract.ContractIDT.RBSNumber;
+				SET outContractInfo.ContractStatus		= inContractRs.Info.Status.StatusDetails;
+				CREATE FIELD outContractInfo.ContractBalInfo;
+				DECLARE outBalance REFERENCE TO outContractInfo.ContractBalInfo;
+				FOR inBalance AS inContractRs.Info.Balances.Balance[] DO
+					IF inBalance.Type IN ('AVAILABLE', 'CR_LIMIT') THEN
+						CREATE LASTCHILD OF outContractInfo.ContractBalInfo AS outBalance NAME 'BalanceRec';
+						
+						SET outBalance.BalType	= inBalance.Type;
+						SET outBalance.Amount	= inBalance.Amount;
+						SET outBalance.BalCurr	= inBalance.Currency;
+					END IF;
+				END FOR;
+				IF NOT EXISTS(outContractInfo.ContractBalInfo.*[]) THEN
+					SET outContractInfo.ContractBalInfo = NULL;
+				END IF;
+			END IF;
+
+			FOR inSubContract AS inContractRs.Info.SubContracts.SubContract[] DO
+				FOR inParm AS inSubContract.Product.AddInfo.Parm[] DO
+					IF inParm.ParmCode = 'ContractCategory' THEN
+						SET contractType = inParm.Value;
+					END IF;
+				END FOR;
+	
+				IF contractType = 'Account' THEN
+					CREATE LASTCHILD OF outRoot.Contracts AS outContractInfo NAME 'ContractInfo';
+					
+					SET outContractInfo.ContractNumber		= inSubContract.Contract.ContractIDT.ContractNumber;
+					SET outContractInfo.ContractExtId.Key	= 'RBSN';
+					SET outContractInfo.ContractExtId.Value	= inSubContract.Contract.ContractIDT.RBSNumber;
+					SET outContractInfo.ContractStatus		= inSubContract.Info.Status.StatusDetails;
+					CREATE FIELD outContractInfo.ContractBalInfo;
+					DECLARE outBalance REFERENCE TO outContractInfo.ContractBalInfo;
+					FOR inBalance AS inSubContract.Info.Balances.Balance[] DO
+						IF inBalance.Type IN ('AVAILABLE', 'CR_LIMIT') THEN
+							CREATE LASTCHILD OF outContractInfo.ContractBalInfo AS outBalance NAME 'BalanceRec';
+							
+							SET outBalance.BalType	= inBalance.Type;
+							SET outBalance.Amount	= inBalance.Amount;
+							SET outBalance.BalCurr	= inBalance.Currency;
+						END IF;
+					END FOR;
+					IF NOT EXISTS(outContractInfo.ContractBalInfo.*[]) THEN
+						SET outContractInfo.ContractBalInfo = NULL;
+					END IF;
+				END IF;
+			END FOR;
+		END FOR;
+
+		CREATE FIELD outRoot.Cards;
+		DECLARE outCardInfo REFERENCE TO outRoot.Cards;
+		FOR inContractRs AS inRoot.MsgData.Information.DataRs.ContractRs[] DO
+			DECLARE contractType CHARACTER '';
+			FOR inParm AS inContractRs.Product.AddInfo.Parm[] DO
+				IF inParm.ParmCode = 'ContractCategory' THEN
+					SET contractType = inParm.Value;
+				END IF;
+			END FOR;
+			
+			IF contractType = 'Card' THEN
+				CREATE LASTCHILD OF outRoot.Cards AS outCardInfo NAME 'CardInfo';
+				
+				SET outCardInfo.cards:CardType		= inContractRs.Contract.CommentText;
+				SET outCardInfo.cards:CardNum		= inContractRs.Contract.ContractIDT.ContractNumber;
+				SET outCardInfo.cards:ExpDt			= extractExpiryDate(inContractRs.Contract.ProductionParms.CardExpiry);
+				SET outCardInfo.cards:CustId.ifxcust:LegalName	= inContractRs.Contract.ContractIDT.Client.ClientInfo.LastName || ' ' ||
+				inContractRs.Contract.ContractIDT.Client.ClientInfo.FirstName;
+				SET outCardInfo.PaySystem			= CASE LEFT(inContractRs.Contract.ContractIDT.ContractNumber, 1)
+				WHEN '4' THEN 'VISA'
+				WHEN '5' THEN 'MasterCard'
+				WHEN '6' THEN 'MasterCard Maestro'
+				ELSE NULL
+				END;
+				
+				SET outCardInfo.CardStatus			= inContractRs.Info.Status.StatusDetails;
+				SET outCardInfo.SecWord				= inContractRs.Contract.ContractIDT.Client.ClientInfo.SecurityName;
+				SET outCardInfo.CardIdExt.Key		= 'RBSN';
+				SET outCardInfo.CardIdExt.Value		= inContractRs.Contract.ContractIDT.RBSNumber;
+			END IF;
+
+			FOR inSubContract AS inContractRs.Info.SubContracts.SubContract[] DO
+				FOR inParm AS inSubContract.Product.AddInfo.Parm[] DO
+					IF inParm.ParmCode = 'ContractCategory' THEN
+						SET contractType = inParm.Value;
+					END IF;
+				END FOR;
+	
+				IF contractType = 'Card' THEN
+					CREATE LASTCHILD OF outRoot.Cards AS outCardInfo NAME 'CardInfo';
+					
+					SET outCardInfo.cards:CardType		= inSubContract.Contract.CommentText;
+					SET outCardInfo.cards:CardNum		= inSubContract.Contract.ContractIDT.ContractNumber;
+					SET outCardInfo.cards:ExpDt			= extractExpiryDate(inSubContract.Contract.ProductionParms.CardExpiry);
+					SET outCardInfo.cards:CustId.ifxcust:LegalName	= inSubContract.Contract.ContractIDT.Client.ClientInfo.LastName || ' ' ||
+					inSubContract.Contract.ContractIDT.Client.ClientInfo.FirstName;
+					SET outCardInfo.PaySystem			= CASE LEFT(inSubContract.Contract.ContractIDT.ContractNumber, 1)
+					WHEN '4' THEN 'VISA'
+					WHEN '5' THEN 'MasterCard'
+					WHEN '6' THEN 'MasterCard Maestro'
+					ELSE NULL
+					END;
+					
+					SET outCardInfo.CardStatus			= inSubContract.Info.Status.StatusDetails;
+					SET outCardInfo.SecWord				= inSubContract.Contract.ContractIDT.Client.ClientInfo.SecurityName;
+					SET outCardInfo.CardIdExt.Key		= 'RBSN';
+					SET outCardInfo.CardIdExt.Value		= inSubContract.Contract.ContractIDT.RBSNumber;
+				END IF;
+			END FOR;
+		END FOR;
+
+		RETURN TRUE;
+	END;
+
+	CREATE FUNCTION extractExpiryDate(IN expDate CHARACTER) RETURNS CHARACTER
+	BEGIN
+		IF LENGTH(expDate) = 4 THEN
+			DECLARE syear CHARACTER LEFT(expDate, 2);
+			DECLARE smonth CHARACTER RIGHT(expDate, 2);
+			DECLARE expDateWithDay DATE (CAST('20'||syear||'-'||smonth||'-01' AS DATE FORMAT 'yyyy-MM-dd') + INTERVAL '1' MONTH) - INTERVAL '1' DAY;
+			RETURN CAST(expDateWithDay AS CHARACTER FORMAT 'yyyy-MM-dd');
+		ELSE
+			RETURN NULL;
+		END IF;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_ConvertWAY2MDO2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+	
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPersonContractCardTransactionsRs';
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:cards = cards;
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:ifxcust = ifxcust;
+	
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		SET outRoot.SPName = 'Way';
+		SET outRoot.Status.ifxca:StatusCode = FIELDVALUE(inRoot."resp_code");
+		SET outRoot.Status.ifxca:Severity = CASE
+			WHEN outRoot.Status.ifxca:StatusCode = '0' THEN 'Info'
+			ELSE 'Error'
+		END;
+		IF outRoot.Status.ifxca:StatusCode <> '0' THEN
+			SET outRoot.Status.ifxca:StatusDesc = FIELDVALUE(inRoot."resp_text");
+		END IF;
+		
+		SET outRoot.TransData.Trans.ContractInfo.ContractNumber		= inRoot.MsgData.Doc.Requestor.ContractNumber;
+
+		DECLARE available CHARACTER NULL;
+		DECLARE block CHARACTER NULL;
+		FOR inBalance AS inRoot.MsgData.Doc.DataRs.Balances.Balance[] DO
+			IF inBalance.Code = 'Available' THEN
+				SET available = inBalance.Amount;
+			END IF;
+			/*IF inBalance.Code = 'Block' THEN
+				SET block = inBalance.Amount;
+			END IF;*/
+		END FOR;
+
+		DECLARE outTransactionInfo REFERENCE TO outRoot;
+		FOR inStmtItem AS inRoot.MsgData.Doc.DataRs.Stmt.AdditionalStmt.StmtItem[] DO
+			CREATE LASTCHILD OF outRoot.TransData.Trans AS outTransactionInfo NAME 'TransactionInfo';
+			
+			DECLARE authCode CHARACTER NULL;
+			DECLARE prn CHARACTER NULL;
+			FOR inParm AS inStmtItem.DocData.DocRefSet.Parm[] DO
+				IF inParm.ParmCode = 'AuthCode' THEN
+					SET authCode = inParm.Value;
+				END IF;
+				IF inParm.ParmCode = 'RRN' THEN
+					SET prn = inParm.Value;
+				END IF;
+			END FOR;
+			
+			SET outTransactionInfo.OperationDate			= inStmtItem.DocData.Billing.PhaseDate;
+			SET outTransactionInfo.Type						= inStmtItem.DocData.TransType.TransTypeCode;
+			SET outTransactionInfo.Status					= inStmtItem.PostingDetails.ProcessingStatus;
+			SET outTransactionInfo.Amt						= inStmtItem.DocData.Transaction.Amount;
+			SET outTransactionInfo.TransCur					= inStmtItem.DocData.Transaction.Currency;
+			SET outTransactionInfo.Description				= inStmtItem.DocData.Description;
+			SET outTransactionInfo.TransDate				= SUBSTRING(inStmtItem.DocData.LocalDt FROM 1 FOR 10);
+			SET outTransactionInfo.AuthCode					= authCode;
+			SET outTransactionInfo.TransCountry				= inStmtItem.DocData.SourceDtls.Country;
+			SET outTransactionInfo.TransCity				= inStmtItem.DocData.SourceDtls.City;
+			SET outTransactionInfo.TransRRN					= prn;
+			SET outTransactionInfo.TransSIC					= inStmtItem.DocData.SourceDtls.SIC;
+			SET outTransactionInfo.ReturnCode				= inStmtItem.PostingDetails.Status.RespCode;
+			
+			CREATE FIELD outTransactionInfo.BalInfo;
+			IF available <> '' THEN
+				CREATE LASTCHILD OF outTransactionInfo.BalInfo NAME 'BalanceRec';
+				SET outTransactionInfo.BalInfo.BalanceRec[<].BalType	= 'AVAIL';
+				SET outTransactionInfo.BalInfo.BalanceRec[<].Amount	= available;
+			END IF;
+			IF block <> '' THEN
+				CREATE LASTCHILD OF outTransactionInfo.BalInfo NAME 'BalanceRec';
+				SET outTransactionInfo.BalInfo.BalanceRec[<].BalType	= 'BLOCK';
+				SET outTransactionInfo.BalInfo.BalanceRec[<].Amount	= block;
+			END IF;
+			IF NOT EXISTS(outTransactionInfo.BalInfo.*[]) THEN
+				SET outTransactionInfo.BalInfo = NULL;
+			END IF;
+			SET outTransactionInfo.CardInfo.cards:CardNum	= inStmtItem.DocData.ContractFor.ContractNumber;
+			SET outTransactionInfo.TransCondition			= inStmtItem.DocData.TransType.TransCondition;
+		END FOR;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_ConvertWAY2MDO3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.ApplicationResponseFile;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZMngClientProgramRs';
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:cards = cards;
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:ifxcust = ifxcust;
+	
+		SET outRoot.RqUID	= Environment.UserProperties.RqUID; --rqUid;
+		SET outRoot.RqTm	= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'IU');
+		SET outRoot.SPName	= 'Way4U';
+		SET outRoot.Status.ifxca:StatusCode	= inRoot.NotificationsList.Notification.Application.Status.RespCode;
+		SET outRoot.Status.ifxca:Severity	= 'Info';
+		SET outRoot.Status.ifxca:StatusDesc	= inRoot.NotificationsList.Notification.Application.Status.RespText;
+		
+		SET outRoot.ProgramInfo.PersonInfo.PersonIdExt.Key		= 'WAY';
+		SET outRoot.ProgramInfo.PersonInfo.PersonIdExt.Value	= inRoot.NotificationsList.Notification.Application.DataRs.ContractRs.Contract.ContractIDT.Client.ClientInfo.ClientNumber;
+		SET outRoot.ProgramInfo.ContractInfo.ContractNumber		= inRoot.NotificationsList.Notification.Application.DataRs.ContractRs.Contract.ContractIDT.ContractNumber;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

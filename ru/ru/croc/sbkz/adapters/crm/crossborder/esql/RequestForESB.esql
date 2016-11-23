@@ -1,0 +1,87 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crm.crossborder.esql
+
+
+CREATE COMPUTE MODULE RequestForESB_PrepareHeaders
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		DECLARE labelName CHARACTER;
+		DECLARE saplm     CHARACTER '0';
+		
+		CASE Operation
+		WHEN 'UpdateLegalClientCrossBorderRq' THEN
+			SET labelName = 'UpdateLegalClientCrossBorderRq';
+		WHEN 'UpdateLegalClientGroupCrossBorderRq' THEN
+			SET labelName = 'UpdateLegalClientGroupCrossBorderRq';
+		WHEN 'CrossBorderGWErrorNf' THEN 
+			SET labelName = 'CrossBorderGWErrorNf';
+
+		WHEN 'PutBusinessPartnerRs' THEN
+			SET labelName = 'PutBusinessPartnerRs';
+			SET saplm     = '1';
+		WHEN 'PutRelatedBorrowersGroupStructRs' THEN
+			SET labelName = 'PutRelatedBorrowersGroupStructRs';
+			SET saplm     = '1';
+		WHEN 'PutPositionRs' THEN
+			SET labelName = 'PutPositionRs';
+			SET saplm     = '1';
+		WHEN 'SendRateRs' THEN
+			SET labelName = 'SendRateRs';
+			SET saplm     = '1';
+		WHEN 'UpdateFinTransactionRs' THEN
+			SET labelName = 'UpdateFinTransactionRs';
+			SET saplm     = '1';
+		WHEN 'UpdateLimitRs' THEN
+			SET labelName = 'UpdateLimitRs';
+			SET saplm     = '1';
+		WHEN 'GetLimitRs' THEN
+			SET labelName = 'GetLimitRs';
+			SET saplm     = '1';
+		WHEN 'CreateLimitRs' THEN
+			SET labelName = 'CreateLimitRs';
+			SET saplm     = '1';
+		WHEN 'CalcMarkerDebtCapacityRs' THEN
+			SET labelName = 'CalcMarkerDebtCapacityRs';
+			SET saplm     = '1';
+
+		WHEN 'SendMasterDataNf' THEN
+			SET labelName = 'SendMasterDataNf';
+			SET saplm     = '2';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForCRM(crossborder)', Operation);
+		END CASE;
+		
+		CALL CopyEntireMessage();
+
+		IF saplm = '1' or saplm = '2' THEN
+		  DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+	      SET outRef.RqUID = UPPER(outRef.RqUID);
+		END IF;
+
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+		IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+		END IF;
+
+		CASE saplm
+		WHEN '1' THEN
+		 	-- Маршрутизация через SystemId
+		 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter:async:response';
+		 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:bpm';
+		WHEN '2' THEN
+		 	-- Маршрутизация через SystemId
+		 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter:async:response';
+		 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:saplmin';
+		ELSE
+			-- Маршрутизация через OperationId в ПМИЛ
+			SET OutputRoot.MQRFH2.usr.OperationId	= Operation;
+		END CASE;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

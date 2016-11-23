@@ -1,0 +1,14 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.mdm.esql
+
+-- Namespace РњР”Рћ
+DECLARE NS_MDO_ORGS CONSTANT CHARACTER 'http://sberbank.ru/dem/organizations/15';
+DECLARE	orgs	NAMESPACE 	NS_MDO_ORGS;
+DECLARE NS_MDO_IFXCA CONSTANT CHARACTER 'http://sberbank.ru/dem/commonAggregates/15';
+DECLARE ifxca NAMESPACE NS_MDO_IFXCA;
+
+
+-- Namespace Siebel
+DECLARE NS_SIEBEL_ACCOUNT CONSTANT CHARACTER 'http://www.siebel.com/xml/FINCORP%20Account%20-%20Integration';
+DECLARE fc NAMESPACE NS_SIEBEL_ACCOUNT;
+DECLARE NS_SIEBEL_PROFITABILITY CONSTANT CHARACTER 'http://siebel.com/CustomUI';
+DECLARE prf NAMESPACE NS_SIEBEL_PROFITABILITY;

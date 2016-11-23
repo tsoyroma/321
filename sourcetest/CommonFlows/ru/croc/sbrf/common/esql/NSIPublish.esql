@@ -1,0 +1,29 @@
+BROKER SCHEMA ru.croc.sbrf.common.esql
+
+
+CREATE COMPUTE MODULE NSIPublish_addMQRFH2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+
+		SET OutputRoot.MQMD.MsgType		= MQMT_DATAGRAM;
+		SET OutputRoot.MQMD.Feedback	= MQFB_NONE;
+		SET OutputRoot.MQMD.Format		= MQFMT_RF_HEADER_2;
+		--Устанавливаем наименьший приоритет
+		SET OutputRoot.MQMD.Priority	= 0;
+
+		CREATE NEXTSIBLING OF OutputRoot.MQMD DOMAIN 'MQRFH2' NAME 'MQRFH2';
+		SET OutputRoot.MQRFH2.(MQRFH2.Field)Version = 2;
+		SET OutputRoot.MQRFH2.(MQRFH2.Field)Format = MQFMT_STRING;
+		CREATE LASTCHILD OF OutputRoot.MQRFH2.psc NAME 'Command' VALUE 'Publish';
+		CREATE LASTCHILD OF OutputRoot.MQRFH2.psc NAME 'Topic' VALUE '/NSI/ESB';
+
+		DELETE FIELD InputRoot.XMLNSC;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

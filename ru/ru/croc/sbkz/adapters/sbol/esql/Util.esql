@@ -1,0 +1,18 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sbol.esql
+
+-- Константа для пространства имен, в котором объявлены методы веб-сервиса, которые предоставляет КСШ для СБОЛ
+DECLARE sbol_ws_ns NAMESPACE 'http://sberbank.kz/processing';
+-- Код общей (неспецифицированной) ошибки для HTTP-адаптера
+DECLARE CommonSBOLErrorCode CONSTANT CHARACTER '-110';
+-- Код общего описания для ошибки HTTP-адаптера
+DECLARE CommonSBOLErrorDesc CONSTANT CHARACTER 'Error has been occured on ESB';
+
+
+CREATE FUNCTION recodeYesNoForSBOL(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+		WHEN 'YES' THEN 'Y'
+		WHEN 'NO' THEN 'N'
+		ELSE param
+	END;
+END;

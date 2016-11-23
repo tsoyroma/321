@@ -1,0 +1,56 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.credit.esql
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRq (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;
+	
+END;
+
+/**
+ * Заполнение стандартных полей Transact в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRs (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;
+	SET outroot.*:*[<].Status.ifxca:StatusCode VALUE	= inroot.*:*[<].Status.ifxca:StatusCode;
+	SET outroot.*:*[<].Status.ifxca:StatusDesc VALUE	= inroot.*:*[<].Status.ifxca:StatusDesc;
+	
+END;
+
+/**
+ * Заполнение специфическими значениями поля для SOAP-заголовка
+ **/
+CREATE PROCEDURE FillSOAPHeaderFields (IN inroot REFERENCE)
+BEGIN
+	DECLARE userName 		CHARACTER;
+	DECLARE userPassword 	CHARACTER;
+	
+	CALL GetUserNameAndPassword(userName, userPassword);
+	
+	SET inroot.*:*[<].SOAPHeaderData.Culture 	= PKB_SOAP_HEADER_CULTURE;
+	SET inroot.*:*[<].SOAPHeaderData.Password 	= userPassword; 
+	SET inroot.*:*[<].SOAPHeaderData.SecToken 	= PKB_SOAP_HEADER_SECTOKEN; 
+	SET inroot.*:*[<].SOAPHeaderData.UserId 	= PKB_SOAP_HEADER_USERID; 
+	SET inroot.*:*[<].SOAPHeaderData.UserName 	= userName;
+	SET inroot.*:*[<].SOAPHeaderData.Version 	= PKB_SOAP_HEADER_VERSION; 
+	
+END;
+
+/**
+ * Процедура получения логина-пароля из БД.
+ */
+CREATE PROCEDURE GetUserNameAndPassword(
+		OUT user_name 			CHARACTER
+		, OUT user_password 	CHARACTER
+	)
+LANGUAGE DATABASE
+EXTERNAL NAME "sbkz.pkb_identity_kz.get_user_name_and_password";

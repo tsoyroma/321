@@ -1,0 +1,35 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.salary.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+/**
+ * Заполнение заголовков для маршрутизации в адаптеры Pragma&qPragma
+ **/
+CREATE COMPUTE MODULE SalaryTurnoverRequest_CreateRequests
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Сообщение для АБПК
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:pragma';
+	 	PROPAGATE TO TERMINAL 'out' DELETE NONE;
+	 	
+	 	-- Сообщение для МАБПК
+	 	-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:newpragma';
+	 	PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+
+		RETURN FALSE;
+	END;
+END MODULE;

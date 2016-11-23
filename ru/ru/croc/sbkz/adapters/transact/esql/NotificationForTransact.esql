@@ -1,0 +1,59 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.transact.esql
+
+/**
+ * Маршрутизация потока по содержимому нотификации
+ **/
+CREATE COMPUTE MODULE NotificationForTransact_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZGetBackOfficeDateNf' THEN
+			SET labelName = 'KZGetBackOfficeDateNf';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ в Transact SM "Передача информации в Бэк-офис" : KZGetBackOfficeDateNf -> GetBackOfficeDateNf
+ **/
+CREATE COMPUTE MODULE NotificationForTransact_ConvertMDONotif2Transact1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetBackOfficeDateNf';		
+		
+		CALL FillTransactStandartElementsNf(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.KZGetBackOfficeDateNf;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.GetBackOfficeDateNf;
+		
+		SET OutRs.DocNumber 	= InpRs.DocNumber;
+		SET OutRs.DocDate 		= InpRs.DocDate;
+		SET OutRs.ResultCode 	= InpRs.ResultCode;
+		SET OutRs.CardNum 		= InpRs.CardAcctId.CardNum;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;

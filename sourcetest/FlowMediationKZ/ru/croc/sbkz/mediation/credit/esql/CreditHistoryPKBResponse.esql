@@ -1,0 +1,57 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.credit.esql
+
+
+/**
+ * Берет два ответа по отчету в формате XML и
+ * по отчету в формате HTML, формирует из них
+ * один отчет, содержащий оба результата и прокидывает
+ * обратно из ПМИЛ'а.
+ **/
+CREATE COMPUTE MODULE CreditHistoryPKBResponse_MakePKBReportResult
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		IF CARDINALITY(Environment.Variables.Request[]) <> 2 THEN
+			THROW USER EXCEPTION VALUES('Two aggregated reports (XML and HTML) must exist, but found', CARDINALITY(Environment.Variables.Request[]));
+		END IF;
+		
+		CALL CopyMessageHeaders();
+		
+		DECLARE xmlReport ROW;
+		DECLARE htmlReport ROW;
+		
+		SET xmlReport = THE(SELECT R FROM Environment.Variables.Request[] AS R 
+				WHERE R.XMLNSC.KZGetCreditHistoryRs.Report IS NULL);
+		SET htmlReport = THE(SELECT R FROM Environment.Variables.Request[] AS R 
+				WHERE NOT EXISTS(R.XMLNSC.KZGetCreditHistoryRs.Agreement[]) AND R.XMLNSC.KZGetCreditHistoryRs.Report IS NOT NULL);
+		
+		IF CARDINALITY(xmlReport.*[]) = 0 THEN
+			THROW USER EXCEPTION VALUES('No XML format report');
+		END IF;
+		
+		IF CARDINALITY(htmlReport.*[]) = 0 THEN
+			THROW USER EXCEPTION VALUES('No HTML format report');
+		END IF;
+		
+		IF xmlReport.XMLNSC.KZGetCreditHistoryRs.Status.ifxca:StatusCode = STATUS_CODE_OK THEN
+			SET xmlReport.XMLNSC.KZGetCreditHistoryRs.Report = htmlReport.XMLNSC.KZGetCreditHistoryRs.Report;
+		END IF;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		SET OutputRoot.XMLNSC = xmlReport.XMLNSC;
+		
+		SET OutputRoot.XMLNSC.KZGetCreditHistoryRs.ProductVersion = '2';
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;

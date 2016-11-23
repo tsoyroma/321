@@ -1,0 +1,185 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.cakd.esql
+
+PATH ru.croc.sbkz.utils;
+
+
+DECLARE NS_MDO_INDS CONSTANT CHARACTER 'http://sberbank.ru/dem/individual/15';
+DECLARE inds	NAMESPACE	NS_MDO_INDS;
+DECLARE NS_MDO_IFXCA CONSTANT CHARACTER 'http://sberbank.ru/dem/commonAggregates/15';
+DECLARE	ifxca	NAMESPACE 	NS_MDO_IFXCA;
+
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос)
+ **/
+
+DECLARE CAKD_DATE_FORMAT CONSTANT CHARACTER 'dd/MM/yyyy';
+DECLARE ESB_DATE_FORMAT CONSTANT CHARACTER 'yyyy-MM-dd';
+
+DECLARE CAKD_DATE_GCVP_FORMAT CONSTANT CHARACTER 'dd.MM.yyyy';
+DECLARE ESB_DATE_GCVP_FORMAT CONSTANT CHARACTER 'yyyy-MM-dd';
+
+DECLARE CAKD_DATE_GCVP_FORMAT777 CONSTANT CHARACTER 'yyyy-MM-dd';
+DECLARE ESB_DATE_GCVP_FORMAT777 CONSTANT CHARACTER 'dd.MM.yyyy';
+
+
+CREATE FUNCTION convertFromCAKDDate (IN inDate CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF LENGTH(inDate) = LENGTH(CAKD_DATE_FORMAT) THEN
+		RETURN CAST(CAST(inDate AS DATE FORMAT CAKD_DATE_FORMAT) AS CHARACTER FORMAT ESB_DATE_FORMAT);
+	ELSE
+		RETURN inDate;
+	END IF;
+END;
+
+CREATE FUNCTION convertToCAKDDate (IN inDate CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF LENGTH(inDate) >= LENGTH(ESB_DATE_FORMAT) THEN
+		RETURN CAST(CAST(LEFT(inDate, LENGTH(ESB_DATE_FORMAT)) AS DATE FORMAT ESB_DATE_FORMAT) AS CHARACTER FORMAT CAKD_DATE_FORMAT);
+	ELSE
+		RETURN inDate;
+	END IF;	
+END;	 
+
+CREATE FUNCTION convertFromGCVPToCAKDDate (IN inDate CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF LENGTH(inDate) >= LENGTH(ESB_DATE_GCVP_FORMAT) THEN
+		RETURN CAST(CAST(LEFT(inDate, LENGTH(ESB_DATE_GCVP_FORMAT)) AS DATE FORMAT ESB_DATE_GCVP_FORMAT) AS CHARACTER FORMAT CAKD_DATE_GCVP_FORMAT);
+	ELSE
+		RETURN inDate;
+	END IF;	
+END; 
+
+CREATE FUNCTION convertFromGCVPToCAKDDate777 (IN inDate CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF LENGTH(inDate) >= LENGTH(ESB_DATE_GCVP_FORMAT777) THEN
+		RETURN CAST(CAST(LEFT(inDate, LENGTH(ESB_DATE_GCVP_FORMAT777)) AS DATE FORMAT ESB_DATE_GCVP_FORMAT777) AS CHARACTER FORMAT CAKD_DATE_GCVP_FORMAT777);
+	ELSE
+		RETURN inDate;
+	END IF;	
+END; 
+
+/*DECLARE NS_MDO_INDS CONSTANT CHARACTER 'http://sberbank.ru/dem/individual/15';
+DECLARE inds	NAMESPACE	NS_MDO_INDS;
+DECLARE NS_MDO_IFXCA CONSTANT CHARACTER 'http://sberbank.ru/dem/commonAggregates/15';
+DECLARE	ifxca	NAMESPACE 	NS_MDO_IFXCA;*/
+
+CREATE PROCEDURE FillMDOStandartElementsRq (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].SPName	= 'CAKD';
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;	
+END;
+
+CREATE PROCEDURE FillCAKDStandartElementsRs (IN inroot REFERENCE, IN outroot REFERENCE, IN env REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	IF FIELDVALUE(inroot.*:*[<].TSMUID) <> '' THEN
+		SET outroot.*:*[<].TSMUID	= FIELDVALUE(inroot.*:*[<].TSMUID);
+	ELSE
+		SET outroot.*:*[<].TSMUID	= COALESCE(env.UserProperties.TSMUID,'');
+	END IF;
+	
+	DECLARE statusCode CHARACTER COALESCE(inroot.*:*[<].Status.*:StatusCode, '');
+	IF statusCode='-100' THEN
+		SET statusCode = '-4';
+	END IF;
+	
+	SET outroot.*:*[<].Status.StatusCode VALUE	= statusCode;
+	SET outroot.*:*[<].Status.StatusDesc VALUE	= COALESCE(inroot.*:*[<].Status.*:StatusDesc, '');
+	
+END;
+
+CREATE FUNCTION replaceAbsentValue(IN incomingValue CHARACTER, IN defaultValue CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF incomingValue <> '' THEN
+		RETURN incomingValue;
+	ELSE		
+		RETURN defaultValue; 
+	END IF;
+END;
+
+CREATE FUNCTION isNegativeNumber(IN strValue CHARACTER) RETURNS BOOLEAN 
+BEGIN
+	DECLARE result BOOLEAN FALSE;
+	IF LEFT(strValue,1)='-' THEN
+		DECLARE intValue INTEGER;
+		SET intValue = CAST(strValue AS INTEGER DEFAULT 0);
+		IF (intValue < 0) THEN
+			SET result = TRUE;
+		END IF;	
+	END IF;	
+	RETURN result;
+END;
+
+CREATE FUNCTION recodeAddressTypeFromCAKD(IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN '1' THEN 'Home'
+		WHEN '2' THEN 'RegAddress'
+		ELSE addressType
+	END;
+END;
+
+CREATE FUNCTION recodeGenderFromCAKD(IN gender CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE gender
+		WHEN '1' THEN 'M'
+		WHEN '2' THEN 'F'
+		ELSE gender
+	END;
+END;
+
+CREATE FUNCTION recodeMaritalStatusFromCAKD(IN status CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE status
+		WHEN '1' THEN 'Single'
+		WHEN '2' THEN 'Married'
+		WHEN '3' THEN 'Divorced'
+		WHEN '4' THEN 'Widow'
+		ELSE status
+	END;
+END;
+
+CREATE FUNCTION recodeIdTypeFromCAKD(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN '1' THEN '3'
+		WHEN '2' THEN '1'
+		WHEN '3' THEN '2'
+		ELSE type
+	END;
+END;
+
+CREATE FUNCTION recodePhoneTypeFromCAKD(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN '1' THEN 'DayPhone'
+		WHEN '2' THEN 'Home'
+		WHEN '3' THEN 'Work'
+		WHEN '4' THEN 'Mobile'
+		WHEN '5' THEN 'Mobile_add'
+		ELSE type
+	END;
+END;
+
+CREATE FUNCTION recodeForeignIndFromCAKD(IN indicator CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE indicator
+		WHEN '1' THEN 'N'
+		WHEN '2' THEN 'Y'
+		ELSE indicator
+	END;
+END;
+
+CREATE FUNCTION recodeSegmentFromCAKD(IN segment CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE segment
+		WHEN 'MMS' THEN 'MMS'
+		ELSE segment
+	END;
+END;
+

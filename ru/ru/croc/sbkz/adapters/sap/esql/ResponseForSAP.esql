@@ -1,0 +1,293 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sap.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+/**
+ * Перенаправление на нужную ветку в соответствии с операцией
+ **/
+CREATE COMPUTE MODULE ResponseForSAP_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZComplexPayDocRs' THEN
+			SET labelName = 'KZComplexPayDocRs';
+		WHEN 'KZSAPSaldoRs' THEN
+			SET labelName = 'KZSAPSaldoRs';
+		WHEN 'KZLegalPayDocRs' THEN /* u00671 09/07/2014 костыль для сервиса SAP_ABC_PP */			
+			SET labelName = 'KZLegalPayDocRs';
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown format XML in SAP(ResponseForSAP)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Восстановление MQ-заголовка исходного сообщения
+ **/
+CREATE COMPUTE MODULE ResponseForSAP_AddOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+	Исходящее платежное поручение
+*/
+CREATE COMPUTE MODULE ResponseForSAP_ConvertMDO2SAP1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.[<];
+		DECLARE outRef REFERENCE TO OutputRoot;
+		
+		DECLARE subStatus CHARACTER;
+		
+		CREATE FIELD OutputRoot.XMLNSC.FILE AS outRef;
+		
+		SET outRef.(XMLNSC.Attribute)TYPE = CASE Environment.UserProperties.TransType 
+				WHEN 'SAP_ABC_PP' THEN 'ABC_SAP_PP_STATUS'
+				WHEN 'SAP_ABC_MO' THEN 'ABC_SAP_MO_STATUS'
+				ELSE NULL
+		END;
+		SET outRef.(XMLNSC.Attribute)MSGUID = Environment.UserProperties.RqUID;
+				
+		DECLARE outSTATUS REFERENCE TO outRef;
+		-- обрабатываем ошибку со стороны поставщика сервиса, кроме таймаута
+		IF inRef.Status.*:StatusCode = '-105' OR inRef.Status.*:StatusCode = '-100' THEN
+			DECLARE outF REFERENCE TO OutputRoot;
+			-- 15.05.20147 u06068
+			
+			-- Очищаю OutputRoot
+			--SET OutputRoot.XMLNSC = NULL;
+			
+			-- Десериализую оригинальное сообщение в случае Таймаута
+			/*CREATE FIRSTCHILD OF OutputRoot.XMLNSC 
+                  PARSE ( 
+                        CAST(
+                             Environment.UserProperties.StartMessage AS BLOB CCSID 1208
+                        )
+                        CCSID 1208
+                        OPTIONS FolderBitStream + ValidateNone);*/
+			
+			/*DECLARE timeoutElement REFERENCE TO OutputRoot;
+			
+			CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+			CREATE LASTCHILD OF OutputRoot.XMLNSC AS timeoutElement NAME 'FILE';
+			SET timeoutElement.(XMLNSC.Attribute)TYPE = 'ABC_SAP_TIMEOUT';
+			SET timeoutElement.(XMLNSC.Attribute)MSGUID = FIELDVALUE(Environment.UserProperties.RqUID);*/
+			
+			SET outRef.(XMLNSC.Attribute)TYPE = 'ABC_SAP_TIMEOUT';
+				
+			/*
+			-- Меняю аттрибут TYPE в поле FILE на TIMEOUT
+			SET OutputRoot.XMLNSC.FILE.(XMLNSC.Attribute)TYPE = CASE Environment.UserProperties.TransType 
+				WHEN 'SAP_ABC_PP' THEN 'ABC_SAP_TIMEOUT'
+				WHEN 'SAP_ABC_MO' THEN 'ABC_SAP_TIMEOUT'
+				ELSE NULL
+			END;*/
+												
+			RETURN TRUE;
+			
+		ELSEIF inRef.Status.*:StatusCode <> '0' THEN
+			FOR inBELNR AS Environment.UserProperties.BELNRs.BELNR[] DO
+				CREATE LASTCHILD OF outRef AS outSTATUS NAME 'STATUS';
+				SET outSTATUS.(XMLNSC.Attribute)TYPE		= 'E';
+				SET outSTATUS.(XMLNSC.Attribute)MESSAGE		= inRef.Status.*:StatusCode || ' : ' || inRef.Status.*:StatusDesc;
+				SET outSTATUS.(XMLNSC.Attribute)BELNR_ABC	= '';
+				SET outSTATUS.(XMLNSC.Attribute)BELNR		= FIELDVALUE(inBELNR);
+				
+			END FOR;
+			
+			PROPAGATE TO TERMINAL 'out';
+		ELSE
+			FOR inPayDoc AS inRef.PayDoc[] DO
+				IF inPayDoc.DocStatus <> '17041' THEN
+					
+					-- 15.05.2014 u06068
+					-- Обрезаю поле DocStatusDesc
+					SET subStatus = SUBSTRING(inPayDoc.DocStatusDesc FROM 1 FOR 15);
+					
+					-- Если встречается дубль то статсу меняется на D
+					IF subStatus = 'Already process' THEN
+						CREATE LASTCHILD OF outRef AS outSTATUS NAME 'STATUS';
+						SET outSTATUS.(XMLNSC.Attribute)TYPE		= 'D';
+						SET outSTATUS.(XMLNSC.Attribute)MESSAGE		= inPayDoc.DocStatus || ' : ' || inPayDoc.DocStatusDesc;
+						SET outSTATUS.(XMLNSC.Attribute)BELNR_ABC	= inPayDoc.PayDocInfo.DocRef;
+						SET outSTATUS.(XMLNSC.Attribute)BELNR		= inPayDoc.PayDocInfo.DocNum;
+						
+			
+					ELSE	 
+						CREATE LASTCHILD OF outRef AS outSTATUS NAME 'STATUS';
+						SET outSTATUS.(XMLNSC.Attribute)TYPE		= 'E';
+						SET outSTATUS.(XMLNSC.Attribute)MESSAGE		= inPayDoc.DocStatus || ' : ' || inPayDoc.DocStatusDesc;
+						SET outSTATUS.(XMLNSC.Attribute)BELNR_ABC	= inPayDoc.PayDocInfo.DocRef;
+						SET outSTATUS.(XMLNSC.Attribute)BELNR		= inPayDoc.PayDocInfo.DocNum;
+						END IF;
+				END IF;
+			END FOR;
+
+			IF EXISTS(outRef.STATUS[]) THEN
+				PROPAGATE TO TERMINAL 'out';
+			ELSE
+				PROPAGATE TO TERMINAL 'out1';
+			END IF;
+		END IF;
+	
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+/*
+	Запрос из SAP : Сальдо и обороты по счетам
+	KZSAPSaldoRs
+*/
+CREATE COMPUTE MODULE ResponseForSAP_ConvertMDO2SAP_Saldo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'FILE';
+		
+		SET outRef.(XMLNSC.Attribute)TYPE						= 'ABC_SAP_BALANCE';
+		SET outRef.(XMLNSC.Attribute)BUDAT						= CAST(CAST(Environment.UserProperties.BUDAT AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'dd.MM.yyyy');
+		SET outRef.(XMLNSC.Attribute)MSGUID                     = Environment.UserProperties.RqUID;
+ 
+    	DECLARE outASD REFERENCE TO outRef;		
+		FOR inAccount AS inRef.AccountStatement[] DO		
+		    CREATE LASTCHILD OF outRef AS outASD NAME 'BALANCE';			
+
+		    SET outASD.(XMLNSC.Attribute)HKONT    				= inAccount.HKONT;      -- Номер лицевого счета в АБС		
+    	    SET outASD.(XMLNSC.Attribute)WAERS    				= inAccount.WAERS;      -- Код валюты		
+	    	SET outASD.(XMLNSC.Attribute)BEGIN_S    		    = inAccount.BEGIN_S;    -- Сальдо на начало дня по Дебету
+		    SET outASD.(XMLNSC.Attribute)BEGIN_H    			= '0.0';                -- Сальдо на начало дня по Кредиту
+    		SET outASD.(XMLNSC.Attribute)TURNOVER_S  			= inAccount.TURNOVER_S; -- Оборот за день по Дебиту
+		    SET outASD.(XMLNSC.Attribute)TURNOVER_H  			= inAccount.TURNOVER_H; -- Оборот за день по Кредиту
+    		SET outASD.(XMLNSC.Attribute)END_S    				= inAccount.END_S;      -- Сальдо на конец дня по Дебету
+		    SET outASD.(XMLNSC.Attribute)END_H    				= '0.0';                -- Сальдо на конец дня по Кредиту		    
+		    SET outASD.(XMLNSC.Attribute)SIDE    				= inAccount.SIDE;       -- Тип счёта : активный/пассивный		    
+        END FOR;	
+
+		IF inRef.Status.*:StatusCode <> '0' THEN
+		  DECLARE outSTATUS REFERENCE TO outRef;
+		  FOR inStatus AS inRef.Status[] DO
+			CREATE LASTCHILD OF outRef AS outSTATUS NAME 'STATUS';
+			SET outSTATUS.(XMLNSC.Attribute)TYPE		= 'E';
+			SET outSTATUS.(XMLNSC.Attribute)MESSAGE		= inRef.Status.*:StatusDesc;
+		  END FOR;
+		  
+ 		  RETURN TRUE;
+		ELSE
+		  PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+
+		  DECLARE COUNTER INTEGER 1;
+	 	  DECLARE ARRAY_USERINFO INTEGER CARDINALITY(OutputRoot.XMLNSC.FILE.BALANCE[]);
+
+          DECLARE i INTEGER;
+          SET i = 1;
+          x : LOOP
+            IF i > ARRAY_USERINFO THEN
+                LEAVE x;
+            END IF;
+            SET OutputRoot.XMLNSC.FILE.BALANCE = NULL;
+            SET i = i + 1;
+          END LOOP x;
+
+		  SET outRef.(XMLNSC.Attribute)TYPE						    = 'ABC_SAP_DOCS';
+
+    	  DECLARE outASD REFERENCE TO outRef;		
+    	  DECLARE outDOC REFERENCE TO outASD;		
+		  FOR inAccount AS inRef.AccountStatement[] DO		
+		      CREATE LASTCHILD OF outRef AS outASD NAME 'BALANCE';			
+			  SET outASD.(XMLNSC.Attribute)HKONT    				= inAccount.HKONT;		
+
+			  FOR inDOCUMENT AS inAccount.AccountOperation[] DO		
+			      CREATE LASTCHILD OF outASD AS outDOC NAME 'DOCUMENT';			
+
+	    	      SET outDOC.(XMLNSC.Attribute)WAERS    			= inDOCUMENT.WAERS; 		
+		    	  SET outDOC.(XMLNSC.Attribute)WRBTR_H    		    = inDOCUMENT.WRBTR_H;   
+			      SET outDOC.(XMLNSC.Attribute)WRBTR_S    			= inDOCUMENT.WRBTR_S;               
+	    		  SET outDOC.(XMLNSC.Attribute)BELNR_ABC  			= inDOCUMENT.BELNR_ABC;
+			      SET outDOC.(XMLNSC.Attribute)XBLNR  			    = inDOCUMENT.XBLNR;
+	    		  SET outDOC.(XMLNSC.Attribute)USER    			    = inDOCUMENT.USER;
+	    		   
+	          END FOR;
+	          			
+          END FOR;			
+
+		  RETURN TRUE;
+		  
+		END IF;		
+   
+	END;	
+END MODULE;
+
+/* u00671 09/07/2014 костыль для сервиса SAP_ABC_PP */
+CREATE COMPUTE MODULE ResponseForSAP_ConvertMDO2SAP__LegalPayDoc
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'FILE';
+		
+		SET outRef.(XMLNSC.Attribute)TYPE						= 'ABC_SAP_HRB_REESTR_STATUS';
+		SET outRef.(XMLNSC.Attribute)BUDAT						= CAST(CAST(Environment.UserProperties.BUDAT AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'dd.MM.yyyy');
+		SET outRef.(XMLNSC.Attribute)MSGUID                     = Environment.UserProperties.RqUID;
+
+	    DECLARE outSTATUS REFERENCE TO outRef;
+
+	    DECLARE vTYPE    CHARACTER 'S';
+	    DECLARE vMESSAGE CHARACTER ' ';
+
+		IF inRef.Status.*:StatusCode <> '0' THEN
+			FOR inStatus AS inRef.Status[] DO
+				SET vTYPE		= 'E';
+				SET vMESSAGE	= inRef.Status.*:StatusDesc;
+			END FOR;
+		END IF;		
+
+		CREATE LASTCHILD OF outRef AS outSTATUS NAME 'STATUS';
+		SET outSTATUS.(XMLNSC.Attribute)BELNR		= Environment.UserProperties.DocNum;	
+		SET outSTATUS.(XMLNSC.Attribute)BELNR_ABC	= inRef.CreatedDocId;
+
+		SET outSTATUS.(XMLNSC.Attribute)TYPE		= vTYPE;
+		SET outSTATUS.(XMLNSC.Attribute)MESSAGE		= vMESSAGE;
+   
+		IF inRef.Status.*:StatusCode <> '0' THEN
+		  PROPAGATE TO TERMINAL 'out1' DELETE NONE; -- в SAP 
+ 		  RETURN FALSE;
+		ELSE
+ 		  RETURN TRUE; -- в журнал
+		END IF;		
+
+	END;	
+END MODULE;
+

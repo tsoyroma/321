@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmAggregateControl.msgnode="ComIbmAggregateControl.msgnode" xmlns:ComIbmAggregateRequest.msgnode="ComIbmAggregateRequest.msgnode" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmLabel.msgnode="ComIbmLabel.msgnode" xmlns:ComIbmMQInput.msgnode="ComIbmMQInput.msgnode" xmlns:ComIbmMQOutput.msgnode="ComIbmMQOutput.msgnode" xmlns:ComIbmRouteToLabel.msgnode="ComIbmRouteToLabel.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow"
+    xmlns:ru_croc_sbrf_bp_common_flow_EchoAggrSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EchoAggrSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow="ru/croc/sbrf/bp/common/flow/ErrorHandlerSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow" xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbkz/mediation/credit/flow/CreditHistoryRequest.msgflow"
+    nsPrefix="ru_croc_sbkz_mediation_credit_flow_CreditHistoryRequest.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.PKBAggrName" name="PKBAggrName" lowerBound="1" defaultValueLiteral="CREDITHISTORY_MEDIATION_PKB">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.PKBAggrTimeout" name="PKBAggrTimeout" lowerBound="1" defaultValueLiteral="600">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EInt"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.PragmaAggrName" name="PragmaAggrName" lowerBound="1" defaultValueLiteral="CREDITHISTORY_MEDIATION_PRAGMA">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.PragmaAggrTimeout" name="PragmaAggrTimeout" lowerBound="1" defaultValueLiteral="600">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EInt"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.PragmaCorpAggrName" name="PragmaCorpAggrName" lowerBound="1" defaultValueLiteral="CREDITHISTORY_MEDIATION_PRAGMA_CORP">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.PragmaCorpAggrTimeout" name="PragmaCorpAggrTimeout" lowerBound="1" defaultValueLiteral="600">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EInt"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="CreditHistoryRequest" bundleName="ru/croc/sbkz/mediation/credit/flow/CreditHistoryRequest" pluginId="FlowMediationKZ"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/FlowMediationKZ/icons/full/obj16/CreditHistoryRequest.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/FlowMediationKZ/icons/full/obj30/CreditHistoryRequest.gif"/>
+    <composition>
+      <nodes xmi:type="ComIbmAggregateRequest.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_1" location="767,392" folderName="REQUEST">
+        <translation xmi:type="utility:ConstantString" string="Aggregate Request"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_2" location="403,113" CurrentOperation="Сообщение получено интеграционной логикой" CurrentEventSource="ESB" CurrentEventReceiver="CREDITHISTORY_MEDIATION">
+        <translation xmi:type="utility:ConstantString" string="ESB -> MEDIATION"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_3" location="885,392" CurrentOperation="Сообщение передано интеграционной логикой в шину для дальнейшей обработки" CurrentEventSource="CREDITHISTORY_MEDIATION" CurrentEventReceiver="ESB">
+        <translation xmi:type="utility:ConstantString" string="MEDIATION -> ESB"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_4" location="261,117" EventReceiverProp="CREDITHISTORY_MEDIATION" EventSourceProp="ESB">
+        <translation xmi:type="utility:ConstantString" string="ErrorHandlerSubflow"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_5" location="544,113" computeExpression="esql://routine/ru.croc.sbkz.mediation.credit.esql#CreditHistoryRequest_DetectSystem.Main" computeMode="destination">
+        <translation xmi:type="utility:ConstantString" string="DetectSystem"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_6" location="494,387" dataSource="SBKZORA" computeExpression="esql://routine/ru.croc.sbkz.mediation.credit.esql#CreditHistoryRequest_MakeReportListRequest.Main">
+        <translation xmi:type="utility:ConstantString" string="MakeReportListRequest"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_7" location="390,206" computeExpression="esql://routine/ru.croc.sbkz.mediation.credit.esql#CreditHistoryRequest_CreateRequests.Main">
+        <translation xmi:type="utility:ConstantString" string="CreateRequests"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_9" location="231,390" computeExpression="esql://routine/ru.croc.sbkz.mediation.credit.esql#CreditHistoryRequest_FillMqRfh2usrForPKB.Main">
+        <translation xmi:type="utility:ConstantString" string="FillMqRfh2usrPKB"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_10" location="102,210" labelName="Pragma">
+        <translation xmi:type="utility:ConstantString" string="RequestForPragma"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_11" location="639,388" queueName="ROUTER.REQUEST" request="true" replyToQ="ESB.MEDIATION.CREDITHISTORY.PKB.REQUEST.REPORT">
+        <translation xmi:type="utility:ConstantString" string="ROUTER.REQUEST"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EchoAggrSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_12" location="505,464" queueName="ESB.MEDIATION.PKB.AGGR.ECHO" replyToQ="ESB.MEDIATION.CREDITHISTORY.PKB.REQUEST.REPORT">
+        <translation xmi:type="utility:ConstantString" string="EchoAggrSubflow"/>
+      </nodes>
+      <nodes xmi:type="ComIbmRouteToLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_13" location="669,114">
+        <translation xmi:type="utility:ConstantString" string="RouteToDetectedSystem"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateControl.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_14" location="374,391" aggregateName="CREDITHISTORY_MEDIATION_PKB" timeoutInterval="55">
+        <translation xmi:type="utility:ConstantString" string="Aggregate Control"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_15" location="104,390" labelName="PKB">
+        <translation xmi:type="utility:ConstantString" string="RequestForPKB"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQInput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_16" location="39,117" queueName="ESB.MEDIATION.CREDITHISTORY.REQUEST" messageDomainProperty="XMLNSC">
+        <translation xmi:type="utility:ConstantString" string="ESB.MEDIATION.CREDITHISTORY.REQUEST"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateControl.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_8" location="244,210">
+        <translation xmi:type="utility:ConstantString" string="Aggregate Control1"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EchoAggrSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_17" location="396,302" queueName="ESB.MEDIATION.CREDITHISTORY.PRAGMA.AGGR.ECHO" replyToQ="ESB.MEDIATION.CREDITHISTORY.PRAGMA.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="EchoAggrSubflow1"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_18" location="567,207" queueName="ROUTER.REQUEST" request="true" replyToQ="ESB.MEDIATION.CREDITHISTORY.PRAGMA.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="ROUTER.REQUEST.1"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateRequest.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_19" location="714,211" folderName="REQUEST_PRAGMA">
+        <translation xmi:type="utility:ConstantString" string="REQUEST_PRAGMA"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_20" location="571,293" queueName="ROUTER.REQUEST" request="true" replyToQ="ESB.MEDIATION.CREDITHISTORY.PRAGMA.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="ROUTER.REQUEST.2"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateRequest.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_21" location="706,297" folderName="REQUEST_PRAGMANEW">
+        <translation xmi:type="utility:ConstantString" string="REQUEST_PRAGMANEW"/>
+      </nodes>
+      <nodes xmi:type="ComIbmLabel.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_22" location="71,549" labelName="Pragma_Corp">
+        <translation xmi:type="utility:ConstantString" string="RequestForPragma_Corp"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateControl.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_23" location="213,549">
+        <translation xmi:type="utility:ConstantString" string="Aggregate Control2"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_24" location="478,546" computeExpression="esql://routine/ru.croc.sbkz.mediation.credit.esql#CreditHistoryRequest_CreateRequests_Corp.Main">
+        <translation xmi:type="utility:ConstantString" string="CreateRequests_Corp"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EchoAggrSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_25" location="387,646" queueName="ESB.MEDIATION.CREDITHISTORY.PRAGMA.AGGR.ECHO" replyToQ="ESB.MEDIATION.CREDITHISTORY.PRAGMACORP.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="EchoAggrSubflow2"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_26" location="624,547" queueName="ROUTER.REQUEST" request="true" replyToQ="ESB.MEDIATION.CREDITHISTORY.PRAGMACORP.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="ROUTER.REQUEST.3"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_27" location="624,638" queueName="ROUTER.REQUEST" request="true" replyToQ="ESB.MEDIATION.CREDITHISTORY.PRAGMACORP.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="ROUTER.REQUEST.4"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateRequest.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_28" location="823,551" folderName="REQUEST_PRAGMA">
+        <translation xmi:type="utility:ConstantString" string="REQUEST_PRAGMA_CORP"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateRequest.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_29" location="813,642" folderName="REQUEST_PRAGMANEW">
+        <translation xmi:type="utility:ConstantString" string="REQUEST_PRAGMANEW_CORP"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_30" location="346,545" computeExpression="esql://routine/ru.croc.sbkz.mediation.credit.esql#CreditHistoryRequest_ModifyMDO2Pragma.Main">
+        <translation xmi:type="utility:ConstantString" string="ModifyMDO2Pragma"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_13" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_16" sourceTerminalName="OutTerminal.catch" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_14" sourceNode="FCMComposite_1_9" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_9" sourceNode="FCMComposite_1_15" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_9" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_1" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_10" targetNode="FCMComposite_1_1" sourceNode="FCMComposite_1_11" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_11" targetNode="FCMComposite_1_11" sourceNode="FCMComposite_1_6" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_12" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_16" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_13" targetNode="FCMComposite_1_12" sourceNode="FCMComposite_1_14" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_14" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_16" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_15" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_14" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_8" sourceNode="FCMComposite_1_10" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_8" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_8" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_16" targetNode="FCMComposite_1_17" sourceNode="FCMComposite_1_8" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_18" targetNode="FCMComposite_1_19" sourceNode="FCMComposite_1_18" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_19" targetNode="FCMComposite_1_20" sourceNode="FCMComposite_1_7" sourceTerminalName="OutTerminal.out1" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_20" targetNode="FCMComposite_1_21" sourceNode="FCMComposite_1_20" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_21" targetNode="FCMComposite_1_23" sourceNode="FCMComposite_1_22" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_23" targetNode="FCMComposite_1_25" sourceNode="FCMComposite_1_23" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_25" targetNode="FCMComposite_1_27" sourceNode="FCMComposite_1_24" sourceTerminalName="OutTerminal.out1" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_26" targetNode="FCMComposite_1_28" sourceNode="FCMComposite_1_26" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_27" targetNode="FCMComposite_1_29" sourceNode="FCMComposite_1_27" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_22" targetNode="FCMComposite_1_30" sourceNode="FCMComposite_1_23" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_28" targetNode="FCMComposite_1_24" sourceNode="FCMComposite_1_30" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.Basic" configurable="true" describedAttribute="Property.PKBAggrName">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.PKBAggrName" bundleName="ru/croc/sbkz/mediation/credit/flow/CreditHistoryRequest" pluginId="FlowMediationKZ"/>
+        <propertyDescriptor groupName="Group.Basic" describedAttribute="Property.PKBAggrTimeout">
+          <propertyName xmi:type="utility:TranslatableString" key="Property.PKBAggrTimeout" bundleName="ru/croc/sbkz/mediation/credit/flow/CreditHistoryRequest" pluginId="FlowMediationKZ"/>
+          <propertyDescriptor groupName="Group.Basic" configurable="true" describedAttribute="Property.PragmaAggrName">
+            <propertyName xmi:type="utility:TranslatableString" key="Property.PragmaAggrName" bundleName="ru/croc/sbkz/mediation/credit/flow/CreditHistoryRequest" pluginId="FlowMediationKZ"/>
+            <propertyDescriptor groupName="Group.Basic" describedAttribute="Property.PragmaAggrTimeout">
+              <propertyName xmi:type="utility:TranslatableString" key="Property.PragmaAggrTimeout" bundleName="ru/croc/sbkz/mediation/credit/flow/CreditHistoryRequest" pluginId="FlowMediationKZ"/>
+              <propertyDescriptor groupName="Group.Basic" configurable="true" describedAttribute="Property.PragmaCorpAggrName">
+                <propertyName xmi:type="utility:TranslatableString" key="Property.PragmaCorpAggrName" bundleName="ru/croc/sbkz/mediation/credit/flow/CreditHistoryRequest" pluginId="FlowMediationKZ"/>
+                <propertyDescriptor groupName="Group.Basic" describedAttribute="Property.PragmaCorpAggrTimeout">
+                  <propertyName xmi:type="utility:TranslatableString" key="Property.PragmaCorpAggrTimeout" bundleName="ru/croc/sbkz/mediation/credit/flow/CreditHistoryRequest" pluginId="FlowMediationKZ"/>
+                </propertyDescriptor>
+              </propertyDescriptor>
+            </propertyDescriptor>
+          </propertyDescriptor>
+        </propertyDescriptor>
+      </propertyDescriptor>
+    </propertyOrganizer>
+    <attributeLinks promotedAttribute="Property.PKBAggrName" overriddenNodes="FCMComposite_1_14">
+      <overriddenAttribute href="ComIbmAggregateControl.msgnode#Property.aggregateName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.PKBAggrTimeout" overriddenNodes="FCMComposite_1_14">
+      <overriddenAttribute href="ComIbmAggregateControl.msgnode#Property.timeoutInterval"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.PragmaAggrName" overriddenNodes="FCMComposite_1_8">
+      <overriddenAttribute href="ComIbmAggregateControl.msgnode#Property.aggregateName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.PragmaAggrTimeout" overriddenNodes="FCMComposite_1_8">
+      <overriddenAttribute href="ComIbmAggregateControl.msgnode#Property.timeoutInterval"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.PragmaCorpAggrName" overriddenNodes="FCMComposite_1_23">
+      <overriddenAttribute href="ComIbmAggregateControl.msgnode#Property.aggregateName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.PragmaCorpAggrTimeout" overriddenNodes="FCMComposite_1_23">
+      <overriddenAttribute href="ComIbmAggregateControl.msgnode#Property.timeoutInterval"/>
+    </attributeLinks>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

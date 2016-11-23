@@ -1,0 +1,407 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.cakd.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE ResponseForCAKD_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZBlackListRs' THEN
+			SET labelName = 'KZBlackListRs';
+		WHEN 'KZGetCreditHistoryRs' THEN
+			SET labelName = 'KZGetCreditHistoryRs';
+		WHEN 'KZGetPensionRs' THEN
+			SET labelName = 'KZGetPensionRs';		
+		WHEN 'KZCheckMDMPersonInfoRs' THEN 
+			SET labelName = 'KZCheckMDMPersonInfoRs';	 			
+		WHEN 'KZSendMDMPrivateClientDataRs' THEN
+			SET labelName = 'KZSendMDMPrivateClientDataRs';					
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in CAKD(ResponseForCAKD)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCAKD_Convert2CAKD
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'AML_OUT';
+						 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE cur_date CHARACTER CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		
+		SET outRef.UID				= Environment.UserProperties.RqUID;
+		SET outRef.RESPONSE_DATE	= cur_date;
+		SET outRef.ERROR_CODE		= inRef.TerrStatus;
+		SET outRef.ERROR_TEXT		= inRef.BLStatus;
+		SET outRef.AML_RESULT		= inRef.AMLStatus;
+		
+		PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCAKD_AddOrigMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCAKD_Convert2CAKD_PKB
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'PKB_OUT';
+						 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE cur_date CHARACTER CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		
+		SET outRef.UID				= Environment.UserProperties.RqUID;
+		SET outRef.RESPONSE_DATE	= cur_date;
+		
+		-- Сообщения об ошибках от ПКБ иногда отсутвует в этих полях
+		--SET outRef.ERROR_CODE		= inRef.Status.*:StatusCode;
+		--SET outRef.ERROR_TEXT		= inRef.Status.*:StatusDesc;
+
+		SET outRef.ERROR_CODE		= inRef.StatusCodeCAKD; 
+		SET outRef.ERROR_TEXT		= inRef.StatusDescCAKD;		
+
+/* Для ситуаций
+    	<NS1:StatusCode xmlns:NS1="http://sberbank.ru/dem/commonAggregates/15">0</NS1:StatusCode>
+		<NS2:StatusDesc xmlns:NS2="http://sberbank.ru/dem/commonAggregates/15">Клиент найден, пустой список отчетов</NS2:StatusDesc>
+*/
+		IF inRef.Status.*:StatusDesc <> '' THEN 		
+		  SET outRef.ERROR_CODE		= 111; --- в случае ошибок от ПКБ, в САКД передавать 111
+
+		  IF inRef.Status.*:StatusDesc = 'Клиент найден, пустой список отчетов' THEN
+		  	SET outRef.ERROR_TEXT		= 'Найден идентификационный отчет';
+		  ELSE
+		  	SET outRef.ERROR_TEXT		= inRef.Status.*:StatusDesc;
+		  END IF;
+		END IF;   
+
+	    IF (CARDINALITY(inRef.PKB_RESPONSE_XML[]) = 0) then  
+		  SET outRef.PKB_RESPONSE		= ' ';
+	    ELSE
+		  --SET outRef.PKB_RESPONSE		= inRef.Report;           -- HTML отчёт
+		  SET outRef.PKB_RESPONSE.Root	= inRef.PKB_RESPONSE_XML; -- XML отчёт
+	    END IF;		  
+
+		IF outRef.ERROR_TEXT <> '' AND outRef.PKB_RESPONSE = '' THEN			 		
+		  SET outRef.PKB_RESPONSE		= 'Ошибка';
+	    END IF;		  
+		
+		PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyMessageHeaders(IN inRoot REFERENCE, IN outRoot REFERENCE) BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		DECLARE domainName CHARACTER;
+		
+		SET J = CARDINALITY(inRoot.*[]);
+		WHILE I < J DO
+			SET domainName = FIELDNAME(inRoot.*[I]);
+			IF domainName = 'Properties' THEN
+				SET outRoot.*[I] = inRoot.*[I]; 
+			ELSE
+				CREATE LASTCHILD OF outRoot DOMAIN(domainName) NAME domainName;
+				SET outRoot.*[<] = inRoot.*[I];
+			END IF;
+			SET I = I + 1;
+	    END WHILE;
+    END;
+	
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCAKD_Convert2CAKD_GCVP
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GCVP_OUT';		
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.KZGetPensionRs;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC."GCVP_OUT";
+		
+		DECLARE cur_date CHARACTER CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');
+		
+		SET OutRs.UID 				= InpRs.RqUID;
+		SET OutRs.RESPONSE_DATE		= cur_date;
+		SET OutRs.ERROR_CODE 		= FIELDVALUE(InpRs.Status.*:StatusCode);
+		SET OutRs.ERROR_TEXT 		= getStatusText(InpRs.Status.*:StatusDesc);
+		
+        CREATE LASTCHILD OF OutRs NAME 'GCVP_RESPONSE';            
+        DECLARE GCVPResponse REFERENCE TO OutRs.GCVP_RESPONSE;
+
+		DECLARE gPersonIdType CHARACTER;				
+        SET gPersonIdType = InpRs.PersonInfo.PersonIdType;
+
+		DECLARE aaaGCVP CHARACTER;
+		DECLARE ZZZ_DATE CHARACTER;			
+		
+		--DECLARE averageSum CHARACTER;
+		-- 26.01.2016 Данное вычесление требуется для определения средней суммы по ОПВ -- 
+        
+        DECLARE averageSum INTEGER 0;
+        DECLARE resultAverage CHARACTER '0'; -- инициализаровал как 0, чтобы в случае отсутвия полей не вылетал нул.
+        DECLARE enumCount INTEGER CARDINALITY(InpRs.PensionRecord[]);
+        DECLARE sum CHARACTER;
+        
+        DECLARE enumC CHARACTER CAST(enumCount AS CHARACTER);
+        
+        FOR items AS InpRs.PensionRecord[] DO
+        	
+        	SET sum = ROUND(CAST(items.SumMon AS DECIMAL), 0);
+        	SET averageSum = averageSum + CAST(sum AS INTEGER);        	
+        	
+        END FOR;
+         -- Добавил условие на проверку. Т.к. язык не позволяет делить на ноль        
+		IF enumCount <> 0 THEN
+			SET resultAverage = ROUND(CAST((averageSum / 6) AS DECIMAL),0);
+		END IF;
+				
+        IF gPersonIdType = '1' THEN -- РНН
+			FOR postAddrZZZ AS InpRs.FirstRecord[] DO
+				SET ZZZ_DATE = convertFromGCVPToCAKDDate(postAddrZZZ.birthDate);
+				--SET averageSum = ROUND(CAST(postAddrZZZ.avgOVPSumm AS DECIMAL), 0);
+				
+		        SET aaaGCVP  = postAddrZZZ.requestNumber     || 
+		                    '|' || postAddrZZZ.SIK           || 
+		                    '|' || postAddrZZZ.IIN           || 
+		                    '|' || postAddrZZZ.surName       || 
+		                    '|' || postAddrZZZ.firstName     || 
+		                    '|' || postAddrZZZ.middleName    || 
+		                    '|' || ZZZ_DATE                  || 
+		                    '|' || postAddrZZZ.status        || 
+		                    '|' || enumC				     || 
+		                    '|' || resultAverage			 ||
+		                    '\n';
+			END FOR;
+        END IF;  
+
+        --- !!! переделать
+		DECLARE aaaFFF01 CHARACTER;
+		DECLARE aaaFFF02 CHARACTER;
+		DECLARE aaaFFF03 CHARACTER;
+		DECLARE aaaFFF04 CHARACTER;
+		DECLARE aaaFFF05 CHARACTER;
+		DECLARE aaaFFF06 CHARACTER;
+		DECLARE aaaFFF07 CHARACTER;
+		DECLARE aaaFFF08 CHARACTER;
+		DECLARE aaaFFF09 CHARACTER;
+          
+        IF gPersonIdType = '2' THEN -- ИИН
+			FOR postAddrZZZ AS InpRs.FirstRecord[] DO
+				SET ZZZ_DATE = convertFromGCVPToCAKDDate(postAddrZZZ.birthDate);
+				
+				SET aaaFFF01  = postAddrZZZ.requestNumber; 
+		        SET aaaFFF02  = postAddrZZZ.IIN; 
+		        
+	            IF postAddrZZZ.surName IS NOT NULL THEN	        
+		           SET aaaFFF03  = postAddrZZZ.surName;
+		        ELSE   
+		           SET aaaFFF03  = '';
+				END IF;
+	
+	            IF postAddrZZZ.firstName IS NOT NULL THEN	        
+		           SET aaaFFF04  = postAddrZZZ.firstName;
+		        ELSE   
+		           SET aaaFFF04  = '';
+				END IF;
+	
+	            IF postAddrZZZ.middleName IS NOT NULL THEN	        
+		           SET aaaFFF05  = postAddrZZZ.middleName;
+		        ELSE   
+		           SET aaaFFF05  = '';
+				END IF;
+		         
+		        SET aaaFFF06  = ZZZ_DATE; 
+		        SET aaaFFF07  = postAddrZZZ.status; 
+		        SET aaaFFF08  = enumCount; 
+		        --SET aaaFFF09  = ROUND(CAST(postAddrZZZ.avgOVPSumm AS DECIMAL), 0);
+				
+		        SET aaaGCVP  = aaaFFF01    || 
+	                    '|' || aaaFFF02    || 
+	                    '|' || aaaFFF03    || 
+	                    '|' || aaaFFF04    || 
+	                    '|' || aaaFFF05    || 
+	                    '|' || aaaFFF06    || 
+	                    '|' || aaaFFF07    || 
+	                    '|' || aaaFFF08    ||
+	                    '|' || resultAverage || 
+	                    '\n';
+	/*
+		        SET aaaGCVP  = postAddrZZZ.requestNumber     || 
+		                    '|' || postAddrZZZ.IIN           || 
+		                    '|' || postAddrZZZ.surName       || 
+		                    '|' || postAddrZZZ.firstName     || 
+		                    '|' || postAddrZZZ.middleName    || 
+		                    '|' || ZZZ_DATE                  || 
+		                    '|' || postAddrZZZ.status        || 
+		                    '|' || postAddrZZZ.enumNum       || 
+		                    '|' || postAddrZZZ.avgOVPSumm    || '\n';
+	*/
+			END FOR;
+        END IF;  
+
+        SET GCVPResponse = aaaGCVP;
+		DECLARE IsdDATE CHARACTER CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd.MM.YYYY hh:mm:ss');				
+
+		DECLARE IsdNAME CHARACTER;				
+		DECLARE IsdSTROKA CHARACTER;				
+		DECLARE IsdSUM CHARACTER;	 
+     
+         
+			FOR postAddr AS InpRs.PensionRecord[] DO
+	          /*
+				  SET GCVPResponse = GCVPResponse || postAddr.DatePmt               || 
+				                              '|' || postAddr.OrgInfo.*:Name         || 
+			                              '||' || postAddr.PersonInfo.PersonId;
+			                              
+	
+	          */		  
+			  SET IsdDATE 	   = convertFromGCVPToCAKDDate(postAddr.DatePmt);
+			  SET IsdNAME 	   = REPLACE(postAddr.OrgInfo.*:Name, '"', ''); -- !!! обработка кавычек 
+			  
+			  SET IsdSTROKA = IsdDATE   || '|';
+			  SET IsdSTROKA = IsdSTROKA || IsdNAME || '||' ;
+			  SET IsdSTROKA = IsdSTROKA || postAddr.PersonInfo.PersonId || '|';
+			  SET IsdSUM = ROUND(CAST(postAddr.SumMon AS DECIMAL), 0);
+			  SET IsdSTROKA = IsdSTROKA || IsdSUM || '\n';
+			  
+			  ---SET IsdSTROKA = IsdDATE ||  '|'  || IsdNAME || '||' || postAddr.PersonInfo.PersonId || '\n';
+			   			   		                              		                              
+			  SET GCVPResponse = GCVPResponse  || IsdSTROKA;		                              
+
+			END FOR;
+				
+		PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+				
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+	
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForTransact_ConvertMDO2Transact_GetPersonData
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'GetPersonDataByIdRs';		
+		
+		CALL FillCAKDStandartElementsRs(InputBody, OutputRoot.XMLNSC, Environment);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZCheckMDMPersonInfoRs;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.GetPersonDataByIdRs;
+		DECLARE outPerson REFERENCE TO outRef;
+		
+		SET outRef.CountsClient 	= '';
+		
+		DECLARE counter INTEGER 0;
+		FOR inPerson AS inRef.PersonInfo[] DO
+			DECLARE idEpk CHARACTER;
+			SET idEpk = replaceAbsentValue(THE(SELECT ITEM idExt.Value FROM inPerson.PersonIdExt[] AS idExt WHERE idExt.Key='CIF'),'ERROR');
+			
+			IF isNegativeNumber(idEpk)=FALSE THEN				
+				CREATE LASTCHILD OF outRef AS outPerson NAME 'PersonInfo';
+				SET outPerson.IIN					= replaceAbsentValue(THE(SELECT ITEM idExt.Value FROM inPerson.PersonIdExt[] AS idExt WHERE idExt.Key='IIN'),'ERROR');
+				SET outPerson.IdEPK					= idEpk;
+				SET outPerson.Surname				= inPerson.*:PersonName.*:LastName;
+				SET outPerson.Name					= inPerson.*:PersonName.*:FirstName;
+				SET outPerson.FatherName			= inPerson.*:PersonName.*:MiddleName;
+				IF FIELDVALUE(inPerson.*:BirthDt) <> '' THEN
+					SET outPerson.DateBirth				= FIELDVALUE(inPerson.*:BirthDt);
+				END IF;
+				SET outPerson.PriznakVip			= inPerson.StatusVIP;
+				SET outPerson.Category				= COALESCE(inPerson.ClientCategory,'None');
+				
+				SET counter = counter + 1;
+			ELSE
+				CREATE LASTCHILD OF outRef AS outPerson NAME 'PersonInfo';
+				SET outPerson.IIN					= replaceAbsentValue(THE(SELECT ITEM idExt.Value FROM inPerson.PersonIdExt[] AS idExt WHERE idExt.Key='IIN'),'ERROR');	
+				SET outPerson.IdEPK					= idEpk;	
+						
+			END IF;
+		END FOR;
+		
+		SET outRef.CountsClient 	= counter;
+		PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForCAKD_ConvertMDO2Transact_UpdatePersonData
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'UpdatePersonDataToEpkRs';		
+		
+		CALL FillCAKDStandartElementsRs(InputBody, OutputRoot.XMLNSC, Environment);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZSendMDMPrivateClientDataRs;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.UpdatePersonDataToEpkRs;
+		DECLARE outPerson REFERENCE TO outRef;
+		
+		SET outRef.CountsClient 	= CARDINALITY(inRef.PersonInfo[]);
+		FOR inPerson AS inRef.PersonInfo[] DO
+			CREATE LASTCHILD OF outRef AS outPerson NAME 'PersonInfo';
+			SET outPerson.IIN					= THE(SELECT ITEM idExt.Value FROM inPerson.PersonIdExt[] AS idExt WHERE idExt.Key='CAKD');
+			SET outPerson.IdEPK					= THE(SELECT ITEM idExt.Value FROM inPerson.PersonIdExt[] AS idExt WHERE idExt.Key='CIF');
+		END FOR;
+		PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		RETURN TRUE;
+	END;
+END MODULE;

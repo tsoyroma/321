@@ -1,0 +1,142 @@
+BROKER SCHEMA ru.croc.sbrf.bp.common.esql
+
+DECLARE CurrentOperation EXTERNAL CHARACTER 'UNKNOWN';
+DECLARE CurrentEventSource EXTERNAL CHARACTER 'UNKNOWN';
+DECLARE CurrentEventReceiver EXTERNAL CHARACTER 'UNKNOWN';
+DECLARE IsAggregate EXTERNAL BOOLEAN FALSE;
+DECLARE SourceQueue EXTERNAL CHARACTER 'UNKNOWN';
+DECLARE IsCopyToOperLog EXTERNAL BOOLEAN FALSE;
+-- TODO ExtLog
+-- Признак записывать информацию о транзакции в отдельный лог 
+DECLARE SendTransactionDetails EXTERNAL CHARACTER '0';
+
+CREATE COMPUTE MODULE EventLogSubflow_CreateEventMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- Делаем ссылку
+		DECLARE origUPRef REFERENCE TO Environment.UserProperties;
+		IF IsAggregate THEN
+			MOVE origUPRef TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties;
+		END IF;
+		
+		-- Определим кодировку входящего сообщения
+		DECLARE inEncoding INT;
+		DECLARE inCCSID INT; 
+
+		IF NOT EXISTS(InputRoot.MQMD[]) THEN
+			SET inEncoding = InputRoot.Properties.Encoding;
+			SET inCCSID    = InputRoot.Properties.CodedCharSetId;
+		ELSE
+			-- Если заголовок содержит MQRFH2 фолдер, то берем информацию о кодировке оттуда
+			-- Для pub/sub в MQMD передается неправильная кодировка 819
+			IF InputRoot.MQMD.Format = MQFMT_RF_HEADER_2 THEN
+				SET inEncoding = InputRoot.MQRFH2.Encoding;
+				SET inCCSID    = InputRoot.MQRFH2.CodedCharSetId;			
+			ELSE	
+				SET inEncoding = InputRoot.MQMD.Encoding;
+				SET inCCSID    = InputRoot.MQMD.CodedCharSetId;
+			END IF;	
+		END IF;
+		
+		IF inEncoding IS NULL THEN
+			SET inEncoding = ESB_LOG_ENCODING;
+		END IF;
+		
+		IF inCCSID IS NULL THEN
+			SET inCCSID    = ESB_LOG_CCSID;
+		END IF;
+		
+		-- Определим имя очереди и имя менеджера назначения (для логирования)
+		DECLARE destQMgr CHARACTER CheckStr(InputLocalEnvironment.WrittenDestination.MQ.DestinationData.queueManagerName);
+		DECLARE destQ	 CHARACTER CheckStr(InputLocalEnvironment.WrittenDestination.MQ.DestinationData.queueName);
+		
+		-- Если имя очереди указано, а имя менеджера неопределенное, 
+		-- то это локальный менеджер
+		IF destQ <> 'UNKNOWN' AND destQMgr = 'UNKNOWN' THEN
+			SET destQMgr = origUPRef.QMgr;
+		END IF;
+
+		-- Создаем заголовок MQMD
+		CALL CreateMQMDHeaderELMess(OutputRoot,inCCSID,inEncoding);		
+
+		-- Сформируем содержимое usr-заголовок
+		DECLARE usrHeader ROW;
+
+		SET usrHeader.EventDate       = getLocalTimeStamp();
+		SET usrHeader.EventSource     = CurrentEventSource;
+		SET usrHeader.EventReciever   = CurrentEventReceiver;
+		SET usrHeader.Operation       = CurrentOperation;
+
+		IF SourceQueue <> 'UNKNOWN' THEN
+			SET usrHeader.SourceQueue = SourceQueue;
+		ELSE	
+			-- ВНИМАНИЕ! WORKAROUND! TODO
+			-- В SourceQueue после аггрегации иногда приходит значение true типа BOOLEAN
+			DECLARE isq CHARACTER CAST(InputRoot.MQMD.SourceQueue AS CHARACTER);
+			DECLARE csq CHARACTER CAST(InputRoot.ComIbmAggregateReplyBody.*[<].MQMD.SourceQueue AS CHARACTER);
+			SET usrHeader.SourceQueue = CheckStr2(
+				CASE WHEN isq <> 'TRUE' THEN isq ELSE NULL END,
+				CASE WHEN csq <> 'TRUE' THEN csq ELSE NULL END);	
+		END IF;
+
+		SET usrHeader.SourceQM    	  = origUPRef.QMgr;
+		SET usrHeader.TargetQueue 	  = destQ;
+		SET usrHeader.TargetQM	  	  = destQMgr;
+		SET usrHeader.ReplyQueue  	  = CheckStr2(origUPRef.ReplyToQ, 'NONE');
+		-- если очередь ответов не указана, то и менеджер очередей ответов принудительно проставим как не указанный
+		-- т.к. по умолчанию он задается равным текущим
+		IF usrHeader.ReplyQueue = 'NONE' THEN
+			SET usrHeader.ReplyQM 	  = 'NONE';
+		ELSE
+			SET usrHeader.ReplyQM 	  = CheckStr(origUPRef.ReplyToQMgr);
+		END IF;
+		SET usrHeader.ProcStatus 	  = 'SUCCESS';
+		SET usrHeader.ErrorText  	  = '';
+		SET usrHeader.RqUID       	  = CheckStr(origUPRef.RqUID);
+		SET usrHeader.IsCopyToOperLog = IsCopyToOperLog;
+		-- 28.07.2011 Добавили новое поле для логирования
+		SET usrHeader.OperationName   = origUPRef.OperationNameForLog;
+
+		-- Создаем заголовок MQRFH2.usr
+		CALL CreateMQRFH2usrHeaderELMess(OutputRoot,usrHeader);			
+
+		IF Environment.DisableNodeLogging = '0' THEN
+			-- Добавляем тело сообщения
+			CALL CreateBlobELMess(InputRoot,OutputRoot,inCCSID,inEncoding);
+		END IF;
+				
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE FILTER MODULE EventLogSubflow_IsAggr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+ 		-- Случай, когда подпоток используется после ноды AggregateReply		
+		IF IsAggregate THEN 
+			-- Параметры для логирования и для ErrorResponseSubflow
+			SET Environment.UserProperties 			  = Root.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties; 
+			SET Environment.UserProperties.InputMsgId = Root.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.MQMD.MsgId;
+		END IF;		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+
+CREATE COMPUTE MODULE EventLogSubflow_CreateTransactionDetailsMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- TODO ExtLog
+		-- Если необходимо дополнительно отправить 
+		-- расширенную информацию о транзакции в очередь EVENT.TRANSACTION.LOG
+		IF SendTransactionDetails = '1' THEN
+			CALL CreateMQRFH2usrHeaderExtLogMess(InputRoot,OutputRoot);
+			RETURN TRUE;
+		ELSE	
+			RETURN FALSE;
+		END IF;	
+		
+	END;
+END MODULE;

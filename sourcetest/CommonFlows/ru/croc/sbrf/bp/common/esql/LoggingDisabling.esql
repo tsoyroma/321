@@ -1,0 +1,40 @@
+BROKER SCHEMA ru.croc.sbrf.bp.common.esql
+
+-- признак отключения логирования в КСШ в данном узле
+-- 0 - включено полное логирование 
+-- 1 - логирование отключено
+-- 2 - включено логирование без тела сообщения
+DECLARE DisableNodeLogging EXTERNAL CHARACTER '0';
+
+CREATE FILTER MODULE IsDisableFlowLogging
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- Проставляем признак для дальнейшего анализа в модуле логирования
+		SET Environment.DisableNodeLogging = DisableNodeLogging;
+		-- Если логирование отключено на уровне потока и на уровне узла, то ничего не делаем
+		IF	Environment.DisableFlowLogging = TRUE OR DisableNodeLogging = '1' THEN
+			RETURN TRUE;
+		ELSE
+			RETURN FALSE;
+		END IF;
+	END;
+END MODULE;
+
+CREATE FILTER MODULE IsDisableFlowLoggingForTimeout
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- проверим наличие в Environment регуляторов логирования
+		-- они могли пропасть, если мы только что вышли из узла AggregateReply по таймауту.
+		-- если это так, восстановим их
+		IF NOT EXISTS(Environment.DisableFlowLogging[]) THEN
+			SET Environment.DisableFlowLogging = CAST(Root.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.DisableFlowLoggingBACKUP AS BOOLEAN);
+		END IF;
+		
+		IF	Environment.DisableFlowLogging = TRUE OR
+			DisableNodeLogging = '1' THEN
+			RETURN TRUE;
+		ELSE
+			RETURN FALSE;
+		END IF;
+	END;
+END MODULE;

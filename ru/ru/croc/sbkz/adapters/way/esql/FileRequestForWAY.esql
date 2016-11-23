@@ -1,0 +1,23 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.way.esql
+
+
+CREATE COMPUTE MODULE FileRequestForWAY_SetFilename
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.ApplicationFile;
+		DECLARE outRfh REFERENCE TO OutputRoot.MQRFH2.usr.FileExchange;
+		SET OutputLocalEnvironment = InputLocalEnvironment; 
+		
+		SET OutputLocalEnvironment.Destination.File.Name = 'XADVAPL003800_' || FIELDVALUE(outRef.FileHeader.Number) || '.' || FIELDVALUE(outRfh.DayNum);
+		
+		SET Environment.UserProperties.RqUID = FIELDVALUE(outRfh.RqUID);
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+

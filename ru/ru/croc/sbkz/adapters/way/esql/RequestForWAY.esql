@@ -1,0 +1,273 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.way.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+DECLARE sourceContractNumber EXTERNAL CHARACTER '0';
+DECLARE transactionsDayInterval EXTERNAL CHARACTER '30';
+
+DECLARE FileNumberCache SHARED DECIMAL;
+DECLARE FileNumberCacheDay SHARED CHARACTER '999';
+--DECLARE FilePropertiesCache SHARED ROW;
+--DECLARE FileMsgIdCache SHARED ROW;
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE RequestForWAY_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZGetPersonContractsCardsRq' THEN
+			SET labelName = 'KZGetPersonContractsCardsRq';
+		WHEN 'KZGetPersonContractCardTransactionsRq' THEN
+			SET labelName = 'KZGetPersonContractCardTransactionsRq';
+		WHEN 'KZMngClientProgramRq' THEN
+			SET labelName = 'KZMngClientProgramRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForWAY_ConvertMDO2WAY1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetPersonContractsCardsRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		SET Environment.UserProperties.SPName = 'Web';
+		CALL FillStandardUFXFieldsReq2(InputRoot.XMLNSC, OutputRoot.XMLNSC, Environment.UserProperties, 'Information', 'WAY4Appl');
+
+		SET outRoot.MsgData.Information.RegNumber	= GenerateUUID();
+		SET outRoot.MsgData.Information.Institution	= '0038';
+		SET outRoot.MsgData.Information.InstitutionIDType = 'Branch';
+		SET outRoot.MsgData.Information.ObjectType	= 'Contract';
+		SET outRoot.MsgData.Information.ActionType	= 'Inquiry';
+		SET outRoot.MsgData.Information.ResultDtls.Parm[1].ParmCode	= 'Status';
+		SET outRoot.MsgData.Information.ResultDtls.Parm[1].Value	= 'Y';
+		SET outRoot.MsgData.Information.ResultDtls.Parm[2].ParmCode	= 'Product';
+		SET outRoot.MsgData.Information.ResultDtls.Parm[2].Value	= 'Y';
+		SET outRoot.MsgData.Information.ResultDtls.Parm[3].ParmCode	= 'Children';
+		SET outRoot.MsgData.Information.ResultDtls.Parm[3].Value	= 'Y';
+		SET outRoot.MsgData.Information.ResultDtls.Parm[4].ParmCode	= 'Balance';
+		SET outRoot.MsgData.Information.ResultDtls.Parm[4].Value	= 'Y';
+		SET outRoot.MsgData.Information.ResultDtls.Parm[5].ParmCode	= 'Client';
+		SET outRoot.MsgData.Information.ResultDtls.Parm[5].Value	= 'Y';
+		SET outRoot.MsgData.Information.ResultDtls.Parm[6].ParmCode	= 'Parent';
+		SET outRoot.MsgData.Information.ResultDtls.Parm[6].Value	= 'Y';
+		
+		DECLARE way CHARACTER;
+		FOR inPersonIdExt AS inRoot.PersonInfo.PersonIdExt[] DO
+			IF inPersonIdExt.Key = 'WAY' THEN
+				SET way = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		SET outRoot.MsgData.Information.ObjectFor.ClientIDT.ClientInfo.ClientNumber	= way;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForWAY_ConvertMDO2WAY2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetPersonContractCardTransactionsRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		SET Environment.UserProperties.SPName = 'Web';
+		CALL FillStandardUFXFieldsReq2(InputRoot.XMLNSC, OutputRoot.XMLNSC, Environment.UserProperties, 'Doc', 'WAY4Doc');
+
+		SET outRoot.MsgData.Doc.TransType.TransCode.MsgCode	= '01000S';
+		SET outRoot.MsgData.Doc.DocRefSet.Parm.ParmCode		= 'SRN';
+		SET outRoot.MsgData.Doc.DocRefSet.Parm.Value		= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'HHmmssSSSSSS');
+		SET outRoot.MsgData.Doc.LocalDt 					= CAST(CAST(inRoot.RqTm AS TIMESTAMP FORMAT 'IU') AS CHARACTER FORMAT 'yyyy-MM-dd HH:mm:ss');
+		SET outRoot.MsgData.Doc.Requestor.ContractNumber	= CASE
+			WHEN inRoot.ContractInfo.ContractExtId.Key = 'RBSN' THEN inRoot.ContractInfo.ContractExtId.Value
+			WHEN inRoot.CardInfo.CardIdExt.Key = 'RBSN' THEN inRoot.CardInfo.CardIdExt.Value
+			ELSE NULL
+		END;
+		SET outRoot.MsgData.Doc.Source.ContractNumber		= sourceContractNumber;
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[1].ParmCode	= 'StmtType';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[1].Value	= 'Additional';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[2].ParmCode	= 'Balance';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[2].Value	= 'Y';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[3].ParmCode	= 'StmtContType';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[3].Value	= 'All';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[4].ParmCode	= 'RequestedLanguage';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[4].Value	= 'ENG';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[5].ParmCode	= 'DateFrom';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[5].Value	= CAST((CURRENT_DATE - CAST(transactionsDayInterval AS INTERVAL DAY)) AS CHARACTER FORMAT 'yyyy-MM-dd');
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[6].ParmCode	= 'DateTo';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[6].Value	= CAST(CURRENT_DATE AS CHARACTER FORMAT 'yyyy-MM-dd');
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForWAY_ConvertMDO2WAY3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZMngClientProgramRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'ApplicationFile';
+		
+		DECLARE currentFileNumber CHARACTER GetNextFileNumber();
+		
+		SET outRoot.FileHeader.FormatVersion		= '2.0';
+		SET outRoot.FileHeader.Sender				= '0038';
+		SET outRoot.FileHeader.CreationDate			= CAST(CAST(inRoot.RqTm AS TIMESTAMP FORMAT 'IU') AS CHARACTER FORMAT 'yyyy-MM-dd');
+		SET outRoot.FileHeader.CreationTime			= CAST(CAST(inRoot.RqTm AS TIMESTAMP FORMAT 'IU') AS CHARACTER FORMAT 'HH-mm-ss');
+		SET outRoot.FileHeader.Number				= SUBSTRING(currentFileNumber AFTER '_');
+		SET outRoot.FileHeader.Institution			= '0038';
+		
+		CREATE FIELD outRoot.ApplicationsList;
+		DECLARE outApplication REFERENCE TO outRoot;
+		DECLARE I INTEGER 1;
+		FOR inProgramInfo AS inRoot.ProgramInfo[] DO
+			CREATE LASTCHILD OF outRoot.ApplicationsList AS outApplication NAME 'Application';
+			
+			DECLARE rbsn CHARACTER;
+			FOR inContractExtId AS inProgramInfo.ContractInfo.ContractExtId[] DO
+				IF inContractExtId.Key = 'RBSN' THEN
+					SET rbsn = inContractExtId.Value;
+				END IF;
+			END FOR;
+			
+			SET outApplication.RegNumber		= 'APL_AS_' || currentFileNumber || '_' || CAST(I AS CHARACTER FORMAT '000');
+			SET outApplication.OrderDprt		= 'TKH';
+			SET outApplication.ObjectType		= 'Event';
+			SET outApplication.ActionType		= 'Add';
+			SET outApplication.ObjectFor.ContractIDT.ContractNumber					= inProgramInfo.ContractInfo.ContractNumber;
+			SET outApplication.ObjectFor.ContractIDT.RBSNumber						= rbsn;
+			SET outApplication.ObjectFor.ContractIDT.Client.ClientInfo.ShortName	= FIELDVALUE(inProgramInfo.PersonInfo.*:FullName);
+			SET outApplication.Data.QueEvent.ActionCode								= CASE
+				WHEN inProgramInfo.Action = 'ADD' THEN 'ENR_CASHB'
+				WHEN inProgramInfo.Action = 'DEL' THEN 'UNENR_CASHB'
+				ELSE NULL
+			END;
+			SET outApplication.Data.QueEvent.Comment								= CASE
+				WHEN inProgramInfo.Action = 'ADD' THEN 'Activate'
+				WHEN inProgramInfo.Action = 'DEL' THEN 'Deactivate'
+				ELSE NULL
+			END;
+			
+			SET I = I + 1;
+		END FOR;
+		
+		SET Environment.UserProperties.FileExchange.DayNum 		= SUBSTRING(currentFileNumber BEFORE '_');
+		SET Environment.UserProperties.FileExchange.FileNum 	= SUBSTRING(currentFileNumber AFTER '_');
+		SET Environment.UserProperties.FileExchange.RqUID 		= inRoot.RqUID;
+		
+		IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	
+	 	SET OutputRoot.MQRFH2.usr.FileExchange.RqUID			= 	inRoot.RqUID;	
+	 	SET OutputRoot.MQRFH2.usr.FileExchange.DayNum 			= 	SUBSTRING(currentFileNumber BEFORE '_');
+	 	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE FUNCTION GetNextFileNumber() RETURNS CHARACTER
+BEGIN
+	DECLARE retFileNumber CHARACTER '';
+	
+	FILE_NUMBER_CACHE_LOCK : BEGIN ATOMIC
+		DECLARE curDay CHARACTER CAST(EXTRACT(DAYOFYEAR FROM CURRENT_DATE) AS CHARACTER FORMAT '000');
+		IF curDay <> FileNumberCacheDay THEN
+			SET FileNumberCache = 1;
+			SET FileNumberCacheDay = curDay;
+			SET retFileNumber = curDay || '_00001';
+		ELSE
+			SET FileNumberCache = FileNumberCache + 1;
+			SET retFileNumber = curDay || '_' || CAST(FileNumberCache AS CHARACTER FORMAT '00000');			
+		END IF;
+	END FILE_NUMBER_CACHE_LOCK;
+	
+	RETURN retFileNumber;
+END;
+
+
+/*
+ * Интерфейс TBP_PAY проводки билингового платежа u06068 SBOLRS -> WAY -> SBOLRS 16.12.2014
+ */
+CREATE COMPUTE MODULE RequestForWAY_ConvertMDO2WAY4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWAYAuthRetailRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_Retail_AuthReq';
+		
+		SET doc.TransType.TransCondition				= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.MadeOperationId;
+		
+		SET doc.Decription		=	inRoot.RecipientRec.CodeRecipientBS;
+		SET doc.LocalDt = CAST(inRoot.SBOLTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.ContractNumber;
+		SET doc.Source.ContractNumber	    = '03806767';
+		--SET doc.Destination.ContractNumber  = inRoot.DestinationContractNumber;
+		SET doc.Transaction.Currency		= 'KZT';	
+		SET doc.Transaction.Amount			= THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Amount');
+		SET doc.Transaction.Extra.Type		= 'AddInfo';
+		SET doc.Transaction.Extra.Details	= 'SBOL_CheckAuthDuplicate;Biller=OwnAcc;';	
+		
+		RETURN TRUE;
+	END;
+END MODULE;

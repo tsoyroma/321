@@ -1,0 +1,129 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.mdm.esql
+
+DECLARE sendRequestToEpk EXTERNAL CHARACTER '0';
+
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE ClientInfoRequest_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZGetCompPersonInfoByIDRq' THEN
+			SET labelName = 'KZGetCompPersonInfoByIDRq';
+		WHEN 'KZExpMDMCompPrivateClientDataRq' THEN
+			SET labelName = 'KZExpMDMCompPrivateClientDataRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ClientInfoRequest_CreateRequestFanout
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+		SET OutputRoot.MQMD.Format = MQFMT_RF_HEADER_2;
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация по коду системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:newpragma';
+		
+		SET OutputRoot.XMLNSC.*[<] NAME = 'KZGetPersonInfoByIDRq';
+		
+		PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		
+		SET OutputRoot.XMLNSC.*[<] = NULL;
+		CREATE FIELD OutputRoot.XMLNSC.KZGetPrivateClientAccountListRq AS outRef;
+		
+		SET outRef.RqUID		= inRef.RqUID;
+		SET outRef.RqTm			= inRef.RqTm;
+		SET outRef.SPName		= inRef.SPName;
+		SET outRef.PersonInfo	= inRef.PersonInfo;
+
+		PROPAGATE TO TERMINAL 'out2' DELETE NONE;
+
+		IF sendRequestToEpk = '1' THEN
+		 	-- Маршрутизация по коду системы
+		 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:epk';
+	
+			SET OutputRoot.XMLNSC.*[<] = NULL;
+			CREATE FIELD OutputRoot.XMLNSC.KZGetMDMPersonInfoByAttrRq AS outRef;
+			
+			SET outRef.RqUID		= inRef.RqUID;
+			SET outRef.RqTm			= inRef.RqTm;
+			SET outRef.SPName		= inRef.SPName;
+			SET outRef.PersonInfo	= inRef.PersonInfo;
+			
+			PROPAGATE TO TERMINAL 'out';
+		END IF;
+
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ClientInfoRequest_CreateRequestFanout1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+		SET OutputRoot.MQMD.Format = MQFMT_RF_HEADER_2;
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+		-- удалим старый маршрут
+	 	SET OutputRoot.MQRFH2.usr			= NULL;
+	 	
+	 	-- запросы не в розничный CRM идут без преобразования
+	 	IF COALESCE(inRef.TargetSPName, '') <> 'CRMr' THEN
+			RETURN FALSE;
+			
+		-- отсылаем дополнительные запросы в Прагму
+	 	ELSE
+		 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+		 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:newpragma';
+			
+			-- получение суррогатных ключей
+			SET OutputRoot.XMLNSC.*[<] = NULL;
+			CREATE FIELD OutputRoot.XMLNSC.KZGetPersonInfoByIDRq AS outRef;
+			
+			SET outRef.RqUID		= inRef.RqUID;
+			SET outRef.RqTm			= inRef.RqTm;
+			SET outRef.SPName		= inRef.SPName;
+			FOR inPersonIdExt AS inRef.PersonInfo.PersonIdExt[] DO
+				IF inPersonIdExt.Key = 'MABPK' THEN
+					SET outRef.PersonInfo.PersonIdExt = inPersonIdExt;
+				END IF;
+			END FOR;
+	
+			PROPAGATE TO TERMINAL 'out' DELETE NONE;
+
+			-- получение списка контрактов
+			SET outRef NAME = 'KZGetPrivateClientAccountListRq';
+				
+			PROPAGATE TO TERMINAL 'out1';
+	 	END IF;
+
+		RETURN FALSE;
+	END;
+END MODULE;

@@ -1,0 +1,605 @@
+
+
+BROKER SCHEMA ru.croc.sbkz.adapters.pragma.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+/**
+* Определяет прохождение потока с учетом обрабатываемой операции
+* запроса в Прагму.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_DetectRequestOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		SET Environment.UserProperties.Operation = Operation;
+		DECLARE labelName CHARACTER;
+	
+		CASE Operation
+		WHEN 'KZGetPrivateClientAccountListRq' THEN
+			SET labelName = 'KZGetPrivateClientAccountListRq';
+		WHEN 'KZGetPrivateClientAccountStatementRq' THEN
+			SET labelName = 'KZGetPrivateClientAccountStatementRq';
+		WHEN 'KZGetPrivateClientCreditPeriodsRq' THEN
+			SET labelName = 'KZGetPrivateClientCreditPeriodsRq';
+		WHEN 'KZGetCurrRateRq' THEN
+			SET labelName = 'KZGetCurrRateRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+	
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+* Определяет операцию для обработки ответа.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_DetectResponseOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.UserProperties.Operation;
+		DECLARE labelName CHARACTER;
+	
+		CASE Operation
+		WHEN 'KZGetPrivateClientAccountListRq' THEN
+			SET labelName = 'KZGetPrivateClientAccountListRs';
+		WHEN 'KZGetPrivateClientAccountStatementRq' THEN
+			SET labelName = 'KZGetPrivateClientAccountStatementRs';
+		WHEN 'KZGetPrivateClientCreditPeriodsRq' THEN
+			SET labelName = 'KZGetPrivateClientCreditPeriodsRs';
+		WHEN 'KZGetCurrRateRq' THEN
+			SET labelName = 'KZGetCurrRateRs';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+	
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+	END;
+END MODULE;
+
+/**
+* Преобразует сообщение из формата
+* МДО в формат UFX для операции KZGetPrivateClientAccountList.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_ConvertMDO2UFX1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+	
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+	
+		CALL FillStandardUFXFieldsReq2(
+				InputRoot.XMLNSC,
+				OutputRoot.XMLNSC,
+				Environment.UserProperties,
+				'Information',
+				'WAY4Appl'
+				);
+		SET outRoot.MsgData.Information.RegNumber = inRoot.RegNumber;
+		SET outRoot.MsgData.Information.ObjectType = 'Contract';
+		SET outRoot.MsgData.Information.ActionType = 'Inquiry';
+		CREATE FIELD outRoot.MsgData.Information.ResultDtls;
+		DECLARE resultDtls REFERENCE TO outRoot.MsgData.Information.ResultDtls;
+		CREATE LASTCHILD OF resultDtls NAME 'Parm';
+		SET resultDtls.Parm[<].ParmCode = 'Contract';
+		SET resultDtls.Parm[<].Value = 'Y';
+		CREATE LASTCHILD OF resultDtls NAME 'Parm';
+		SET resultDtls.Parm[<].ParmCode = 'Client';
+		SET resultDtls.Parm[<].Value = 'Y';
+		CREATE LASTCHILD OF resultDtls NAME 'Parm';
+		SET resultDtls.Parm[<].ParmCode = 'Product';
+		SET resultDtls.Parm[<].Value = 'Y';
+		CREATE LASTCHILD OF resultDtls NAME 'Parm';
+		SET resultDtls.Parm[<].ParmCode = 'Balance';
+		SET resultDtls.Parm[<].Value = 'Y';
+		SET resultDtls.Filter.Type = 'Contract';
+		SET resultDtls.Filter.Code = 'CONTRACT_LIST';
+		SET resultDtls.Filter.ParamsInfo.Parm.ParmCode = 'ACC_TYPE';
+		SET resultDtls.Filter.ParamsInfo.Parm.Value = 'ABS_DEPOSIT';
+		SET resultDtls.MsgData.Information.ObjectFor.ClientIDT.CustomIDT
+				= THE(SELECT ITEM P.Value FROM inRoot.PersonInfo.PersonIdExt[] AS P WHERE P.Key='CUSTIDT');
+		SET resultDtls.MsgData.Information.ObjectFor.ClientIDT.CustomCode
+				= THE(SELECT ITEM P.Value FROM inRoot.PersonInfo.PersonIdExt[] AS P WHERE P.Key='CUSTCODE');
+	
+		RETURN TRUE;
+	
+	END;
+END MODULE;
+
+/**
+* Преобразование ответа из формата UFX в формат МДО для
+* операции KZGetPrivateClientAccountList.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_ConvertUFX2MDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		-- дальнейшее взаимодействие происходит по MQ, поэтому убираем заголовок HTTP
+		SET OutputRoot.HTTPResponseHeader = null;
+	
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountListRs';
+	
+		CALL SetCommonMDOElementsFromUFX(InputRoot.XMLNSC, OutputRoot.XMLNSC);
+		SET outRoot.Status.StatusCode = inRoot.MsgData.Information.Status.RespCode;
+		SET outRoot.Status.Severity = CASE
+			WHEN inRoot.MsgData.Information.Status.RespClass = 'Error' THEN 'Error'
+			WHEN inRoot.MsgData.Information.Status.RespClass = 'Information' THEN 'Info'
+		END;
+		SET outRoot.RegNumber = inRoot.MsgData.Information.RegNumber;
+		CREATE LASTCHILD OF outRoot.PersonInfo NAME 'PersonIdExt';
+		SET outRoot.PersonInfo.PersonIdExt[<].Key = 'CUSTIDT';
+		SET outRoot.PersonInfo.PersonIdExt[<].Value = inRoot.MsgData.Information.ClientIDT.CustomIDT;
+		CREATE LASTCHILD OF outRoot.PersonInfo NAME 'PersonIdExt';
+		SET outRoot.PersonInfo.PersonIdExt[<].Key = 'CUSTCODE';
+		SET outRoot.PersonInfo.PersonIdExt[<].Value = inRoot.MsgData.Information.ClientIDT.CustomIDT;
+		CREATE FIELD outRoot.AcctList;
+		DECLARE acctList REFERENCE TO outRoot.AcctList;
+		FOR contractRs AS inRoot.MsgData.Information.DataRs.ContractRs[] DO
+			CREATE LASTCHILD OF acctList NAME 'AcctInfo';
+			SET acctList.AcctInfo[<].AcctId = contractRs.Contract.ContractIDT.ContractNumber;
+			SET acctList.AcctInfo[<].AcctName = contractRs.Contract.ContractName;
+			SET acctList.AcctInfo[<].AcctCur = contractRs.Contract.Currency;
+			SET acctList.AcctInfo[<].ClientInfo.PersonInfo.PersonName.LastName
+					= contractRs.Contract.ContractIDT.Client.ClientInfo.LastName;
+			SET acctList.AcctInfo[<].ClientInfo.PersonInfo.PersonName.FirstName
+					= contractRs.Contract.ContractIDT.Client.ClientInfo.FirstName;
+			SET acctList.AcctInfo[<].BankInfo.BankId = contractRs.Contract.ContractIDT.MemberId;
+			SET acctList.AcctInfo[<].ProductName = contractRs.Contract.Product.ProductName;
+			SET acctList.AcctInfo[<].StartDate = contractRs.Contract.DateOpen;
+			SET acctList.AcctInfo[<].EndDate = contractRs.Contract.DateExpiry;
+			SET acctList.AcctInfo[<].AcctStatus.StatusClass = contractRs.Info.Status.StatusClass;
+			SET acctList.AcctInfo[<].AcctStatus.StatusCode = contractRs.Info.Status.StatusCode;
+			SET acctList.AcctInfo[<].AcctStatus.StatusDetails = contractRs.Info.Status.StatusDetails;
+			CREATE FIELD acctList.AcctInfo[<].AcctBalInfo;
+			FOR balance AS contractRs.Info.Balances.Balance[] DO
+				CREATE LASTCHILD OF acctList.AcctInfo[<].AcctBalInfo NAME 'BalanceRec';
+				SET acctList.AcctInfo[<].AcctBalInfo.BalanceRec[<].BalType
+						= contractRs.Info.Balances.Balance.Type;
+				SET acctList.AcctInfo[<].AcctBalInfo.BalanceRec[<].BalName
+						= contractRs.Info.Balances.Balance.Name;
+				SET acctList.AcctInfo[<].AcctBalInfo.BalanceRec[<].Amount
+						= contractRs.Info.Balances.Balance.Amount;
+				SET acctList.AcctInfo[<].AcctBalInfo.BalanceRec[<].BalCurr
+						= contractRs.Info.Balances.Balance.Currency;
+			END FOR;
+			SET acctList.AcctInfo[<].ExtAcctInfo = contractRs.Contract.AddContractInfo.ExtraRs;
+		END FOR;
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+* Преобразование ответа из формата МДО в формат UFX для
+* операции KZGetPrivateClientAccountStatement.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_ConvertMDO2UFX2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+	
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+	
+		CALL FillStandardUFXFieldsReq2(
+				InputRoot.XMLNSC,
+				OutputRoot.XMLNSC,
+				Environment.UserProperties,
+				'Doc',
+				'WAY4Doc'
+				);
+	
+		SET outRoot.MsgData.Doc.TransType.TransCode.MsgCode
+				= THE(SELECT ITEM s.AttrValue FROM inRoot.ServiceAttr[] AS s WHERE s.AttrId='MSG');
+	
+		FOR serviceAttr AS inRoot.ServiceAttr[] DO
+			IF serviceAttr.AttrId IN ('STAN', 'RRN', 'SRN') THEN
+				CREATE LASTCHILD OF outRoot.MsgData.Doc.DocRefSet NAME 'Parm';
+				SET outRoot.MsgData.Doc.DocRefSet.Parm[<].ParmCode = serviceAttr.AttrId;
+				SET outRoot.MsgData.Doc.DocRefSet.Parm[<].Value = serviceAttr.AttrValue;
+			END IF;
+		END FOR;
+	
+		SET outRoot.MsgData.Doc.LocalDt = inRoot.RqTm;
+		SET outRoot.MsgData.Doc.Requestor.ContractNumber = inRoot.AcctReq.AcctId;
+		SET outRoot.MsgData.Doc.Requestor.MemberId = inRoot.AcctReq.BankInfo.BankId;
+		SET outRoot.MsgData.Doc.Source.ContractNumber = inRoot.AcctSource.AcctId;
+	
+		CREATE LASTCHILD OF outRoot.MsgData.Doc.ResultDtls NAME 'Parm';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[<].ParmCode = 'DateFrom';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[<].Value = inRoot.DateStart;
+		CREATE LASTCHILD OF outRoot.MsgData.Doc.ResultDtls NAME 'Parm';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[<].ParmCode = 'DateTo';
+		SET outRoot.MsgData.Doc.ResultDtls.Parm[<].Value = inRoot.DateEnd;
+	
+		FOR serviceAttr AS inRoot.ServiceAttr[] DO
+			DECLARE parmCode CHARACTER '';
+	
+			CASE serviceAttr.AttrId
+			WHEN 'STT' THEN
+				SET parmCode = 'StmtType';
+			WHEN 'BAL' THEN
+				SET parmCode = 'Balance';
+			WHEN 'STCT' THEN
+				SET parmCode = 'StmtCustomType';
+			WHEN 'STCO' THEN
+				SET parmCode = 'StmtContType';
+			WHEN 'STTE' THEN
+				SET parmCode = 'StmtTypeEx';
+			WHEN 'REP' THEN
+				SET parmCode = 'RepaymentPeriod';
+			WHEN 'REA' THEN
+				SET parmCode = 'RepaymentAmount';
+			END CASE;
+	
+			IF parmCode <> '' THEN
+				CREATE LASTCHILD OF outRoot.MsgData.Doc.ResultDtls NAME 'Parm';
+				SET outRoot.MsgData.Doc.ResultDtls.Parm[<].ParmCode = parmCode;
+				SET outRoot.MsgData.Doc.ResultDtls.Parm[<].Value = serviceAttr.AttrValue;
+			END IF;
+	
+		END FOR;
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+* Преобразование ответа из формата UFX в формат МДО для
+* операции KZGetPrivateClientAccountStatement.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_ConvertUFX2MDO2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		-- дальнейшее взаимодействие происходит по MQ, поэтому убираем заголовок HTTP
+		SET OutputRoot.HTTPResponseHeader = null;
+	
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountStatementRs';
+	
+		CALL SetCommonMDOElementsFromUFX(InputRoot.XMLNSC, OutputRoot.XMLNSC);
+		SET outRoot.Status.StatusCode = inRoot.MsgData.Information.Status.RespCode;
+		SET outRoot.Status.Severity = CASE
+		WHEN inRoot.MsgData.Information.Status.RespClass = 'Error' THEN 'Error'
+		WHEN inRoot.MsgData.Information.Status.RespClass = 'Information' THEN 'Info'
+		END;
+		SET outRoot.ServiceAttr.AttrId = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = inRoot.(XMLNSC.Attribute)version;
+		SET outRoot.AcctReq.AcctId = inRoot.MsgData.Doc.Requestor.ContractNumber;
+		SET outRoot.AcctReq.BankInfo.BankId = inRoot.MsgData.Doc.Requestor.MemberId;
+		SET outRoot.AcctSource.AcctId = inRoot.MsgData.Doc.Source.ContractNumber;
+		SET outRoot.DateStart
+				= THE(SELECT ITEM s.ParmValue FROM inRoot.MsgData.Doc.ResultDtls.Parm AS s WHERE s.ParmCode = 'DateFrom');
+		SET outRoot.DateEnd
+				= THE(SELECT ITEM s.ParmValue FROM inRoot.MsgData.Doc.ResultDtls.Parm AS s WHERE s.ParmCode = 'DateEnd');
+		SET outRoot.htmldata = inRoot.MsgData.Doc.DataRs.Stmt.CustomStmt.html.text;
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+* Преобразование ответа из формата МДО в формат UFX для
+* операции KZGetPrivateClientAccountStatement.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_ConvertMDO2UFX3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+	
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+	
+		CALL FillStandardUFXFieldsReq2(
+				InputRoot.XMLNSC,
+				OutputRoot.XMLNSC,
+				Environment.UserProperties,
+				'CustomerProfile',
+				'WAY4Profile'
+				);
+	
+		SET outRoot.Target.(XMLNSC.Attribute)app = THE(SELECT ITEM s.AttrValue FROM inRoot.ServiceAttr[] AS s WHERE s.AttrId='TAPP');
+		SET outRoot.Target.(XMLNSC.Attribute)role = THE(SELECT ITEM s.AttrValue FROM inRoot.ServiceAttr[] AS s WHERE s.AttrId='TROLE');
+		SET outRoot.MsgData.CustomerProfile.RegNumber = inRoot.RegNumber;
+		SET outRoot.MsgData.CustomerProfile.Requestor.ContractNumber = inRoot.AcctReq.AcctId;
+		SET outRoot.MsgData.CustomerProfile.Source.ContractNumber = inRoot.AcctSource.AcctId;
+		SET outRoot.MsgData.CustomerProfile.ObjectType = 'HandBook';
+		SET outRoot.MsgData.CustomerProfile.ActionType = 'Inquiry';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.Type = 'HandBook';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.Code = 'PERIOD_FOR_CREDIT';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm.ParmCode = 'CREDIT';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm.Value = inRoot.ContractInfo.ContractNumber;
+		SET outRoot.MsgData.CustomerProfile.ObjectFor.HandBookIDT.Code = 'PERIOD_FOR_ACCOUNT';
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Преобразование ответа из формата UFX в формат МДО для
+ * операции KZGetPrivateClientAccountStatement.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForPragma_ConvertUFX2MDO3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		-- дальнейшее взаимодействие происходит по MQ, поэтому убираем заголовок HTTP
+		SET OutputRoot.HTTPResponseHeader = null;
+	
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientCreditPeriodsRs';
+	
+		CALL SetCommonMDOElementsFromUFX(InputRoot.XMLNSC, OutputRoot.XMLNSC);
+		SET outRoot.Status.StatusCode = inRoot.MsgData.Information.Status.RespCode;
+		SET outRoot.Status.Severity = CASE
+			WHEN inRoot.MsgData.CustomerProfile.Status.RespClass = 'Error' THEN 'Error'
+			WHEN inRoot.MsgData.CustomerProfile.Status.RespClass = 'Information' THEN 'Info'
+		END;
+		SET outRoot.Status.StatusDesc = inRoot.MsgData.CustomerProfile.Status.RespText;
+		SET outRoot.RegNumber = inRoot.MsgData.CustomerProfile.RegNumber;
+		SET outRoot.ServiceAttr.AttrId = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = inRoot.(XMLNSC.Attribute)version;
+		SET outRoot.AcctReq.AcctId = inRoot.MsgData.CustomerProfile.Requestor.ContractNumber;
+		SET outRoot.AcctReq.BankInfo.BankId = inRoot.MsgData.CustomerProfile.Requestor.MemberId;
+		SET outRoot.AcctSource.AcctId = inRoot.MsgData.CustomerProfile.Source.ContractNumber;
+		SET outRoot.ContractInfo.ContractNumber
+				= THE(SELECT ITEM p.Value FROM inRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[] AS p WHERE p.ParmCode = 'CREDIT');
+	
+		FOR bookItem AS inRoot.MsgData.CustomerProfile.DataRs.HandBook.HandBookItems.HandBookItem[] DO
+			CREATE LASTCHILD OF outRoot.PeriodList NAME 'PeriodRec';
+			SET outRoot.PeriodList.PeriodRec[<].PeriodCode = bookItem.Code;
+			SET outRoot.PeriodList.PeriodRec[<].PeriodName = bookItem.Value;
+		END FOR;
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+* Преобразование ответа из формата МДО в формат UFX для
+* операции KZGetCurrRate.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_ConvertMDO2UFX4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+	
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+	
+		CALL FillStandardUFXFieldsReq2(
+				InputRoot.XMLNSC,
+				OutputRoot.XMLNSC,
+				Environment.UserProperties,
+				'CustomerProfile',
+				'WAY4Profile'
+				);
+	
+		SET outRoot.Target.(XMLNSC.Attribute)app = THE(SELECT ITEM s.AttrValue FROM inRoot.ServiceAttr[] AS s WHERE s.AttrId='TAPP');
+		SET outRoot.Target.(XMLNSC.Attribute)role = THE(SELECT ITEM s.AttrValue FROM inRoot.ServiceAttr[] AS s WHERE s.AttrId='TROLE');
+		SET outRoot.MsgData.CustomerProfile.RegNumber = inRoot.RegNumber;
+		SET outRoot.MsgData.CustomerProfile.Requestor.ContractNumber = inRoot.AcctReq.AcctId;
+		SET outRoot.MsgData.CustomerProfile.Source.ContractNumber = inRoot.AcctSource.AcctId;
+		SET outRoot.MsgData.CustomerProfile.ObjectType = 'HandBook';
+		SET outRoot.MsgData.CustomerProfile.ActionType = 'Inquiry';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.Type = 'HandBook';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.Code = 'FILTER_BY_CURR';
+		CREATE LASTCHILD OF outRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo NAME 'Parm';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[<].ParmCode = 'SOURCE_CURR';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[<].Value = inRoot.SourceCurr;
+		CREATE LASTCHILD OF outRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo NAME 'Parm';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[<].ParmCode = 'TARGET_CURR';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[<].Value = inRoot.TargetCurr;
+		CREATE LASTCHILD OF outRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo NAME 'Parm';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[<].ParmCode = 'FX_DATE';
+		SET outRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[<].Value = inRoot.ConvDate;
+		SET outRoot.MsgData.CustomerProfile.ObjectFor.HandBookIDT.Code = 'FX_RATE_ABS';
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Преобразование ответа из формата UFX в формат МДО для
+ * операции KZGetCurrRate.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForPragma_ConvertUFX2MDO4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		-- дальнейшее взаимодействие происходит по MQ, поэтому убираем заголовок HTTP
+		SET OutputRoot.HTTPResponseHeader = null;
+	
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetCurrRateRs';
+	
+		CALL SetCommonMDOElementsFromUFX(InputRoot.XMLNSC, OutputRoot.XMLNSC);
+		SET outRoot.Status.StatusCode = inRoot.MsgData.Information.Status.RespCode;
+		SET outRoot.Status.Severity = CASE
+			WHEN inRoot.MsgData.CustomerProfile.Status.RespClass = 'Error' THEN 'Error'
+			WHEN inRoot.MsgData.CustomerProfile.Status.RespClass = 'Information' THEN 'Info'
+		END;
+		SET outRoot.Status.StatusDesc = inRoot.MsgData.CustomerProfile.Status.RespText;
+		SET outRoot.RegNumber = inRoot.MsgData.CustomerProfile.RegNumber;
+		SET outRoot.ServiceAttr.AttrId = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = inRoot.(XMLNSC.Attribute)version;
+		SET outRoot.SourceCurr 
+				= THE(SELECT ITEM p.Value FROM inRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[] AS p WHERE p.ParmCode = 'SOURCE_CURR');
+		SET outRoot.TargetCurr 
+				= THE(SELECT ITEM p.Value FROM inRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[] AS p WHERE p.ParmCode = 'TARGET_CURR');
+		SET outRoot.ConvDate 
+				= THE(SELECT ITEM p.Value FROM inRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[] AS p WHERE p.ParmCode = 'FX_DATE');
+		
+		CREATE FIELD outRoot.CurrList;
+		FOR handBookItem AS inRoot.MsgData.CustomerProfile.DateRs.HandBook.HandBookItems.HandBookItem[] DO
+			CREATE LASTCHILD OF outRoot.CurrList NAME 'CurrRec';
+			SET outRoot.CurrList.CurrRec[<].Code = handBookItem.Code;
+			SET outRoot.CurrList.CurrRec[<].Value = handBookItem.Value;
+			SET outRoot.CurrList.CurrRec[<].RateRec.SourceCurr 
+					= THE(SELECT ITEM p.Value FROM handBookItem.Extra.AddData.Parm[] AS p WHERE p.ParmCode = 'SOURCE_CURR');
+			SET outRoot.CurrList.CurrRec[<].RateRec.TargetCurr 
+					= THE(SELECT ITEM p.Value FROM handBookItem.Extra.AddData.Parm[] AS p WHERE p.ParmCode = 'TARGET_CURR');
+			SET outRoot.CurrList.CurrRec[<].RateRec.TargetCurr 
+					= THE(SELECT ITEM p.Value FROM handBookItem.Extra.AddData.Parm[] AS p WHERE p.ParmCode = 'FX_RATE');
+			SET outRoot.CurrList.CurrRec[<].RateRec.TargetCurr 
+					= THE(SELECT ITEM p.Value FROM handBookItem.Extra.AddData.Parm[] AS p WHERE p.ParmCode = 'DISPLAY_VALUE');
+		END FOR;
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+* Установка параметров логгирования, в частности
+* "очищение" RqUID сообщения.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_SetLogParams
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		SET Environment.UserProperties.RqUID = COALESCE(CleanRqUID(InputRoot.XMLNSC.*[<].RqUID));
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+* Сохраняет MQ-заголовки оригинального сообщения
+* (запроса).
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_SaveOrigMsg
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+	
+		CREATE LASTCHILD OF Environment.UserProperties NAME 'OrigMess';
+		-- Сохраняются заголовки оригинального сообщения, для генерации ответа
+		SET Environment.UserProperties.OrigMess.MQMD = InputRoot.MQMD;
+		SET Environment.UserProperties.OrigMess.MQRFH2 = InputRoot.MQRFH2;
+		-- Сохраняем исходное чтобы сохранять корректность ответного сообщения
+		-- даже при некорректном ответе от Прагмы
+		SET Environment.UserProperties.OrigMess.XMLNSC = InputRoot.XMLNSC;
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+* Устанавливает параметры и пути отправки ответного MQ-сообщения.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_PrepareRespHeaders
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+	
+		SET OutputRoot.HTTPResponseHeader = NULL;
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(Environment.UserProperties.OrigMess, OutputLocalEnvironment);
+		-- Восстанавливаем все заголовки
+		IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.BLOB DOMAIN('MQMD') NAME 'MQMD';
+		END IF;
+		SET OutputRoot.MQMD = Environment.UserProperties.OrigMess.MQMD;
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO
+		SET OutputRoot.Properties.ReplyIdentifier = CAST(Environment.UserProperties.OrigMess.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType = MQMT_REPLY;
+		-- Указываем время жизни соообщения и настройки для перенаправления сообщения при истечении времени жизни в очередь
+		SET OutputRoot.MQMD.Report = MQRO_EXPIRATION_WITH_FULL_DATA;
+		-- Время, через которое сообщения удаляется из очереди
+		SET OutputRoot.MQMD.Expiry = 6000;
+		SET OutputRoot.MQMD.ReplyToQ = 'EVENT.TIMEOUT';
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+* Конструирует МДО-ответ в случае ошибки адаптера.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_ComposeErrorMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+	
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountListRs';
+		DECLARE inRoot REFERENCE TO Environment.UserProperties.OrigMess.XMLNSC.*[<];
+	
+		SET outRoot.RqUID = inRoot.RqUID;
+		SET outRoot.RqTm = CURRENT_TIMESTAMP;
+		SET outRoot.SPName = inRoot.SPName;
+		IF Environment.UserProperties.Error.Code IS NULL THEN
+			SET outRoot.Status.StatusCode = CommonHTTPErrorCode;
+		ELSE
+			SET outRoot.Status.StatusCode = Environment.UserProperties.Error.Code;
+		END IF;
+		SET outRoot.Status.Severity = 'Error';
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+* Проверяет приходящее от Прагмы UFX-сообщение.
+* Если первые символы в передаваемых данных образуют "ERROR",
+* то считаем, что пришедшее сообщение - сообщение об ошибке.
+* В противном случае, считаем, что пришел XML и пытаемся
+* его соответствующим образом разобрать.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_Test4Error
+CREATE FUNCTION Main() RETURNS BOOLEAN
+BEGIN
+	CALL CopyWholeMessage(InputRoot, OutputRoot);
+
+	DECLARE stringResponse CHARACTER CAST(InputRoot.BLOB.BLOB AS CHARACTER CCSID 1251);
+
+	IF STARTSWITH(stringResponse, 'ERROR') THEN
+		PROPAGATE TO TERMINAL 'out1';
+	ELSE
+		PROPAGATE TO TERMINAL 'out';
+	END IF;
+
+	RETURN FALSE;
+END;
+END MODULE;
+
+/**
+* Сохраняем параметры Error в Environment.UserProperties
+* и выбрасываем пользовательское исключение для дальнейшего
+* его перехвата ErrorHandlerSubflow.
+**/
+CREATE COMPUTE MODULE HTTPRequestForPragma_ThrowCommonError
+CREATE FUNCTION Main() RETURNS BOOLEAN
+BEGIN
+	CALL CopyWholeMessage(InputRoot, OutputRoot);
+	SET Environment.UserProperties.Error.Desc = CAST(InputRoot.BLOB.BLOB AS CHARACTER CCSID 1251);
+	THROW USER EXCEPTION VALUES ('Non-XML return string from Pragma', Environment.UserProperties.Error.Desc);
+END;
+END MODULE;
+

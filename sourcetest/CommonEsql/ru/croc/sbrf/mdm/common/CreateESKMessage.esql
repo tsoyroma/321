@@ -1,0 +1,30 @@
+BROKER SCHEMA ru.croc.sbrf.mdm.common
+
+-- формирует ответное сообщение для ESK
+CREATE PROCEDURE CreateESKMessage (INOUT eskref REFERENCE, IN MessType CHARACTER, IN RsUID CHARACTER, IN RsDate CHARACTER, IN StCode CHARACTER, IN StDesc CHARACTER)
+BEGIN
+	CREATE FIRSTCHILD OF eskref NAME 'Head';
+	SET eskref.Head.MessUID.MessageId = REPLACE(UUIDASCHAR,'-','');
+	SET eskref.Head.MessUID.MessageDate = CURRENT_DATE;
+	SET eskref.Head.MessUID.FromAbonent = 'ESBBP';
+	SET eskref.Head.MessType = MessType;
+	SET eskref.Head.Version = '1';
+	SET eskref.Head.Error.ErrCode = StCode;
+	SET eskref.Head.Error.ErrMes  = SUBSTRING(StDesc FROM 0 FOR 255);
+	SET eskref.Head.parentId.MessageId = RsUID;
+	SET eskref.Head.parentId.MessageDate =   RsDate;
+	SET eskref.Head.parentId.FromAbonent = 'ESKBP';
+	SET eskref.Body='';
+END;
+
+-- формирует сообщение-нотификации для ESK
+CREATE PROCEDURE CreateESKMessageNf (INOUT eskref REFERENCE, IN MessType CHARACTER)
+BEGIN
+	CREATE FIRSTCHILD OF eskref NAME 'Head';
+	SET eskref.Head.MessUID.MessageId = REPLACE(UUIDASCHAR,'-','');
+	SET eskref.Head.MessUID.MessageDate = CURRENT_DATE;
+	SET eskref.Head.MessUID.FromAbonent = 'ESBBP';
+	SET eskref.Head.MessType = MessType;
+	SET eskref.Head.Version = '1';
+	SET eskref.Body='';
+END;

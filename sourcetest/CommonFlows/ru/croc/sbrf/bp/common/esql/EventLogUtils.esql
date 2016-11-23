@@ -1,0 +1,170 @@
+BROKER SCHEMA ru.croc.sbrf.bp.common.esql
+
+DECLARE ESB_LOG_CCSID CONSTANT INTEGER 1208;
+DECLARE ESB_LOG_ENCODING CONSTANT INTEGER 546;
+DECLARE TIMEOUT_CODE	 CONSTANT CHARACTER '-105';
+DECLARE OK_CODE 	     CONSTANT CHARACTER '0';
+DECLARE ERROR_STATUS     CONSTANT CHARACTER 'ERROR';
+DECLARE TIMEOUT_STATUS   CONSTANT CHARACTER 'TIMEOUT';
+DECLARE OK_STATUS        CONSTANT CHARACTER 'SUCCESS';
+
+CREATE PROCEDURE CreateMQMDHeaderELMess(IN outRef REFERENCE, IN inCCSID INTEGER, IN inEncoding INTEGER)
+	BEGIN
+		-- Создаем заголовок MQMD
+		CREATE LASTCHILD OF outRef DOMAIN('MQMD') NAME 'MQMD';
+		SET outRef.MQMD.MsgType				  = MQMT_DATAGRAM;
+		SET outRef.MQMD.Format				  = MQFMT_RF_HEADER_2;
+		SET outRef.MQMD.CodedCharSetId		  = inCCSID;
+		SET outRef.MQMD.Encoding			  = inEncoding;	
+				
+	END;	
+
+CREATE PROCEDURE CreateMQRFH2usrHeaderELMess(IN outRef REFERENCE, IN usrHeader REFERENCE)
+	BEGIN
+		-- Создаем заголовок MQRFH2
+		IF NOT EXISTS(outRef.MQRFH2[]) THEN
+			IF EXISTS(outRef.BLOB[]) THEN
+				CREATE PREVIOUSSIBLING OF outRef.BLOB DOMAIN('MQRFH2') NAME 'MQRFH2';
+			ELSE	
+				CREATE LASTCHILD OF outRef DOMAIN('MQRFH2') NAME 'MQRFH2';
+			END IF;	
+		END IF;
+		
+		SET outRef.MQRFH2.usr = usrHeader;
+	END;	
+	
+CREATE PROCEDURE CreateBlobELMess(IN inRef REFERENCE, IN outRef REFERENCE, IN inCCSID INTEGER, IN inEncoding INTEGER)
+	BEGIN
+
+		-- Входящее сообщение в бинарном формате
+		DECLARE inblob BLOB;
+
+		IF NOT EXISTS(inRef.ComIbmAggregateReplyBody[]) THEN
+			
+			IF EXISTS(inRef.MRM[]) THEN
+				SET inblob = ASBITSTREAM(inRef.*:*[<] CCSID inCCSID SET inRef.Properties.MessageSet TYPE inRef.Properties.MessageType FORMAT inRef.Properties.MessageFormat);
+			ELSEIF EXISTS(inRef.SOAP[]) THEN
+				SET inblob = ASBITSTREAM(inRef.SOAP.Body CCSID inCCSID ENCODING inEncoding); 
+			ELSEIF EXISTS(inRef.XMLNSC[]) OR EXISTS(inRef.BLOB[]) THEN
+				SET inblob = ASBITSTREAM(inRef.*:*[<] CCSID inCCSID ENCODING inEncoding);				
+			ELSEIF EXISTS(inRef.MQRFH2.ttapi[]) THEN
+				-- ситуация, когда тела сообщения нет, а данные переданы в заголовке для логирования транзакций
+				-- значения из заголовка просто так не перенесёшь
+				-- они некорректно кодируются, поэтому финт ушами с поэлементным переносом
+				-- переменная для формирования псевдотела сообщения
+				DECLARE outBody ROW;
+				-- псевдотело сообщения
+				CREATE FIRSTCHILD OF outBody DOMAIN('XMLNSC') NAME 'MsgFromHeader';
+				-- по всем элементам заголовка
+				FOR currentNode AS inRef.MQRFH2.ttapi.*[] DO
+					-- переношу значение с сохранением имени элемента
+					SET outBody.MsgFromHeader.ttapi.{FIELDNAME(currentNode)} VALUE = FIELDVALUE(currentNode);
+				END FOR;
+				-- теперь кодирую
+				SET inblob = ASBITSTREAM(outBody.MsgFromHeader CCSID inCCSID ENCODING inEncoding);				
+			END IF;
+			
+		ELSE
+			DECLARE outLE ROW;
+			CREATE FIRSTCHILD OF outLE DOMAIN('XMLNSC') NAME 'AggrVariables';
+
+			-- копируем сообщение-запрос из ECHO
+			SET outLE.AggrVariables.AggrMsg.REQUEST  = inRef.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body;
+
+			-- копируем все ответы
+			DECLARE I INTEGER 1;
+			FOR req AS inRef.ComIbmAggregateReplyBody.REQUEST[] DO
+				SET outLE.AggrVariables.AggrMsg.RESPONSE[I] = req.*[<];
+				SET I = I+1;
+			END FOR;	
+				
+			SET inblob = ASBITSTREAM(outLE.AggrVariables CCSID inCCSID);
+		END IF;
+		
+		CREATE LASTCHILD OF outRef DOMAIN('BLOB') NAME 'BLOB';
+		SET outRef.BLOB.BLOB = inblob;
+				
+	END;		
+	
+CREATE FUNCTION CreateExceptionString(IN outLE REFERENCE, IN excepList REFERENCE) RETURNS CHARACTER
+	BEGIN
+
+		-- Преобразуем описание исключения к строке 
+		CREATE FIRSTCHILD OF outLE DOMAIN('XMLNSC') NAME 'sFullException';
+		SET outLE.sFullException = excepList;
+
+		RETURN COALESCE(CAST(ASBITSTREAM(outLE.sFullException) AS CHAR CCSID ESB_LOG_CCSID),'');
+		
+	END;		
+	
+CREATE FUNCTION NVL(IN val CHARACTER, IN altern CHARACTER) RETURNS CHARACTER 
+	BEGIN
+		RETURN CASE WHEN val IS NULL OR val = '' THEN altern ELSE val END;
+	END;	
+	
+-- TODO ExtLog
+-- outRef - ссылка на корень сообщения, в котором нет тела сообщения
+CREATE PROCEDURE CreateMQRFH2usrHeaderExtLogMess(IN inRef REFERENCE, IN outRef REFERENCE)
+	BEGIN
+		IF NOT EXISTS(outRef.MQMD[]) THEN
+			CREATE LASTCHILD OF outRef DOMAIN('MQMD') NAME 'MQMD';
+			SET outRef.MQMD.Format = MQFMT_STRING;
+		END IF;	
+		IF NOT EXISTS(outRef.MQRFH2[]) THEN
+			CREATE LASTCHILD OF outRef DOMAIN('MQRFH2') NAME 'MQRFH2';
+		END IF;
+
+		-- Берем часть информации из echo-сообщения, которое сформировали на адаптере
+		-- Если нет, то работает без агрегации
+		IF EXISTS(inRef.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.MQRFH2.usr[]) THEN
+			SET outRef.MQRFH2.usr 				      = inRef.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.MQRFH2.usr;
+--			TODO Вся информация формируется только внутри адаптера фронтальной системы
+--			SET outRef.MQRFH2.usr.ExtLogTargetSystem  = inRef.ComIbmAggregateReplyBody.REQUEST.MQRFH2.usr.ExtLogTargetSystem; 
+--			SET outRef.MQRFH2.usr.ExtLogOperationName = inRef.ComIbmAggregateReplyBody.REQUEST.MQRFH2.usr.ExtLogOperationName; 				
+		ELSEIF EXISTS(inRef.ComIbmAggregateReplyBody.REQUEST.MQRFH2.usr[]) THEN
+			SET outRef.MQRFH2.usr 			    	  = inRef.ComIbmAggregateReplyBody.REQUEST.MQRFH2.usr;
+		ELSEIF EXISTS(inRef.MQRFH2.usr[]) THEN	
+			SET outRef.MQRFH2.usr			    	  = inRef.MQRFH2.usr;	
+		END IF;	
+		
+		-- Время ответа 
+		SET outRef.MQRFH2.usr.ExtLogRsTm 	  = getLocalTimeStamp();
+
+		-- Код ответа  из сообщения
+		IF EXISTS(inRef.ComIbmAggregateReplyBody.ECHO[]) AND NOT(EXISTS(inRef.ComIbmAggregateReplyBody.REQUEST[])) THEN
+			-- Ситуация тайм-аута (проставляем фиксированно)
+			SET outRef.MQRFH2.usr.ExtLogReplyCode = TIMEOUT_CODE;
+		ELSE	
+			SET outRef.MQRFH2.usr.ExtLogReplyCode = COALESCE(inRef.ComIbmAggregateReplyBody.REQUEST.XMLNSC.*:*[<].Status.*:StatusCode,inRef.XMLNSC.*:*[<].Status.*:StatusCode);
+		END IF;
+		
+		IF OK_CODE <> outRef.MQRFH2.usr.ExtLogReplyCode THEN
+			
+			-- Статус обработки сообщения
+			IF TIMEOUT_CODE = outRef.MQRFH2.usr.ExtLogReplyCode THEN
+				SET outRef.MQRFH2.usr.ExtLogOperationStatus = TIMEOUT_STATUS;
+			ELSE	
+				SET outRef.MQRFH2.usr.ExtLogOperationStatus = ERROR_STATUS;
+			END IF;
+				
+			-- Описание ошибки	
+			IF EXISTS(inRef.ComIbmAggregateReplyBody.REQUEST[]) THEN
+				SET outRef.MQRFH2.usr.ExtLogErrorMsg = inRef.ComIbmAggregateReplyBody.REQUEST.XMLNSC.*:*[<].Status.*:StatusDesc || ' ' || COALESCE(inRef.ComIbmAggregateReplyBody.REQUEST.XMLNSC.*:*[<].Status.*:ServerStatusDesc,'');
+			ELSE
+				SET outRef.MQRFH2.usr.ExtLogErrorMsg = inRef.XMLNSC.*:*[<].Status.*:StatusDesc || ' ' || COALESCE(inRef.XMLNSC.*:*[<].Status.*:ServerStatusDesc,'');
+			END IF;
+		ELSE				
+			-- Статус обработки сообщения
+			SET outRef.MQRFH2.usr.ExtLogOperationStatus = OK_STATUS;
+		END IF;			
+	END;
+
+CREATE FUNCTION GetESBLogCCSID() RETURNS INTEGER 
+	BEGIN
+		RETURN ESB_LOG_CCSID;
+	END;
+
+CREATE FUNCTION GetESBLogEncoding() RETURNS INTEGER 
+	BEGIN
+		RETURN ESB_LOG_ENCODING;
+	END;

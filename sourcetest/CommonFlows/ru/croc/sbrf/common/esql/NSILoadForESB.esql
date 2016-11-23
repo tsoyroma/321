@@ -1,0 +1,67 @@
+BROKER SCHEMA ru.croc.sbrf.common.esql
+
+DECLARE LocaleListForUpdate EXTERNAL CHARACTER '';
+
+CREATE COMPUTE MODULE NSILoadForESB_ExtractSubscr
+	CREATE PROCEDURE InitLocaleList() BEGIN
+		DECLARE localeBlob BLOB CAST (LocaleListForUpdate AS BLOB CCSID 1208);
+		CREATE LASTCHILD OF InputLocalEnvironment DOMAIN('XMLNSC') PARSE(localeBlob);
+	END;
+
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL InitLocaleList();
+
+		DECLARE langTpCd ROW THE(SELECT ListItem.Value
+								FROM InputLocalEnvironment.XMLNSC.List.Item[] AS ListItem
+								WHERE ListItem.Value = FIELDVALUE(InputRoot.XMLNSC.NSITB.Table.LANG_TP_CD));
+
+		IF EXISTS(langTpCd.*[]) THEN
+			SET Environment.UserProperties.langTpCd	= FIELDVALUE(InputRoot.XMLNSC.NSITB.Table.LANG_TP_CD);
+		END IF;
+
+		SET Environment.UserProperties.LoadMode	= COALESCE(CAST(InputRoot.XMLNSC.NSITB.Options.LoadMode AS INTEGER), 0);
+		SET Environment.tableName				= FIELDVALUE(InputRoot.XMLNSC.NSITB.Table.name);
+
+		IF Environment.UserProperties.langTpCd IS NOT NULL AND LENGTH(Environment.UserProperties.langTpCd) > 0 THEN
+			DECLARE Record REFERENCE TO InputRoot.XMLNSC.NSITB.Table.record[>];
+
+			WHILE LASTMOVE(Record) DO
+				CALL CopyMessageHeaders();
+				SET OutputRoot.XMLNSC.record = Record;
+				PROPAGATE;
+				MOVE Record NEXTSIBLING;
+			END WHILE;
+		END IF;
+
+		IF InputRoot.XMLNSC.NSITB.Table.RecCount IS NOT NULL THEN
+			--Запишем влог сообщение о том, что справочники в МДМ обновлены
+			CALL OutMsgToCleanCache (OutputRoot, Environment.tableName);
+			PROPAGATE TO TERMINAL 1;
+		END IF;
+
+		DELETE FIELD InputRoot.XMLNSC.NSITB;
+
+		RETURN FALSE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE NSILoadForESB_Log
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL OutMsgToCleanCache (OutputRoot, Environment.tableName);
+
+		RETURN TRUE;
+	END;
+END MODULE;

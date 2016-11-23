@@ -1,0 +1,52 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crmca.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE ResponseForESB_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		-- 7. Сообщение-ответ :: Служебное сообщение
+		WHEN 'Message_DB_StatusRq' THEN
+			SET labelName = 'Message_DB_StatusRq';
+		-- 10. Результат модификации клиентской записи :: Результат выполнения операции, УИК MDM клиента
+		WHEN 'CustOrgModRs' THEN
+			SET labelName = 'CustOrgModRs';
+		-- 11. Результат создания/изменения профиля ФЛ, связанного с ЮЛ
+		WHEN 'RequestUpdateRelatedPrivateClientRs' THEN
+			SET labelName = 'RequestUpdateRelatedPrivateClientRs';
+		-- 12. Результат деактивации клиентской записи :: Результат деактивации клиентской записи
+		WHEN 'CustOrgDelRs' THEN
+			SET labelName = 'CustOrgDelRs';	
+		ELSE
+			-- Невалидный документ
+			THROW USER EXCEPTION VALUES ('Unknown format XML in ResponseForCRM', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_FillMqRfh_ToRes
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN  
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;								
+		IF InputRoot.XMLNSC.*[<].SPName = 'urn:sbrfsystems:99-mdmorg' THEN
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter:async:response';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:crmmdm';
+		END IF;
+		RETURN TRUE;
+	END;
+END MODULE;

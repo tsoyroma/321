@@ -1,0 +1,76 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.cakd.approve.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE RequestForCAKD_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZsCreditListforApproveRq' THEN
+			SET labelName = 'KZsCreditListforApproveRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in CAKD(RequestForCAKD)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForCAKD_ConvertMDOCRM_KZsCreditListforApproveRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'LoadCreditDatafromCRM_IN';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZsCreditListforApproveRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.LoadCreditDatafromCRM_IN;
+
+		SET outRef.RqUID 			= inRef.MessageId;
+		SET outRef.RqTm 			= inRef.RqTm;
+		SET outRef.IIN 				= inRef.IIN;
+		SET outRef.LastName 		= inRef.LastName;
+		SET outRef.FirstName 		= inRef.FirstName;
+		SET outRef.MiddleName 		= inRef.MiddleName ;
+		SET outRef.Born_date 		= inRef.BornDate;
+		SET outRef.ISResident 		= inRef.IsResident;
+		SET outRef.IsCitizen 		= inRef.Citizen;
+		DECLARE doclist REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS doclist NAME 'DocList';
+		SET doclist.DocType 		= inRef.DocList.DocType;
+		SET doclist.DocNumber 		= inRef.DocList.DocNumber;
+		SET doclist.DocStartDate 	= inRef.DocList.DocStartDate;
+		SET doclist.DocEndDate	 	= inRef.DocList.DocEndDate;
+		SET outRef.EmployerName 	= inRef.EmployerName;
+		SET outRef.PostName 		= inRef.PostName;
+		SET outRef.LiveAddress 		= inRef.LiveAddress;
+		SET outRef.EmployerAdress 	= inRef.EmployerAddress;
+		SET outRef.HomePhone 		= inRef.HomePhone;
+		SET outRef.EmployerPhone 	= inRef.EmployerPhone;
+		SET outRef.MobilePhone 		= inRef.MobilePhone;
+		SET outRef.FilialId 		= inRef.FilialId;
+		SET outRef.ClientCategory 	= inRef.ClientCategory;
+		SET outRef.DepositSum 		= inRef.DepositSum;
+		SET outRef.DepositTerm 		= inRef.DepositTerm;
+		SET outRef.EmployerBIN 		= inRef.EmployerBIN;
+		DECLARE creditlist REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS creditlist NAME 'CreditList';
+		SET creditlist.IdCRM 		= inRef.CreditList.IdCRM;		
+		SET creditlist.ProductId 	= inRef.CreditList.ProductId;
+		SET creditlist.Rate 		= inRef.CreditList.Rate;
+		SET creditlist.CreditTerm 	= inRef.CreditList.CreditTerm;
+		SET creditlist.CurrencyCode = inRef.CreditList.CurrencyCode;
+		SET creditlist.CreditSumma 	= inRef.CreditList.CreditSumma;
+		SET creditlist.MonthPayment = inRef.CreditList.MonthPayment;
+		SET outRef.mqmsgid = inRef.mqmsgid;
+		RETURN TRUE;
+	END;
+END MODULE;

@@ -1,0 +1,24 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crm.crossborder.esql
+
+
+CREATE COMPUTE MODULE RequestForCRM_SetReplyTo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.BLOB DOMAIN('MQMD') NAME 'MQMD';
+		END IF;
+		
+		SET OutputRoot.MQMD.ReplyToQ   = 'ESB.CRM.KZ.OUT';
+        SET OutputRoot.MQMD.ReplyToQMgr = 'IKAZ.ESB.OUT.GW1';        
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+

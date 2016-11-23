@@ -1,0 +1,397 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crm.esql
+
+PATH ru.croc.sbkz.utils;
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE RequestForCRM_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation			
+		WHEN 'Envelope' THEN
+			SET labelName = 'Envelope';
+		WHEN 'KZExpCurrencyRateRq' THEN
+			SET labelName = 'KZExpCurrencyRateRq';
+		WHEN 'KZExpMDMLegalClientDataRq' THEN
+			SET labelName = 'KZExpMDMLegalClientDataRq';
+		WHEN 'KZExpMDMPrivateClientDataRq' THEN
+			SET labelName = 'KZExpMDMPrivateClientDataRq';
+		WHEN 'KZExpLegalClientDataRq' THEN
+			SET labelName = 'KZExpLegalClientDataRq';
+		WHEN 'KZExpFinAccountRq' THEN
+			SET labelName = 'KZExpFinAccountRq';
+
+		WHEN 'UpdateLegalClientCrossBorderRq' THEN
+			SET labelName = 'UpdateLegalClientCrossBorderRq';
+		WHEN 'UpdateLegalClientGroupCrossBorderRq' THEN
+			SET labelName = 'UpdateLegalClientGroupCrossBorderRq';
+		WHEN 'CrossBorderGWErrorNf' THEN
+			SET labelName = 'CrossBorderGWErrorNf';
+			
+		WHEN 'KZGetLimitRqFromSAPLMtoCRM' THEN
+			SET labelName = 'GetLimitRq';
+		WHEN 'KZSendMasterDataNftoCRM' THEN	
+			SET labelName = 'SendMasterDataNf';
+		WHEN 'PutLimitMasterDataRq' THEN
+			SET labelName = 'PutLimitMasterDataRq';	
+		-- 1. Данные по Единому клиенту :: Сообщение с данными по Единому клиенту,  включая обновление переданных параметров
+		WHEN 'Message_DB_UCModRq' THEN
+			SET labelName = 'Message_DB_UCModRq';
+		-- 2. Подтверждение состава Единого клиента :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_UCAppRq' THEN
+			SET labelName = 'Message_DB_UCAppRq';
+		-- 3. ПереназначениеКМ ЕК :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_UCModKMEKRq' THEN
+			SET labelName = 'Message_DB_UCModKMEKRq';
+		-- 4. Данныепо Мета-группе :: Данные по Мета-группе, включая обновление переданных параметров
+		WHEN 'Message_DB_MGModRq' THEN
+			SET labelName = 'Message_DB_MGModRq';
+		-- 5. Сообщение о переназначении ГКМ :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_MGModGKMRq' THEN
+			SET labelName = 'Message_DB_MGModGKMRq';
+		-- 6. Сообщение о признании связи внутри Мета-группы несущественной/существенной 
+		--     :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_MGAppRq' THEN
+			SET labelName = 'Message_DB_MGAppRq';	
+		-- 7. Сообщение-ответ :: Служебное сообщение
+		WHEN 'Message_DB_StatusRq' THEN
+			SET labelName = 'Message_DB_StatusRq';
+		-- 8. Создание или изменение юр. Лица :: Клиентские данные
+		WHEN 'CustOrgModRq' THEN
+			SET labelName = 'CustOrgModRq';	
+		-- 9. Создание или изменение физ. Лица :: Клиентские данные
+		WHEN 'RequestUpdateRelatedPrivateClientRq' THEN
+			SET labelName = 'RequestUpdateRelatedPrivateClientRq';
+		
+		-- CRM corp
+		WHEN 'PragmaEnvelope' THEN
+			DECLARE ServiceCode CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode);
+			CASE ServiceCode
+			-- OrganisationNotify_Request 		
+			WHEN 'OrganizationNotify' THEN
+				SET labelName = 'OrganizationNotify';
+			WHEN 'OrganizationGetClient' THEN
+				SET labelName = 'OrganizationGetClient';	
+			ELSE
+				-- Непонятный тэг
+				THROW USER EXCEPTION VALUES ('Unknown message format in RequestForCRM(CRM Corp)', ServiceCode);
+			END CASE;	
+		
+		
+		
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown message format in RequestForCRM(CRM Corp)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Экспорт курсов валют KZExpCurrencyRateRq ->
+ **/
+CREATE COMPUTE MODULE RequestForCRM_ConvertMDO2CRM_CurrencyRate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRq REFERENCE TO InputRoot.XMLNSC.KZExpCurrencyRateRq;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE OutRq REFERENCE TO OutputRoot;	
+		DECLARE outList REFERENCE TO OutputRoot;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS OutRq NAME 'SiebelCurrencyRateInsertOrUpdate_Input';
+		
+		CREATE LASTCHILD OF OutRq AS outList NAME 'ListOfCurrency-RateIntegration';
+		
+		-- Копирование данных в формат CRM
+		FOR currRate AS InRq.CurrRateData.CurrRate[] DO				
+			DECLARE curElm REFERENCE TO OutRq;
+			DECLARE rateCont REFERENCE TO OutRq;
+							
+			FOR outCurr AS outList.*:Currency[] DO
+				IF outCurr.*:FromCurcy = currRate.BaseCurrCode THEN
+					MOVE curElm TO outCurr;
+				END IF;
+			END FOR;
+			
+			IF curElm = OutRq THEN
+				CREATE LASTCHILD OF outList AS curElm NAME 'Currency';
+				SET curElm.FromCurcy = currRate.BaseCurrCode;
+				CREATE LASTCHILD OF curElm NAME 'ListOfExchangeRate';
+			END IF;
+			
+			CREATE LASTCHILD OF curElm.*:ListOfExchangeRate AS rateCont NAME 'ExchangeRate';
+			SET rateCont.RateDate 		= currRate.StartDt;
+			SET rateCont.Rate 			= currRate.RateValue;
+			SET rateCont.ToCurcy		= currRate.CurrCode;			
+		
+		END FOR;
+		
+		SET OutRq.RqUID 				= InRq.RqUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Выгрузка данных ЮЛ KZExpMDMLegalClientDataRq, KZExpLegalClientDataRq -> KZExpMDMLegalClientDataRq
+ **/
+CREATE COMPUTE MODULE RequestForCRM_ConvertMDO2CRM_LegalClient
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		SET OutputRoot.XMLNSC.*[<] NAME = 'KZExpMDMLegalClientDataRq';
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		FOR addr AS outRef.OrgInfo.*:CompositeContactInfo.*:ContactInfo.*:PostAddr[] DO
+			SET addr.*:Country VALUE = convertCountryForCRM(addr.*:Country);	
+			SET addr.*:AddrType VALUE = convertAddrTypeForCRM(addr.*:AddrType);	
+		END FOR;
+		SET outRef.OrgInfo.OrgAttr.Country VALUE = convertCountryForCRM(outRef.OrgInfo.OrgAttr.Country);	
+		FOR phone AS outRef.OrgInfo.Phones.Phone[] DO
+			SET phone.PhoneType	VALUE			 = convertPhoneTypeForCRM(phone.PhoneType);
+			SET phone.Allowed 					 = UPPER(phone.Allowed);
+			SET phone.IsActive 					 = UPPER(phone.IsActive);
+		END FOR;	
+		FOR email AS outRef.OrgInfo.EMails.EMail[] DO
+			SET email.Allowed 					 = UPPER(email.Allowed);
+			SET email.Active 					 = UPPER(email.Active);
+		END FOR;
+		CREATE NEXTSIBLING OF outRef.OrgInfo.OrgAttr NAME 'DateOpen';	
+		SET outRef.OrgInfo.DateOpen		 		 = FIELDVALUE(outRef.OrgInfo.orgs:EstablishDt);
+		SET outRef.OrgInfo.orgs:EstablishDt 	 = NULL;
+		
+		FOR idExt AS outRef.OrgInfo.OrgIdExt[] DO
+			IF idExt.Key = 'Segment' THEN
+				SET idExt.Value VALUE = convertSegmentForCRM(idExt.Value);
+			END IF;
+		END FOR;
+		
+		SET outRef.OrgInfo.OrgAttr.Form 		 = convertOrgFormForCRM(FIELDVALUE(outRef.OrgInfo.OrgAttr.Form)); 
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Экспорт данных о финансовых счетах клиента - ЮЛ KZExpFinAccountRq -> SiebelFinAccountInsertOrUpdate_Input
+ **/
+CREATE COMPUTE MODULE RequestForCRM_ConvertMDO2CRM_AcctUpdt
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		CREATE FIELD OutputRoot.XMLNSC."SiebelFinAccountInsertOrUpdate_Input";
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+		DECLARE outFincorpAccount REFERENCE TO outRef;
+		CREATE FIELD outRef."ListOfFincorpAccount-Integration".FincorpAccount AS outFincorpAccount;
+		
+		DECLARE total CHARACTER;
+		FOR inBalanceRec AS inRef.AcctInfo.AcctBalInfo.BalanceRec[] DO
+			IF inBalanceRec.BalType = 'TOTAL' THEN
+				SET total = inBalanceRec.Amount;
+			END IF;
+		END FOR;
+		DECLARE rnn CHARACTER;
+		DECLARE iin CHARACTER;
+		FOR inOrgIdExt AS inRef.AcctInfo.ClientInfo.OrgInfo.OrgIdExt[] DO
+			IF inOrgIdExt.Key = 'RNN' THEN
+				SET rnn = inOrgIdExt.Value;
+			END IF;
+			IF inOrgIdExt.Key = 'IIN' THEN
+				SET iin = inOrgIdExt.Value;
+			END IF;
+		END FOR;
+		
+		DECLARE primaryContractType CHARACTER;
+		FOR inContractInfo AS inRef.AcctInfo.Contracts.ContractInfo[] DO
+			IF inContractInfo.IsPrimary = 'Y' THEN
+				SET primaryContractType = inContractInfo.ContractType;
+			END IF;
+		END FOR;
+		
+		SET outFincorpAccount.AccountNumber		= inRef.AcctInfo.AcctId;
+		SET outFincorpAccount.Currency			= inRef.AcctInfo.AcctCur;
+		SET outFincorpAccount.AvailableBalance	= '';
+		SET outFincorpAccount.AccBalance			= total;
+		SET outFincorpAccount.ClientId			= '';
+		SET outFincorpAccount.Rnn				= rnn;
+		SET outFincorpAccount.Bin				= iin;
+		SET outFincorpAccount.DivisionCode		= FIELDVALUE(inRef.AcctInfo.BankInfo.*:BranchId);
+		SET outFincorpAccount.AccType			= '';
+		SET outFincorpAccount.OpenDate			= inRef.AcctInfo.StartDate;
+		SET outFincorpAccount.CloseDate			= inRef.AcctInfo.EndDate;
+		SET outFincorpAccount.AccountStatus		= CASE COALESCE(inRef.AcctInfo.EndDate, '') WHEN '' THEN 'открыт' ELSE 'закрыт' END;
+		SET outFincorpAccount.FinProductCode		= primaryContractType;
+		SET outFincorpAccount.ListOfFincorpAdditionalProduct.fc:FincorpAdditionalProduct.fc:Description				= '';
+		SET outFincorpAccount.ListOfFincorpAdditionalProduct.fc:FincorpAdditionalProduct.fc:ProductEndDate			= '';
+		SET outFincorpAccount.ListOfFincorpAdditionalProduct.fc:FincorpAdditionalProduct.fc:AdditionalFinProductCode	= '';
+		SET outFincorpAccount.ListOfFincorpAdditionalProduct.fc:FincorpAdditionalProduct.fc:ProductStartDate			= '';
+
+		SET outRef.RqUID	= inRef.RqUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForCRM_ConvertMDO2CRM_GetLimitRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRq REFERENCE TO InputRoot.XMLNSC.KZGetLimitRqFromSAPLMtoCRM;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE OutRq REFERENCE TO OutputRoot;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS OutRq NAME 'GetLimitRq';
+		SET OutRq = InRq;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForCRM_ConvertMDO2CRM_SendMasterDataNf
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRq REFERENCE TO InputRoot.XMLNSC.KZSendMasterDataNftoCRM;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE OutRq REFERENCE TO OutputRoot;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS OutRq NAME 'SendMasterDataNf';
+		SET OutRq = InRq;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForCRM_ConvertCustOrgModRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForCRM_ConvertMGModGKMRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForCRM_ConvertRequestUpdateRelatedPrivateClientRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForCRM_ConvertUCModKMEKRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForCRM_ConvertUCModRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:gplang="http://www.ibm.com/wbi/2005/gplang" xmlns:maplang="http://www.ibm.com/wbi/2005/maplang" xmlns:msg="http://www.ibm.com/wbi/2005/msg">
+  <maplang:MapOperation name="Router_SendError" version="6.1.300.v20090610_1626" prefixes="/0/@namespaces.0/@prefix /0/@namespaces.1/@prefix /0/@namespaces.2/@prefix">
+    <blockContents xsi:type="msg:MsgTargetMapStatement" targetMapName="$target">
+      <blockContents xsi:type="msg:ElementMsgStatement" mappableName="Properties">
+        <blockContents xsi:type="maplang:MapFromStatement">
+          <value xsi:type="maplang:MappableReferenceExpression" name="$source" text="$source/Properties"/>
+        </blockContents>
+      </blockContents>
+      <blockContents xsi:type="msg:ElementMsgStatement" mappableName="tns:ControlMessage">
+        <blockContents xsi:type="maplang:MapFromStatement"/>
+        <blockContents xsi:type="msg:ElementMsgStatement" mappableName="tns:Acknowledgement">
+          <blockContents xsi:type="maplang:MapFromStatement"/>
+          <blockContents xsi:type="msg:ElementMsgStatement" mappableName="tns:Router">
+            <blockContents xsi:type="maplang:MapFromStatement">
+              <value xsi:type="gplang:FunctionCallExpression" name="esql:ru.croc.sbrf.common.esql.GetRouterId" text="esql:ru.croc.sbrf.common.esql.GetRouterId()"/>
+            </blockContents>
+          </blockContents>
+          <blockContents xsi:type="msg:ElementMsgStatement" mappableName="tns:Status">
+            <blockContents xsi:type="maplang:MapFromStatement">
+              <value xsi:type="gplang:LiteralExpression" text="'Synchronization failed'">
+                <eType xsi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+              </value>
+            </blockContents>
+          </blockContents>
+          <blockContents xsi:type="msg:ElementMsgStatement" mappableName="tns:Message">
+            <blockContents xsi:type="maplang:MapFromStatement">
+              <value xsi:type="gplang:LiteralExpression" text="'error'">
+                <eType xsi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+              </value>
+            </blockContents>
+          </blockContents>
+        </blockContents>
+      </blockContents>
+    </blockContents>
+    <eParameters xsi:type="msg:MsgSourceMapRoot" name="$source" eType="/1"/>
+    <eParameters xsi:type="msg:MsgTargetMapRoot" name="$target" eType="/2"/>
+    <namespaces namespaceName="http://www.w3.org/2001/XMLSchema">
+      <prefix prefixName="xsd"/>
+    </namespaces>
+    <namespaces namespaceName="http://www.w3.org/2001/XMLSchema-instance">
+      <prefix prefixName="xsi"/>
+    </namespaces>
+    <namespaces namespaceName="http://www.croc.ru/sbrf/router/config/xml/ControlMessage">
+      <prefix prefixName="tns"/>
+    </namespaces>
+  </maplang:MapOperation>
+  <msg:MessageHandle messageSetName="ConfigMessageSet" namespaceName="http://www.croc.ru/sbrf/router/config/xml/ControlMessage" simpleName="ControlMessage" messageKind="assembly">
+    <headers name="Properties" rootElementName="Properties"/>
+  </msg:MessageHandle>
+  <msg:MessageHandle messageSetName="ConfigMessageSet" namespaceName="http://www.croc.ru/sbrf/router/config/xml/ControlMessage" simpleName="ControlMessage" messageKind="assembly" domainName="XMLNSC">
+    <headers name="Properties" rootElementName="Properties"/>
+  </msg:MessageHandle>
+</xmi:XMI>

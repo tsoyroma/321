@@ -1,0 +1,100 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crmca.esql
+
+PATH ru.croc.sbkz.utils;
+
+DECLARE NS_CRM_MDO CONSTANT CHARACTER 'http://sberbank.ru/dem/CRM_MG';
+DECLARE	orgs_crm	NAMESPACE 	NS_CRM_MDO;
+
+DECLARE NS_CRM_MDO2 CONSTANT CHARACTER 'http://www.w3.org/2001/XMLSchema-instance';
+DECLARE	orgs_xsi	NAMESPACE 	NS_CRM_MDO2;
+
+
+CREATE COMPUTE MODULE RequestForCRMCA_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+	
+		WHEN 'Message_DB_UCModKMEKRq' THEN
+			SET labelName = 'Message_DB_UCModKMEKRq';
+		WHEN 'Message_DB_UCAppRq' THEN
+			SET labelName = 'Message_DB_UCAppRq';
+		WHEN 'Message_DB_MGModGKMRq' THEN
+			SET labelName = 'Message_DB_MGModGKMRq';
+		WHEN 'Message_DB_MGAppRq' THEN
+			SET labelName = 'Message_DB_MGAppRq';
+			
+
+		ELSE
+		
+			THROW USER EXCEPTION VALUES ('Unknown message format in RequestForCRMCA(CRM CA)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+ 
+CREATE COMPUTE MODULE RequestForCRMCA_ConvertCRM2MDO_Message_DB_UCAppRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		-- На этом этапе начинается перешивка сообщения с нэймспейсом по умолчанию
+		
+		DECLARE RootXMLElement CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		SET OutputRoot.XMLNSC.orgs_crm:{RootXMLElement}.(XMLNSC.NamespaceDecl)xmlns = orgs_crm;
+		SET OutputRoot.XMLNSC.orgs_crm:{RootXMLElement}.(XMLNSC.NamespaceDecl)xmlns:xsi = orgs_xsi;
+		
+		CALL COPYIN2OUT(InputRoot.XMLNSC.*[<], OutputRoot.XMLNSC.orgs_crm:{RootXMLElement});
+		
+		RETURN TRUE;
+	END;	
+	
+	CREATE PROCEDURE COPYIN2OUT (IN inRoot REFERENCE, IN outRoot REFERENCE)
+	BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		DECLARE K INTEGER;
+		DECLARE elementName CHARACTER;
+			
+		SET J = CARDINALITY(inRoot.[]);
+		WHILE I <= J DO
+			
+			SET K = CARDINALITY(inRoot.*[I].[]);
+			IF K > 0 THEN
+				SET elementName = FIELDNAME(inRoot.*[I]);
+				CREATE LASTCHILD OF outRoot
+					TYPE FIELDTYPE(inRoot.*[I])
+					NAMESPACE orgs_crm
+					NAME FIELDNAME(inRoot.*[I]);
+				
+				DECLARE newIn REFERENCE TO inRoot.*[I];
+				DECLARE newOut REFERENCE TO outRoot.orgs_crm:{elementName};
+				  
+				CALL COPYIN2OUT(newIn, newOut);
+			ELSE
+				SET elementName = FIELDNAME(inRoot.*[I]);
+				IF elementName = 'Properties' THEN
+					SET outRoot.*[I] = inRoot.*[I]; 
+				ELSE
+					SET outRoot.orgs_crm:*[I] = inRoot.*[I];
+				END IF;
+			END IF;
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;

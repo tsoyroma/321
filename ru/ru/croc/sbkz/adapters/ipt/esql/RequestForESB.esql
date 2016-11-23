@@ -1,0 +1,1819 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.ipt.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE RequestForESB_FillHeaders
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+
+		-- дальнейшее взаимодействие происходит по MQ, поэтому убираем заголовок HTTP
+		SET OutputRoot.HTTPInputHeader = null;
+		
+		DECLARE outBody REFERENCE TO OutputRoot.XMLNSC.message;
+		-- сохраним заголовки в переменных среды, 
+		SET Environment.UserProperties.RqUID			= FIELDVALUE(outBody.uid);
+		SET Environment.UserProperties.RqTm				= FIELDVALUE(outBody.datetime);
+		SET Environment.UserProperties.SPName			= 'IPT';
+		SET Environment.UserProperties.OperationName	= FIELDVALUE(outBody.xtype);
+
+		-- сохраним идентификатор запроса для дальнейшего ответа
+		SET Environment.UserProperties.HTTPRequestIdentifier = CAST(InputLocalEnvironment.Destination.HTTP.RequestIdentifier AS CHARACTER);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Маршрутизация потока в соответствии с операцией
+ **/
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.UserProperties.OperationName;
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'XTX001' THEN
+			SET labelName = 'XTX001';
+		WHEN 'XTX002' THEN
+			SET labelName = 'XTX002';
+		WHEN 'XTX003' THEN
+			SET labelName = 'XTX003';
+		WHEN 'XTX004' THEN
+			SET labelName = 'XTX004';
+		WHEN 'XTX008' THEN
+			SET labelName = 'XTX008';
+		WHEN 'XTX009' THEN
+			SET labelName = 'XTX009';
+		WHEN 'XTX010' THEN
+			SET labelName = 'XTX010';
+		WHEN 'XTX011' THEN
+			SET labelName = 'XTX011';
+		WHEN 'XTX012' THEN
+			SET labelName = 'XTX012';
+		WHEN 'XTX013' THEN
+			SET labelName = 'XTX013';
+		WHEN 'XTX014' THEN
+			SET labelName = 'XTX014';
+		WHEN 'XTX016' THEN
+			SET labelName = 'XTX016';
+		WHEN 'XTX017' THEN
+			SET labelName = 'XTX017';
+		WHEN 'XTX018' THEN
+			SET labelName = 'XTX018';
+		WHEN 'XTX019' THEN
+			SET labelName = 'XTX019';
+		WHEN 'XTX023' THEN
+			SET labelName = 'XTX023';
+		WHEN 'XTX024' THEN
+			SET labelName = 'XTX024';
+		WHEN 'XTX025' THEN
+			SET labelName = 'XTX025';
+		WHEN 'XTX026' THEN
+			SET labelName = 'XTX026';
+		WHEN 'XTX027' THEN
+			SET labelName = 'XTX027';		
+		WHEN 'XTX028' THEN
+			SET labelName = 'XTX028';
+		WHEN 'XTX029' THEN
+			SET labelName = 'XTX029';
+		WHEN 'XTX030' THEN
+			SET labelName = 'XTX030';
+		WHEN 'XTX042' THEN
+			SET labelName = 'XTX042';	
+		WHEN 'XTX043' THEN
+			SET labelName = 'XTX043';
+		WHEN 'XTX044' THEN
+			SET labelName = 'XTX044';
+		WHEN 'XTX045' THEN
+			SET labelName = 'XTX045';		
+		WHEN 'XTX046' THEN
+			SET labelName = 'XTX046';
+		WHEN 'XTX047' THEN
+			SET labelName = 'XTX047';
+		WHEN 'XTX048' THEN
+			SET labelName = 'XTX048';
+		WHEN 'XTX049' THEN
+			SET labelName = 'XTX049';		
+		WHEN 'XTX050' THEN
+			SET labelName = 'XTX050';
+		WHEN 'XTX051' THEN
+			SET labelName = 'XTX051';		
+		WHEN 'XTX052' THEN
+			SET labelName = 'XTX052';
+		WHEN 'XTX053' THEN
+			SET labelName = 'XTX053';
+		WHEN 'XTX054' THEN
+			SET labelName = 'XTX054';
+		WHEN 'XTX055' THEN
+			SET labelName = 'XTX055';		
+		WHEN 'XTX056' THEN
+			SET labelName = 'XTX056';
+		WHEN 'XTX057' THEN
+			SET labelName = 'XTX057';
+		WHEN 'XTX058' THEN
+			SET labelName = 'XTX058';
+		WHEN 'XTX059' THEN
+			SET labelName = 'XTX059';	
+		WHEN 'XTX060' THEN
+			SET labelName = 'XTX060';
+		WHEN 'XTX061' THEN
+			SET labelName = 'XTX061';
+		WHEN 'XTX062' THEN
+			SET labelName = 'XTX062';
+		WHEN 'XTX063' THEN
+			SET labelName = 'XTX063';			
+		WHEN 'BillingXTX01' THEN
+			SET labelName = 'BillingXTX01';
+		WHEN 'BillingXTX02' THEN
+			SET labelName = 'BillingXTX02';
+		WHEN 'BillingXTX03' THEN
+			SET labelName = 'BillingXTX03';
+		WHEN 'BillingXTX04' THEN
+			SET labelName = 'BillingXTX04';
+		WHEN 'BillingXTX05' THEN
+			SET labelName = 'BillingXTX05';													
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.PayDocInfo.PaymentType	= FIELDVALUE(InpRq."type-payment");
+		SET OutRq.PayDocInfo.CardNum		= FIELDVALUE(InpRq."card-number");
+		SET OutRq.PayDocInfo.ProviderCode	= FIELDVALUE(InpRq."oper-pref");
+		SET OutRq.PayDocInfo.ProviderNum	= FIELDVALUE(InpRq."ph-number");
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.PayDocInfo.PaymentType	= FIELDVALUE(InpRq."type-payment");
+		SET OutRq.PayDocInfo.CardNum		= FIELDVALUE(InpRq."card-number");
+		SET OutRq.PayDocInfo.ProviderCode	= FIELDVALUE(InpRq."oper-pref");
+		SET OutRq.PayDocInfo.ProviderNum	= FIELDVALUE(InpRq."ph-number");
+		SET OutRq.PayDocInfo.Amount			= FIELDVALUE(InpRq."trx-amount");
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* XTX008 */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.PayerInfo.PersonInfo.inds:NameAddrType	= 'Customer';
+		SET OutRq.PayerInfo.PersonInfo.inds:FullName		= FIELDVALUE(InpRq.fio);
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdType		= '1';
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdStatus	= 'true';
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdNum		= FIELDVALUE(InpRq."pass");
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IssueDt	= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd');
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IssuedBy	= '1';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Key		= 'RNN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Value	= FIELDVALUE(InpRq."rnn-number");
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[2].Key		= 'IIN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[2].Value	= FIELDVALUE(InpRq."iin-number");
+		
+		SET OutRq.PayDocInfo.PaymentType		= FIELDVALUE(InpRq."type-payment");
+		SET OutRq.PayDocInfo.CardNum			= FIELDVALUE(InpRq."card-number");
+		SET OutRq.PayDocInfo.PaymentCBC			= FIELDVALUE(InpRq."kbk");
+		SET OutRq.PayDocInfo.TaxOfficeId		= FIELDVALUE(InpRq."rnn-nk");
+		SET OutRq.PayDocInfo.PaymentTargetCode	= FIELDVALUE(InpRq."knp");
+		SET OutRq.PayDocInfo.Amount				= FIELDVALUE(InpRq."trx-amount");
+		SET OutRq.PayDocInfo.RegistrationNumber	= FIELDVALUE(InpRq."RegistrationNumber"); -- Гос. номер ТС
+		SET OutRq.PayDocInfo.CustomsNum			= FIELDVALUE(InpRq."detpay");
+		
+		SET Environment.UserProperties.PaymentCBC = FIELDVALUE(InpRq."kbk");
+		SET Environment.UserProperties.ptype                = FIELDVALUE(InpRq."ptype"); -- Тип платежа
+		SET Environment.UserProperties.IIN                  = FIELDVALUE(InpRq."rnn-number");
+		SET Environment.UserProperties.RegistrationNumber   = FIELDVALUE(InpRq."RegistrationNumber");
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* XTX009 */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.PayerInfo.PersonInfo.inds:NameAddrType	= 'Customer';
+		SET OutRq.PayerInfo.PersonInfo.inds:FullName		= FIELDVALUE(InpRq.fio);
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdType		= '1';
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdStatus	= 'true';
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdNum		= FIELDVALUE(InpRq."pass");
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IssueDt	= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd');
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IssuedBy	= '1';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Key		= 'RNN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Value	= FIELDVALUE(InpRq."rnn-number");
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[2].Key		= 'IIN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[2].Value	= FIELDVALUE(InpRq."iin-number");
+		
+		SET OutRq.PayDocInfo.PaymentType			= FIELDVALUE(InpRq."type-payment");
+		SET OutRq.PayDocInfo.CardNum				= FIELDVALUE(InpRq."card-number");
+		SET OutRq.PayDocInfo.PaymentCBC				= FIELDVALUE(InpRq."kbk");
+		SET OutRq.PayDocInfo.TaxOfficeId			= FIELDVALUE(InpRq."rnn-nk");
+		SET OutRq.PayDocInfo.PaymentTargetCode		= FIELDVALUE(InpRq."knp");
+		SET OutRq.PayDocInfo.Amount					= FIELDVALUE(InpRq."trx-amount");
+		SET OutRq.PayDocInfo.CustomsNum				= FIELDVALUE(InpRq."detpay");
+		SET OutRq.PayDocInfo.BCAmount				= FIELDVALUE(InpRq."bank-comm");
+		SET OutRq.PayDocInfo.PaymentExtAttr.Key		= 'VINCODE';
+		SET OutRq.PayDocInfo.PaymentExtAttr.Value	= FIELDVALUE(InpRq.VinCode);
+		SET OutRq.PayDocInfo.PaymentExtAttr.Value2	= FIELDVALUE(InpRq.PenaltyId);
+		SET OutRq.PayDocInfo.PaymentExtAttr.Value3	= FIELDVALUE(InpRq.CarTransportRid);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO5
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.PayerInfo.PersonInfo.inds:NameAddrType	= 'Customer';
+		SET OutRq.PayerInfo.PersonInfo.inds:FullName		= FIELDVALUE(InpRq.fio);
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdType		= '1';
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdStatus	= 'true';
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdNum		= FIELDVALUE(InpRq."pass");
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IssueDt	= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd');
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IssuedBy	= '1';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Key		= 'RNN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Value	= FIELDVALUE(InpRq."rnn-number");
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[2].Key		= 'IIN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[2].Value	= FIELDVALUE(InpRq."iin-number");
+		
+		SET OutRq.PayDocInfo.PaymentType		= FIELDVALUE(InpRq."type-payment");
+		SET OutRq.PayDocInfo.CardNum			= FIELDVALUE(InpRq."card-number");
+		SET OutRq.PayDocInfo.PaymentSubType		= FIELDVALUE(InpRq."trx-type");
+		SET OutRq.PayDocInfo.StationRNN			= FIELDVALUE(InpRq."rnn-bn");
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO6
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.PayerInfo.PersonInfo.inds:NameAddrType	= 'Customer';
+		SET OutRq.PayerInfo.PersonInfo.inds:FullName		= FIELDVALUE(InpRq.fio);
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdType		= '1';
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdStatus	= 'true';
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IdNum		= FIELDVALUE(InpRq."pass");
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IssueDt	= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd');
+		SET OutRq.PayerInfo.PersonInfo.inds:IdentityCards.inds:IdentityCard.inds:IssuedBy	= '1';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Key		= 'RNN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Value	= FIELDVALUE(InpRq."rnn-number");
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[2].Key		= 'IIN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[2].Value	= FIELDVALUE(InpRq."iin-number");
+		
+		SET OutRq.PayDocInfo.PaymentType		= FIELDVALUE(InpRq."type-payment");
+		SET OutRq.PayDocInfo.CardNum			= FIELDVALUE(InpRq."card-number");
+		SET OutRq.PayDocInfo.Amount				= FIELDVALUE(InpRq."trx-amount");
+		SET OutRq.PayDocInfo.PaymentTargetCode	= FIELDVALUE(InpRq."knp");
+		SET OutRq.PayDocInfo.PaymentSubType		= FIELDVALUE(InpRq."trx-type");
+		SET OutRq.PayDocInfo.StationRNN			= FIELDVALUE(InpRq."rnn-bn");
+		SET OutRq.PayDocInfo.BCAmount			= FIELDVALUE(InpRq."bank-comm");
+		
+		DECLARE extAttr REFERENCE TO OutRq;
+		CREATE LASTCHILD OF OutRq.PayDocInfo AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'KODRP';
+		SET extAttr.Value 						= FIELDVALUE(InpRq."kod-rp");
+		CREATE LASTCHILD OF OutRq.PayDocInfo AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'NOMREQ';
+		SET extAttr.Value 						= FIELDVALUE(InpRq."nom-req");
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO7
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.PayerInfo.PersonInfo.inds:NameAddrType	= 'Customer';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Key		= 'RNN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Value	= FIELDVALUE(InpRq."rnn-bn");
+		
+		SET OutRq.PayDocInfo.PaymentType			= FIELDVALUE(InpRq."type-payment");
+		SET OutRq.PayDocInfo.CardNum				= FIELDVALUE(InpRq."card-number");
+		SET OutRq.PayDocInfo.Amount					= FIELDVALUE(InpRq."trx-amount");
+		SET OutRq.PayDocInfo.PaymentTarget			= FIELDVALUE(InpRq."type-transport");
+		SET OutRq.PayDocInfo.PaymentExtAttr.Key		= 'NGR';
+		SET OutRq.PayDocInfo.PaymentExtAttr.Value	= FIELDVALUE(InpRq."nom-grp");
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO8
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.PayerInfo.PersonInfo.inds:NameAddrType	= 'Customer';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Key		= 'RNN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Value	= FIELDVALUE(InpRq."rnn-bn");
+		
+		SET OutRq.PayDocInfo.PaymentType			= FIELDVALUE(InpRq."type-payment");
+		SET OutRq.PayDocInfo.CardNum				= FIELDVALUE(InpRq."card-number");
+		SET OutRq.PayDocInfo.Amount					= FIELDVALUE(InpRq."trx-amount");
+		SET OutRq.PayDocInfo.PaymentTarget			= FIELDVALUE(InpRq."type-transport");
+		SET OutRq.PayDocInfo.BCAmount				= FIELDVALUE(InpRq."bank-comm");
+		SET OutRq.PayDocInfo.PaymentExtAttr.Key		= 'NGR';
+		SET OutRq.PayDocInfo.PaymentExtAttr.Value	= FIELDVALUE(InpRq."nom-grp");
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Задание параметров маршрутизации в заголовке MQRFH2.
+ **/
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_Parse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC');
+		CREATE FIRSTCHILD OF OutputRoot.XMLNSC 
+		PARSE ( 
+			InputRoot.BLOB.BLOB
+			CCSID 1208
+			OPTIONS FolderBitStream + ValidateNone);
+		
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO9
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutRq.PayerInfo.PersonInfo.inds:NameAddrType	= 'Customer';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Key		= 'RNN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Value	= FIELDVALUE(InpRq."rnn-number");
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[2].Key		= 'IIN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[2].Value	= FIELDVALUE(InpRq."iin-number");
+		
+		SET OutRq.PayDocInfo.PaymentType		= FIELDVALUE(InpRq."type-payment");
+		SET OutRq.PayDocInfo.CardNum			= FIELDVALUE(InpRq."card-number");
+		SET OutRq.PayDocInfo.Amount				= FIELDVALUE(InpRq."trx-amount");
+		SET OutRq.PayDocInfo.PaymentSubType		= FIELDVALUE(InpRq."trx-type");
+		SET OutRq.PayDocInfo.PaymentCBC			= FIELDVALUE(InpRq."kbk");
+		SET OutRq.PayDocInfo.TaxOfficeId		= FIELDVALUE(InpRq."rnn-nk");
+		SET OutRq.PayDocInfo.PaymentTargetCode	= FIELDVALUE(InpRq."knp");
+		SET OutRq.PayDocInfo.CustomsNum			= FIELDVALUE(InpRq."detpay");
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Технический запрос ICON, AlmaTV / платеж коммерческому предприятию 
+ **/ 
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX013
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE payDoc REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType 				= inRef."type-payment";
+		SET payDoc.CardNum	 				= inRef."card-number";
+		DECLARE extAttr REFERENCE TO outRef;
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 					= 'BIN';
+		SET extAttr.Value 					= inRef."rnn-bn";
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 					= 'ACCT';
+		SET extAttr.Value 					= inRef."ph-number";
+				
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос на оплату ICON, AlmaTV / платеж коммерческому предприятию 
+ **/ 
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX014
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType 				= inRef."type-payment";
+		SET payDoc.CardNum					= inRef."card-number";
+		SET payDoc.Amount					= inRef."trx-amount";
+		SET payDoc.BCAmount					= inRef."bank-komm";
+		
+		DECLARE extAttr REFERENCE TO outRef;
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 					= 'BIN';
+		SET extAttr.Value 					= inRef."rnn-bn";
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 					= 'ACCT';
+		SET extAttr.Value 					= inRef."ph-number";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Технический запрос погашение кредита
+ **/ 
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX018
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		IF inRef.type_req = '1' THEN
+			-- информационный запрос
+			DECLARE personInfo REFERENCE TO outRef;
+			CREATE FIELD outRef.PayerInfo.PersonInfo AS personInfo;
+			SET personInfo.inds:NameAddrType 				= 'Customer';
+			SET personInfo.PersonIdExt.Key					= 'RNN';
+			SET personInfo.PersonIdExt.Value				= inRef."rnn-bn";
+			
+			SET outRef.PayDocInfo.PaymentType				= inRef."type-payment";
+			SET outRef.PayDocInfo.CardNum					= inRef."card-number";
+			
+			DECLARE extAttr REFERENCE TO outRef;
+			CREATE LASTCHILD  OF outRef.PayDocInfo AS extAttr NAME 'PaymentExtAttr';
+			SET extAttr.Key									= 'TYPER';
+			SET extAttr.Value								= inRef.type_req;			
+			
+		ELSEIF inRef.type_req = '2' THEN 
+			-- расчетный запрос
+			DECLARE payDoc REFERENCE TO outRef;
+			CREATE FIELD outRef.PayDocInfo AS payDoc;
+			SET outRef.PayDocInfo.PaymentType				= inRef."type-payment";
+			SET outRef.PayDocInfo.CardNum					= inRef."card-number";			
+			SET outRef.PayDocInfo.Amount					= inRef."trx-amount";
+			SET outRef.PayDocInfo.CurrCode					= IsoToCodCurSafe(inRef.crc_lon);
+			
+			DECLARE extAttr REFERENCE TO outRef;
+			CREATE LASTCHILD  OF outRef.PayDocInfo AS extAttr NAME 'PaymentExtAttr';
+			SET extAttr.Key									= 'TYPER';
+			SET extAttr.Value								= inRef.type_req;	
+			CREATE LASTCHILD  OF outRef.PayDocInfo AS extAttr NAME 'PaymentExtAttr';
+			SET extAttr.Key									= 'ACCTCR';
+			SET extAttr.Value								= inRef."client-account";			
+			
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Финансовый запрос погашения кредита
+ **/ 
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX019
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType 				= inRef."type-payment";
+		SET payDoc.CardNum					= inRef."card-number";
+		SET payDoc.Amount					= inRef."trx-amount";
+		SET payDoc.CurrCode					= IsoToCodCurSafe(inRef.crc_lon);
+		
+		DECLARE extAttr REFERENCE TO outRef;
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 			= 'ACCTCR';
+		SET extAttr.Value 			= inRef."client-account";
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 			= 'KCRATE';
+		SET extAttr.ValueD 			= inRef.kros_kurs;
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 			= 'DT';
+		SET extAttr.Value 			= inRef.date_tran;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Технический запрос ДДУ по Атырау (и ДДУ по Петропавловску)
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX025
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE pInfo REFERENCE TO outRef;
+		DECLARE payDoc REFERENCE TO outRef;
+		DECLARE extAttr REFERENCE TO outRef;
+		CREATE FIELD outRef.PayerInfo.PersonInfo AS pInfo;
+		
+		SET pInfo.inds:NameAddrType 			= 'Customer';
+		SET pInfo.PersonIdExt.Key 				= 'RNN';
+		SET pInfo.PersonIdExt.Value 			= FIELDVALUE(inRef."rnn-bn");
+		
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType 					= FIELDVALUE(inRef."type-payment");
+		SET payDoc.Amount	 					= FIELDVALUE(inRef."trx-amount");
+		SET payDoc.PaymentTarget 				= FIELDVALUE(inRef."type-transport");
+		SET payDoc.PaymentSubType				= FIELDVALUE(inRef."trx-type");
+		
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'NGR';
+		SET extAttr.Value 						= FIELDVALUE(inRef."nom-grp");
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'AMTDOP';
+		SET extAttr.ValueD 						= FIELDVALUE(inRef."trx-amount-dop");
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'FIO';
+		SET extAttr.Value 						= FIELDVALUE(inRef."fio");
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'RNNNK';
+		SET extAttr.Value 						= FIELDVALUE(inRef."rnn-nk");
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'KODRP';
+		SET extAttr.Value 						= FIELDVALUE(inRef."kod-rp");
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос ДДУ по Атырау (и ДДУ по Петропавловску)
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX026
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];		
+		DECLARE pInfo REFERENCE TO outRef;
+		DECLARE payDoc REFERENCE TO outRef;
+		DECLARE extAttr REFERENCE TO outRef;
+		CREATE FIELD outRef.PayerInfo.PersonInfo AS pInfo;
+		
+		SET pInfo.inds:NameAddrType 			= 'Customer';
+		SET pInfo.PersonIdExt.Key 				= 'RNN';
+		SET pInfo.PersonIdExt.Value 			= FIELDVALUE(inRef."rnn-bn");
+		
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType 					= FIELDVALUE(inRef."type-payment");
+		SET payDoc.Amount	 					= FIELDVALUE(inRef."trx-amount");
+		SET payDoc.PaymentTarget 				= FIELDVALUE(inRef."type-transport");
+		SET payDoc.BCAmount 					= FIELDVALUE(inRef."bank-comm");
+		
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'NGR';
+		SET extAttr.Value 						= FIELDVALUE(inRef."nom-grp");
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'AMTDOP';
+		SET extAttr.ValueD 						= FIELDVALUE(inRef."trx-amount-dop");
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'FIO';
+		SET extAttr.Value 						= FIELDVALUE(inRef."fio");
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'RNNNK';
+		SET extAttr.Value 						= FIELDVALUE(inRef."rnn-nk");
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'KODRP';
+		SET extAttr.Value 						= FIELDVALUE(inRef."kod-rp");
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Технический запрос пополнение текущего счета
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX003
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef.PayDocInfo.PaymentType			= inRef."type-payment";
+		SET outRef.PayDocInfo.CardNum				= inRef."card-number";
+		SET outRef.PayDocInfo.PaymentExtAttr.Key	= 'ACCOUNT';
+		SET outRef.PayDocInfo.PaymentExtAttr.Value	= inRef."client-account";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос пополнение текущего счета
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX004
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType 				= inRef."type-payment";
+		SET payDoc.CardNum					= inRef."card-number";
+		SET payDoc.Amount					= inRef."trx-amount";
+		SET payDoc.CurrCode					= IsoToCodCurSafe(inRef.crc_lon);
+		
+		DECLARE extAttr REFERENCE TO outRef;
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 			= 'ACCOUNT';
+		SET extAttr.Value 			= inRef."client-account";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Технический запрос пополнение депозита
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX016
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef.PayDocInfo.PaymentType			= inRef."type-payment";
+		SET outRef.PayDocInfo.CardNum				= inRef."card-number";
+		SET outRef.PayDocInfo.Amount				= inRef."trx-amount";
+		SET outRef.PayDocInfo.PaymentExtAttr.Key	= 'ACCOUNT';
+		SET outRef.PayDocInfo.PaymentExtAttr.Value	= inRef."client-account";
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос пополнение депозита
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX017
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType 				= inRef."type-payment";
+		SET payDoc.CardNum					= inRef."card-number";
+		SET payDoc.Amount					= inRef."trx-amount";
+		
+		DECLARE extAttr REFERENCE TO outRef;
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 			= 'ACCOUNT';
+		SET extAttr.Value 			= inRef."client-account";
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Технический запрос пополнение карт-счета
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX023
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef.PayDocInfo.PaymentType			= inRef."type-payment";
+		SET outRef.PayDocInfo.CardNum				= inRef."card-number";
+		SET outRef.PayDocInfo.CurrCode				= inRef."account-currency";
+		SET outRef.PayDocInfo.PaymentExtAttr.Key	= 'ACCOUNT';
+		SET outRef.PayDocInfo.PaymentExtAttr.Value	= inRef."account-number";
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос пополнение депозита
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX024
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType 						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.Amount							= inRef."trx-amount";
+		SET payDoc.CurrCode							= inRef."account-currency";
+		SET payDoc.PaymentExtAttr.Key				= 'ACCOUNT';
+		SET payDoc.PaymentExtAttr.Value				= inRef."account-number";
+		RETURN TRUE;
+	END;
+END MODULE;
+ 
+/*
+ * Технический запрос по платежу в посольство Литвы 	 
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX052
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType 						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.IIN								= inRef."iin";
+		SET payDoc.PayType							= inRef."type_pay";
+		SET payDoc.Amount							= inRef."trx-amount";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+ * Финансовыйй запрос по платежу в посольство Литвы 
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX053
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType 						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.IIN								= inRef."iin";
+		SET payDoc.PayType							= inRef."type_pay";
+		SET payDoc.Amount							= inRef."trx-amount";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *   Технический запрос в пользу ДГОК Филиала АО "ТНК" Казхром 
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX046
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;
+		 
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType 						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.IIN								= inRef."iin-bn";
+		SET payDoc.Amount							= inRef."trx-amount";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *   Финансовый запрос в пользу ДГОК Филиала АО "ТНК" Казхром 
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX047
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType 						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.IIN								= inRef."iin-bn";
+		SET payDoc.PayType							= inRef."type_pay";
+		SET payDoc.Amount							= inRef."trx-amount";
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+/*
+ * Технический запрос по оплате коммунальных платежей ТОО "Батыс Энергоресурс" г.Уральск
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX044
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;	
+				
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.Account							= inRef."client-account";
+		SET payDoc.FIO								= inRef."fio";
+		SET payDoc.PRBalance						= inRef."pr_balance";
+		SET payDoc.Balance							= inRef."balance";
+		SET payDoc.Adr								= inRef."adr";
+		SET payDoc.Amount							= inRef."trx-amount";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Финансовый запрос по оплате коммунальных платежей ТОО "Батыс Энергоресурс" г.Уральск
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX045
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		 
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.Account							= inRef."client-account";
+		SET payDoc.FIO								= inRef."fio";
+		SET payDoc.PRBalance						= inRef."pr_balance";
+		SET payDoc.Balance							= inRef."balance";
+		SET payDoc.Adr								= inRef."adr";
+		SET payDoc.Amount							= inRef."trx-amount";
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Технический запрос по оплате технический осмотр ТОО "Орал техосмотр" г.Уральск
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX050
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;	
+				
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.IIN							        = inRef."iin-bn";
+		SET payDoc.NumAuto							= inRef."nom-grp";
+		SET payDoc.Amount							= inRef."trx-amount";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Финансовый запрос по оплате технический осмотр ТОО "Орал техосмотр" г.Уральск
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX051
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;	
+				
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.IIN							         = inRef."iin-bn";
+		SET payDoc.NumAuto							= inRef."nom-grp";
+		SET payDoc.Amount							= inRef."trx-amount";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Технический запрос : «Университет «Мирас»
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX056
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		/* ??? SET OutRq.PayerInfo.PersonInfo.inds:NameAddrType	= 'Customer'; ??? */
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Key	= 'IIN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Value	= FIELDVALUE(InpRq."iin-bn");
+		
+		SET OutRq.PayDocInfo.PaymentType			= FIELDVALUE(InpRq."type-payment");
+		SET OutRq.PayDocInfo.CardNum				= FIELDVALUE(InpRq."card-number");
+		SET OutRq.PayDocInfo.Amount					= FIELDVALUE(InpRq."trx-amount"); /* ??? AmouontDB */
+		SET OutRq.PayDocInfo.PaymentExtAttr.Key		= 'NGR';
+		SET OutRq.PayDocInfo.PaymentExtAttr.Value	= FIELDVALUE(InpRq."nom-grp");
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос : «Университет «Мирас»
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX057
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;	
+				
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.IIN							    = inRef."iin_bn";
+		SET payDoc.NumAuto							= inRef."nom-grp";
+		SET payDoc.Amount							= inRef."trx-amount";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Технический запрос по оплате образовательного платежа МАБ
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX048
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;	
+				
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.StudId						    = inRef."id-stud";
+		SET payDoc.GroupStud						= inRef."nom-grp";
+		SET payDoc.Course							= inRef."kod-rp";
+		SET payDoc.Balance							= inRef."balance";
+		SET payDoc.Amount							= inRef."trx-amount";
+		
+		RETURN TRUE;
+
+	END;
+END MODULE;
+
+/*
+ * Финансовый запрос по оплате образовательного платежа МАБ
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX049
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;	
+				
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.StudId						    = inRef."id-stud";
+		SET payDoc.GroupStud						= inRef."nom-grp";
+		SET payDoc.Course							= inRef."kod-rp";
+		SET payDoc.Balance							= inRef."balance";
+		SET payDoc.Amount							= inRef."trx-amount";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Технический запрос по платежам коммунальных услуг ТОО "Аксайжылукуат" г.Аксай
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX042
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;	
+				
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.FIO								= inRef."fio";
+		SET payDoc.NumberK							= inRef."nom-grp";
+		SET payDoc.Address							= inRef."adr";
+		SET payDoc.PayType							= inRef."type_pay";
+		SET payDoc.Balance							= inRef."balance";
+		SET payDoc.Amount							= inRef."trx-amount";
+		SET payDoc.Period							= inRef."detpay";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Финансовый запрос по платежам коммунальных услуг ТОО "Аксайжылукуат" г.Аксай
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX043
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;	
+				
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.FIO								= inRef."fio";
+		SET payDoc.NumberK							= inRef."nom-grp";
+		SET payDoc.Address							= inRef."adr";
+		SET payDoc.PayType							= inRef."type_pay";
+		SET payDoc.Balance							= inRef."balance";
+		SET payDoc.Amount							= inRef."trx-amount";
+		SET payDoc.Period							= inRef."detpay";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Технический запрос по платежам коммерческих услуг РГКП "Центр по недвижимости по ЗКО" г.Уральск 
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX054
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;	
+				
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.IIN								= inRef."iin";
+		SET payDoc.PayType							= inRef."type_pay";
+		SET payDoc.Amount							= inRef."trx-amount";
+				
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Финансовый запрос по платежам коммерческих услуг РГКП "Центр по недвижимости по ЗКО" г.Уральск 
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX055
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;	
+				
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.IIN								= inRef."iin";
+		SET payDoc.PayType							= inRef."type_pay";
+		SET payDoc.Amount							= inRef."trx-amount";
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Технический запрос по платежам коммерческих услуг АО «ЖилстройсбербанкКазахстана»
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX058
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX059	
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- CALL CopyMessageHeaders();
+		-- CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+/*
+u07357 10.02.2015
+*/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX060
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		/* ??? SET OutRq.PayerInfo.PersonInfo.inds:NameAddrType	= 'Customer'; ??? */
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Key	= 'IIN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Value	= FIELDVALUE(InpRq."iin-bn");
+		
+		SET OutRq.PayDocInfo.PaymentType			= FIELDVALUE(InpRq."type-payment");
+		SET OutRq.PayDocInfo.CardNum				= FIELDVALUE(InpRq."card-number");
+		SET OutRq.PayDocInfo.Amount					= FIELDVALUE(InpRq."trx-amount"); /* ??? AmouontDB */
+		SET OutRq.PayDocInfo.typetr					= FIELDVALUE(InpRq."type-transport");
+		SET OutRq.PayDocInfo.PaymentExtAttr.Key		= 'NGR';
+		SET OutRq.PayDocInfo.PaymentExtAttr.Value	= FIELDVALUE(InpRq."nom-grp");
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX061
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+				
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;	
+				
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.IIN							    = inRef."iin-bn";
+		SET payDoc.NumAuto							= inRef."nom-grp";
+		SET payDoc.Amount							= inRef."trx-amount";
+		SET payDoc.typetr							= inRef."type-transport";
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос с ИПТ в КСШ по Биллингу Info -u06068 20.02.2015
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_BillingXTX01
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+ 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZBillingIPTInfoRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'request';
+		SET oRef = inRef;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Запрос с ИПТ в КСШ по Биллингу Prep -u06068 20.02.2015
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_BillingXTX02
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request.*[<];
+		DECLARE inReq REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		 FOR inbody AS inRef.Body.objects.object[] DO
+			IF inbody.(XMLNSC.Attribute)"name" = 'PERSONGETIIN' THEN
+				CALL CopyMessageHeaders(InputRoot, OutputRoot);
+				CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+				CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetClientInfoRq';
+				DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<]; 
+				SET outRef.RqUID	= Environment.UserProperties.RqUID;
+				SET outRef.RqTm		= Environment.UserProperties.RqTm; 
+				SET outRef.SPName	= Environment.UserProperties.SPName;
+				
+				FOR inbody_inner AS inRef.Body.objects.object[] DO
+					IF inbody_inner.(XMLNSC.Attribute)"name" = 'TARGET' THEN
+						SET outRef.PersonInfo.PersonIdExt.Value = inbody_inner.(XMLNSC.Attribute)"value";	
+					END IF;
+				END FOR;
+				SET Environment.UserProperties.RepeatRq = 'ResponseFromQP';
+				SET Environment.UserProperties.RepeatRqForBilling = inReq; 
+				--PROPAGATE TO TERMINAL 'out1';	
+				
+				RETURN TRUE;		
+				
+				--PROPAGATE TO TERMINAL 'out';		
+			END IF;		
+		 END FOR;
+		 
+		 CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+				CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+				CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZBillingIPTInfoRq';
+			
+				CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);				
+			
+				DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+								
+				DECLARE oRef REFERENCE TO outRef;
+			
+				CREATE LASTCHILD OF outRef AS oRef NAME 'request';
+				SET oRef = inRef;				
+				
+				FOR orefBody AS oRef.Body.objects.object[] DO					
+					IF orefBody.(XMLNSC.Attribute)"name" = 'PERSONGETIIN' THEN
+						
+						SET orefBody = NULL;
+					
+					END IF;					
+				END FOR;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_BillingXTX03
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZBillingIPTInfoRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'request';
+		SET oRef = inRef;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+u07357 09.04.2015
+*/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX062
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZTechnicalRequestProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		/* ??? SET OutRq.PayerInfo.PersonInfo.inds:NameAddrType	= 'Customer'; ??? */
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Key	= 'IIN';
+		SET OutRq.PayerInfo.PersonInfo.PersonIdExt[1].Value	= FIELDVALUE(InpRq."iin-bn");
+		
+		SET OutRq.PayDocInfo.PaymentType			= FIELDVALUE(InpRq."type-payment");
+		SET OutRq.PayDocInfo.CardNum				= FIELDVALUE(InpRq."card-number");
+		SET OutRq.PayDocInfo.Amount					= FIELDVALUE(InpRq."trx-amount"); /* ??? AmouontDB */
+		SET OutRq.PayDocInfo.typetr					= FIELDVALUE(InpRq."type-transport");
+		SET OutRq.PayDocInfo.PaymentExtAttr.Key		= 'NGR';
+		SET OutRq.PayDocInfo.PaymentExtAttr.Value	= FIELDVALUE(InpRq."nom-grp");
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+u07357 09.04.2015
+*/
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_XTX063
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+				
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE payDoc REFERENCE TO outRef;	
+				
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		SET payDoc.PaymentType						= inRef."type-payment";
+		SET payDoc.CardNum							= inRef."card-number";
+		SET payDoc.IIN							    = inRef."iin-bn";
+		SET payDoc.NumAuto							= inRef."nom-grp";
+		SET payDoc.Amount							= inRef."trx-amount";
+		SET payDoc.typetr							= inRef."type-transport";
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * u06068 03.06.2015
+ */
+CREATE COMPUTE MODULE RequestForESB_ConvertIPT2MDO_BillingXTX05
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZBillingIPTtoBilling';
+		
+		CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAME 'request';
+		SET oRef = inRef;
+		
+		RETURN TRUE;
+
+	END;
+
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertoTOQpragmaXTX026
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPaymentProviderRq';		
+
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:inds = inds;		
+		
+		
+		--CALL FillMDOStandartElementsRq(Environment.UserProperties, InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.message.request;
+		DECLARE inReq REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];		
+		DECLARE pInfo REFERENCE TO outRef;
+		DECLARE payDoc REFERENCE TO outRef;
+		DECLARE extAttr REFERENCE TO outRef;
+		CREATE FIELD outRef.PayerInfo.PersonInfo AS pInfo;
+		
+		SET OutputRoot.XMLNSC.*:*[<].RqUID				= Environment.UserProperties.RqUID;
+		SET OutputRoot.XMLNSC.*:*[<].RqTm				= Environment.UserProperties.RqTm;
+		SET OutputRoot.XMLNSC.*:*[<].SPName				= Environment.UserProperties.SPName;
+		SET OutputRoot.XMLNSC.*:*[<].ServiceAttr[1].Key	= 'XTYPE';
+		SET OutputRoot.XMLNSC.*:*[<].ServiceAttr[1].Value	= 'XTX026';
+		SET OutputRoot.XMLNSC.*:*[<].ServiceAttr[2].Key	= 'SMC';
+		SET OutputRoot.XMLNSC.*:*[<].ServiceAttr[2].Value	= 'TRM1';
+		SET OutputRoot.XMLNSC.*:*[<].ServiceAttr[3].Key	= 'SMID';
+		SET OutputRoot.XMLNSC.*:*[<].ServiceAttr[3].Value	= inRef.*[<].Source;
+		SET OutputRoot.XMLNSC.*:*[<].ServiceAttr[4].Key	= 'RMC';
+		SET OutputRoot.XMLNSC.*:*[<].ServiceAttr[4].Value	= 'SBERBANK';
+		SET OutputRoot.XMLNSC.*:*[<].ServiceAttr[5].Key	= 'RMID';
+		SET OutputRoot.XMLNSC.*:*[<].ServiceAttr[5].Value	= '000000001';
+				
+		SET pInfo.inds:NameAddrType 			= 'Customer';
+		SET pInfo.PersonIdExt.Key 				= 'RNN';
+		
+		DECLARE personGetIIN CHARACTER;
+		SET personGetIIN = THE(SELECT ITEM FIELDVALUE(attr.(XMLNSC.Attribute)"value") FROM inRef.*[<].Body.objects.object[] AS attr WHERE attr.(XMLNSC.Attribute)"name"='PERSONGETIIN');
+		
+		IF personGetIIN <> '' THEN
+			SET pInfo.PersonIdExt.Value 			= THE(SELECT ITEM FIELDVALUE(attr.(XMLNSC.Attribute)"value") FROM inRef.*[<].Body.objects.object[] AS attr WHERE attr.(XMLNSC.Attribute)"name"='TARGET');
+		ELSE
+			SET pInfo.PersonIdExt.Value 			= '000000000000';
+		END IF;
+		
+		CREATE LASTCHILD OF outRef AS payDoc NAME 'PayDocInfo';
+		
+		IF inRef.*[<].Pay.(XMLNSC.Attribute)"Type" = '1' THEN
+			SET payDoc.PaymentType 					= 'card';
+		ELSE
+			SET payDoc.PaymentType 					= 'cash';
+		END IF;		
+		
+		DECLARE varSumm DECIMAL 0.0;
+		SET varSumm = CAST(inRef.*[<].Pay.Amount AS DECIMAL) - CAST(inRef.*[<].Pay.Commission AS DECIMAL);
+		SET payDoc.Amount	 					= varSumm;
+		SET payDoc.PaymentTarget 				= 'EBS';
+		SET payDoc.BCAmount 					= inRef.*[<].Pay.Commission;
+		
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'NGR';
+		SET extAttr.Value 						= THE(SELECT ITEM FIELDVALUE(attr.(XMLNSC.Attribute)"value") FROM inRef.*[<].Body.objects.object[] AS attr WHERE attr.(XMLNSC.Attribute)"name"='DETAILS');
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'AMTDOP';
+		SET extAttr.ValueD 						= '0.0';
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'FIO';
+		IF personGetIIN <> '' THEN
+			SET extAttr.Value 						= THE(SELECT ITEM FIELDVALUE(attr.(XMLNSC.Attribute)"value") FROM inRef.*[<].Body.objects.object[] AS attr WHERE attr.(XMLNSC.Attribute)"name"='FIO');
+		ELSE
+			SET extAttr.Value 						= 'Платежи ЕБС';
+		END IF;	
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'RNNNK';
+		SET extAttr.Value 						= InputRoot.XMLNSC.message.(XMLNSC.Attribute)"rnn_nk";
+		CREATE LASTCHILD OF payDoc AS extAttr NAME 'PaymentExtAttr';
+		SET extAttr.Key 						= 'KODRP';
+		SET extAttr.Value 						= '0';
+		 
+		SET Environment.UserProperties.OperationName = 'BillingXTX04';
+		SET Environment.UserProperties.RepeatRq = 'ResponseFromQP';
+		SET Environment.UserProperties.RepeatRqForBilling = inReq; 
+		
+		RETURN TRUE;
+	END;
+END MODULE;

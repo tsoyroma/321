@@ -1,0 +1,15 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.dbo.esql
+
+-- Namespace MDO
+DECLARE NS_MDO_BANKS CONSTANT CHARACTER 'http://sberbank.ru/dem/organizations/banks/15';
+DECLARE banks	NAMESPACE	NS_MDO_BANKS;
+DECLARE NS_MDO_INDS CONSTANT CHARACTER 'http://sberbank.ru/dem/individual/15';
+DECLARE inds	NAMESPACE	NS_MDO_INDS;
+DECLARE NS_MDO_IFXCA CONSTANT CHARACTER 'http://sberbank.ru/dem/commonAggregates/15';
+DECLARE	ifxca	NAMESPACE 	NS_MDO_IFXCA;
+DECLARE NS_MDO_ORGS CONSTANT CHARACTER 'http://sberbank.ru/dem/organizations/15';
+DECLARE	orgs	NAMESPACE 	NS_MDO_ORGS;
+DECLARE NS_MDO_COMMONS CONSTANT CHARACTER 'http://sberbank.ru/dem/commonAggregates/18';
+DECLARE	commons	NAMESPACE 	NS_MDO_COMMONS;
+
+

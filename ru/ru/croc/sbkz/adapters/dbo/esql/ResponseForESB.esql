@@ -1,0 +1,88 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.dbo.esql
+PATH ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE ResponseForESB_DetectOperationForResponse
+CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'InternetClientInformationResponse' THEN
+			SET labelName = 'InternetClientInformationResponse';
+		WHEN 'ClientMailResponse' THEN
+			SET labelName = 'ClientMailResponse';
+		WHEN 'InternetClientRequisitionResponse' THEN
+			SET labelName = 'InternetClientRequisitionResponse';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_ToCRM1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);							
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'InternetClientInformationResponse';
+
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+
+		SET outRef = inRef;
+		--SET outRef.mqgid = Environment.UserProperties.MsgId2;
+		
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = 'ESB.KZCRM.NOAGGR.OUT';
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName = 'MKZ.ESB.ADP1';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_ToCRM2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);							
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'ClientMailResponse';
+
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+
+		SET outRef = inRef;
+		--SET outRef.mqgid = Environment.UserProperties.MsgId2;
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = 'ESB.KZCRM.NOAGGR.OUT';
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName = 'MKZ.ESB.ADP1';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_ToCRM3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);							
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'InternetClientRequisitionResponse';
+
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+
+		SET outRef = inRef;
+		--SET outRef.mqgid = Environment.UserProperties.MsgId2;
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = 'ESB.KZCRM.NOAGGR.OUT';
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName = 'MKZ.ESB.ADP1';
+		RETURN TRUE;
+	END;
+END MODULE;

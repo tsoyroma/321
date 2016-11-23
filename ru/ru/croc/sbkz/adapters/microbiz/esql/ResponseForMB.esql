@@ -1,0 +1,1129 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.microbiz.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+ 
+-- Восстановление заголовка исходного сообщения
+CREATE COMPUTE MODULE ResponseForMB_AddOrigHead
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+		----------------------------------------------------------------------------------------------------
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body.*[<]);		
+		SET Environment.UserProperties.OrigMess	       = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body;
+		SET Environment.UserProperties.UserProperties  = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		IF Operation IN ('BankAccountRequest') THEN
+			DECLARE varT INTEGER 0;
+			FOR inREQUEST AS InputRoot.ComIbmAggregateReplyBody.REQUEST[] DO			
+			    
+				SET varT = varT + 1;
+				SET Environment.UserProperties.REQUEST[varT]	= inREQUEST;
+				
+			END FOR;			
+		END IF;
+		----------------------------------------------------------------------------------------------------
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- Перенаправление на нужную ветку в соответствие с маршрутизацией
+CREATE COMPUTE MODULE ResponseForMB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZResponseGESV' THEN
+			SET labelName = 'KZResponseGESV';
+		WHEN 'KZGSLResponse' THEN
+			SET labelName = 'KZGSLResponse';
+
+		WHEN 'KZBankAccountResponse' THEN
+			SET labelName = 'KZBankAccountResponse';
+
+		WHEN 'KZGetPrivateClientAccountListRs' THEN
+			SET labelName = 'KZBankAccountResponse';
+		WHEN 'BankAccountRequest' THEN
+			SET labelName = 'KZBankAccountResponse';
+			
+        WHEN 'KZGetCreditHistoryRs' THEN
+			SET labelName = 'KZGetCreditHistoryRs';	
+        WHEN 'KZEPKCompanyRequest' THEN
+			SET labelName = 'KZEPKCompanyResponse';	
+
+        WHEN 'KZGetMDMPersonInfoByAttrRs' THEN
+			SET labelName = 'KZEPKIndividualResponse';	
+        WHEN 'KZEPKIndividualResponse' THEN
+			SET labelName = 'KZEPKIndividualResponse';	
+        WHEN 'KZEPKIndividualRequest' THEN
+			SET labelName = 'KZEPKIndividualResponse';	
+
+        WHEN 'KZLSBOOResponse' THEN
+			SET labelName = 'KZLSBOOResponse';
+        WHEN 'KZLSBOORequest' THEN
+			SET labelName = 'KZLSBOOResponse';
+			
+		WHEN 'KZGetPensionRs' THEN
+			SET labelName = 'KZGetPensionRs';
+		WHEN 'KZSendMDMPrivateClientDataRs'	THEN
+			SET labelName = 'KZSendMDMPrivateClientDataRs';
+		WHEN 'KZSendMDMLegalClientDataRs' THEN
+			SET labelName = 'KZSendMDMLegalClientDataRs';
+		WHEN 'KZGetBackOfficeRs' THEN
+			SET labelName = 'KZGetBackOfficeRs';			 	
+        WHEN 'KZBlackListRs' THEN
+        	IF FIELDVALUE(Environment.UserProperties.TransactOperation) = 'AMLRequest' THEN
+        		SET labelName = 'AMLResponse';
+        	ELSE	
+				SET labelName = 'AML_SBDKResponse';	
+        	END IF;
+		WHEN 'KZGetMDMLegalInfoByAttrRs' THEN
+			SET labelName = 'KZEPKCompanyResponse';
+		WHEN 'KZOrgSetDataRichRs' THEN
+			SET labelName = 'KZOrgSetDataRichRs';
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown service in ResponseForMB', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_ResponseGESV
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	    CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZResponseGESV.ResponseData.GetScheduleEffRates.GetScheduleEffRate;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'ResponseGESV'; 
+		
+		SET OutputRoot.XMLNSC.tns:ResponseGESV.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varGESVResponse REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varGESVResponse NAMESPACE tns NAME 'GESVResponse'; 
+
+		DECLARE varGeneralInfoType REFERENCE TO varGESVResponse;
+		CREATE LASTCHILD OF varGESVResponse AS varGeneralInfoType NAMESPACE tns NAME 'GeneralInfoType';
+				
+		SET varGeneralInfoType.tns:MsgID          =  InputRoot.XMLNSC.*[<].MessageUID;
+		SET varGeneralInfoType.tns:MsgFrom		  =  Environment.UserProperties.MsgFrom;	
+		SET varGeneralInfoType.tns:MsgDate		  =  InputRoot.XMLNSC.*[<].MessageDateTime;	
+
+		DECLARE varErrorInfoType REFERENCE TO varGESVResponse;
+		CREATE LASTCHILD OF varGESVResponse AS varErrorInfoType NAMESPACE tns NAME 'ErrorInfoType';
+				
+	    SET varErrorInfoType.tns:ErrorCode                =  COALESCE(InputRoot.XMLNSC.*[<].ErrorData.ErrorCode, '0');
+		SET varErrorInfoType.tns:ErrorDescription		  =  COALESCE(InputRoot.XMLNSC.*[<].ErrorData.ErrorDesc, ' ');	
+
+		SET varGESVResponse.tns:EffectiveInterestRate	  =  COALESCE(inRef.EffRate, '0');	
+
+		DECLARE varCreditRepaymentSchedule REFERENCE TO varGESVResponse;
+		FOR inScheduleOfPayment AS inRef.ScheduleOfPayment[] DO			
+		    CREATE LASTCHILD OF varGESVResponse AS varCreditRepaymentSchedule NAMESPACE tns NAME 'CreditRepaymentSchedule';
+		    
+			SET varCreditRepaymentSchedule.tns:RepaymentDate                  = inScheduleOfPayment.DtRepayment;       
+			SET varCreditRepaymentSchedule.tns:MainDebtRest                   = inScheduleOfPayment.TotalPrincipalDebtBefore;       
+			SET varCreditRepaymentSchedule.tns:MainDebtRepayment              = inScheduleOfPayment.PaymentPrincipalDebt;       
+			SET varCreditRepaymentSchedule.tns:InterestRepayment              = inScheduleOfPayment.PaymentPercent;       
+			SET varCreditRepaymentSchedule.tns:RepaymentAmount                = inScheduleOfPayment.PaymentAmount;       
+			SET varCreditRepaymentSchedule.tns:EndMonthMainDebtRest           = inScheduleOfPayment.TotalPrincipalDebtAfter;       
+		END FOR;
+		
+		RETURN TRUE;
+	END;			
+END MODULE;
+
+/* KZGSLResponse */
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_GSLResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	    CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.[<];
+		DECLARE inGSLResponse REFERENCE TO InputRoot.XMLNSC.KZGSLResponse;
+				
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/GSL/res';
+		DECLARE tns NAMESPACE TNS1;
+
+        DECLARE varTTTT CHARACTER '';
+        SET varTTTT = InputRoot.XMLNSC.KZGSLResponse.ResponseData.*:GSLResponse.*:GSLRes.*:GeneralInfo.*:MsgID;
+        
+		IF varTTTT <> '' THEN
+			CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+			SET OutputRoot.XMLNSC = inGSLResponse.ResponseData;		
+	        DELETE FIELD OutputRoot.XMLNSC.*:GSLResponse.*:GSLRes.*:gid;
+		ELSE 
+   		    DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+			CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'GSLResponse'; 
+			
+			SET OutputRoot.XMLNSC.tns:GSLResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+	
+	        DECLARE varGSLResponse REFERENCE TO outRef;
+	        CREATE LASTCHILD OF outRef AS varGSLResponse NAMESPACE tns NAME 'GSLRes'; 
+	
+			DECLARE varGeneralInfo REFERENCE TO varGSLResponse;
+			CREATE LASTCHILD OF varGSLResponse AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+					
+			SET varGeneralInfo.tns:MsgID          =  InputRoot.XMLNSC.*[<].MessageUID;
+			SET varGeneralInfo.tns:MsgFrom		  =  'TSM_GSL';	
+			SET varGeneralInfo.tns:MsgDate		  =  InputRoot.XMLNSC.*[<].MessageDateTime;	
+	
+			DECLARE varErrorInfo REFERENCE TO varGSLResponse;
+			CREATE LASTCHILD OF varGSLResponse AS varErrorInfo NAMESPACE tns NAME 'ErrorInfo';
+					
+		    SET varErrorInfo.tns:ErrorCode                =  SUBSTRING(COALESCE(InputRoot.XMLNSC.*[<].ErrorData.ErrorCode, '0') FROM 1 FOR 3);
+			SET varErrorInfo.tns:ErrorDescription		  =  COALESCE(InputRoot.XMLNSC.*[<].ErrorData.ErrorDesc, ' ');
+
+			DECLARE varGSLDebtInfo REFERENCE TO varGSLResponse;
+			CREATE LASTCHILD OF varGSLResponse AS varGSLDebtInfo NAMESPACE tns NAME 'GSLDebtInfo';
+			
+			SET varGSLDebtInfo.tns:DoverieDebtSumm    =  0.0;
+			SET varGSLDebtInfo.tns:DebtSumm 	  	  =	 0.0;
+		END IF; 
+
+		RETURN TRUE;
+	END;			
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_BankAccountResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	    CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+
+		DECLARE OrigMess  REFERENCE TO Environment.UserProperties.OrigMess;
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];				
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/BankAccount/res';
+		DECLARE tns NAMESPACE TNS1;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'BankAccountResponse'; 
+		
+		SET OutputRoot.XMLNSC.tns:BankAccountResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varBankAccountRes REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varBankAccountRes NAMESPACE tns NAME 'BankAccountRes'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varBankAccountRes;
+		CREATE LASTCHILD OF varBankAccountRes AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  InputRoot.XMLNSC.*[<].RqUID;
+	
+		SET varGeneralInfo.tns:MsgFrom		  =  OrigMess.*:BankAccountRequest.*:BankAccountReq.*:GeneralInfo.*:MsgFrom;	
+		SET varGeneralInfo.tns:MsgDate		  =  InputRoot.XMLNSC.*[<].RqTm;	
+
+		DECLARE varDealMemberResponseAttributes REFERENCE TO varBankAccountRes;
+		DECLARE varAccountsInfo REFERENCE TO varDealMemberResponseAttributes;
+		DECLARE counter INTEGER;
+		SET counter = 0;
+			
+		FOR inREQUEST AS Environment.UserProperties.REQUEST[] DO
+			FOR inStatus AS inREQUEST.XMLNSC.*[<].Status[] DO 
+				IF (inStatus.*:StatusCode <> 0) THEN 
+					IF (inStatus.*:StatusDesc <> 'Ошибка выполнения запроса списка лицевых счетов!') THEN -- в будущем заменить на код от QP
+						DECLARE varErrorInfo REFERENCE TO varBankAccountRes;
+						CREATE LASTCHILD OF varBankAccountRes AS varErrorInfo NAMESPACE tns NAME 'ErrorInfo';
+					    SET varErrorInfo.tns:ErrorCode                =  inStatus.*:StatusCode;
+						SET varErrorInfo.tns:ErrorDescription		  =  inStatus.*:StatusDesc; 
+						SET counter = counter + 1;
+					END IF;
+				END IF;
+			END FOR;
+		END FOR;
+			
+		IF counter = 0  THEN 
+				DECLARE varErrorInfo REFERENCE TO varBankAccountRes;
+				CREATE LASTCHILD OF varBankAccountRes AS varErrorInfo NAMESPACE tns NAME 'ErrorInfo';
+				SET varErrorInfo.tns:ErrorCode                =  0;
+				SET varErrorInfo.tns:ErrorDescription		  =  ' ';
+		END IF;
+					
+		FOR inREQUEST AS Environment.UserProperties.REQUEST[] DO	
+				
+			CREATE LASTCHILD OF varBankAccountRes AS varDealMemberResponseAttributes NAMESPACE tns NAME 'DealMemberResponseAttributes';
+			SET varDealMemberResponseAttributes.tns:DealMemberID = inREQUEST.XMLNSC.*[<].PersonInfo.PersonIdExt.Value;
+											
+			FOR inAcctInfo AS inREQUEST.XMLNSC.*[<].AcctList.AcctInfo[] DO
+				  IF inAcctInfo.AcctExtAttr.CurrAttr.Contract <> 'ОМС' THEN  
+					  IF inAcctInfo.Type IN ('1' , '2') THEN  
+				      CREATE LASTCHILD OF varDealMemberResponseAttributes AS varAccountsInfo NAMESPACE tns NAME 'AccountsInfo';
+						    
+					  SET varAccountsInfo.tns:AccountType                  = inAcctInfo.Type;       
+					  SET varAccountsInfo.tns:AccountID                    = inAcctInfo.AcctId;       
+					  SET varAccountsInfo.tns:AccountCurrency              = inAcctInfo.AcctCur;       
+					  SET varAccountsInfo.tns:AccountState                 = inAcctInfo.AcctStatus.StatusCode;       
+					  SET varAccountsInfo.tns:AccountSunn                  = inAcctInfo.AcctBalInfo.BalanceRec.Amount;       
+				  END IF;
+			END IF;
+
+		END FOR; 
+		END FOR;
+
+		RETURN TRUE;
+	END;			
+END MODULE;
+
+/*
+ *  Ответ по ВКИ и ПКБ от ПМИЛ 
+ */
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_CreditHistoryRetail
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+						
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/CreditHistory/res';
+		DECLARE tns NAMESPACE TNS1;		
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAMESPACE tns NAME 'CreditHistoryResponse';		
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.KZGetCreditHistoryRs;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.tns:CreditHistoryResponse;
+		
+		DECLARE outRoot REFERENCE TO OutRs;
+		
+		CREATE LASTCHILD OF OutRs AS outRoot NAMESPACE tns NAME 'CreditHistoryRes';
+			
+		SET OutputRoot.XMLNSC.tns:CreditHistoryResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+		
+		SET outRoot.tns:GeneralInfo.tns:MsgID		=	Environment.UserProperties.RqUID;
+		IF NOT EXISTS(Environment.UserProperties.MsgFrom[]) THEN
+			SET outRoot.tns:GeneralInfo.tns:MsgFrom		=	'TSM_KI';
+		ELSE	
+			SET outRoot.tns:GeneralInfo.tns:MsgFrom		=	Environment.UserProperties.MsgFrom;
+		END IF;
+		SET outRoot.tns:GeneralInfo.tns:MsgDate		=	Environment.UserProperties.RqTm;
+		
+		SET outRoot.tns:ErrorInfo.tns:ErrorCode			=	COALESCE(InputBody.*:*[<].Status.*:StatusCode, '0');
+		SET outRoot.tns:ErrorInfo.tns:ErrorDescription	=	COALESCE(InputBody.*:*[<].Status.*:StatusDesc, '');
+		
+		DECLARE counter INTEGER 1;
+		
+		FOR agreement AS InpRs.Agreement[] DO
+			CREATE LASTCHILD OF outRoot NAMESPACE tns NAME 'DealMemberResponseAttributes';
+			DECLARE agreem REFERENCE TO outRoot.tns:DealMemberResponseAttributes[<];
+			
+			SET agreem.tns:BKIID 			= agreement.BKI;
+			
+			IF NOT EXISTS(Environment.UserProperties.BKI_TYPE[]) THEN 			
+				SET agreem.tns:LastName 		= agreement.PersonInfo.inds:PersonName.inds:LastName;
+				SET agreem.tns:FirstName 		= agreement.PersonInfo.inds:PersonName.inds:FirstName;
+				SET agreem.tns:Patronymic 		= agreement.PersonInfo.inds:PersonName.inds:MiddleName;
+			END IF;
+			
+			IF FIELDVALUE(Environment.UserProperties.BKI_TYPE) = 'PKB' OR FIELDVALUE(Environment.UserProperties.BKI_TYPE) = 'PKB_CORP' THEN
+				SET agreem.tns:CompanyName 		= FIELDVALUE(InpRs.PKB_RESPONSE_XML.Header.TradeName.(XMLNSC.Attribute)value);
+			ELSE
+				SET agreem.tns:CompanyName 		= Environment.UserProperties.CompanyName;
+			END IF;		
+			SET agreem.tns:CreditorBankName	    = agreement.BankName;	
+			SET agreem.tns:ContractID			= agreement.AcctId;
+			SET agreem.tns:LastModifiedDate		= agreement.LastChangeDate;				
+			SET agreem.tns:ContractOpeningDate 	= agreement.OpenDate;
+			SET agreem.tns:ContractClosingDate 	= agreement.CloseDate;
+			SET agreem.tns:ContractState		= agreement.ApplicationStatus;
+			SET agreem.tns:CreditCurr 			= agreement.AcctCur;
+			SET agreem.tns:CreditSumm 			= agreement.CurAmt;
+			
+			IF agreement.MBCreditType = '5' THEN	
+				DECLARE firstDouble CHARACTER;
+				DECLARE secondDouble CHARACTER;
+				
+				DECLARE firstInt INTEGER;
+				DECLARE secondInt INTEGER;
+				
+				SET firstDouble  = REPLACE(agreement.CurAmt, '.00', '');
+				SET secondDouble = REPLACE(agreement.DebtSum,'.00', '');
+				
+				SET firstInt  = CAST(firstDouble AS INTEGER);
+				SET secondInt = CAST(secondDouble AS INTEGER);
+				
+				DECLARE resultDouble INTEGER;
+				SET resultDouble = firstInt - secondInt;
+				
+				SET agreem.tns:OutstandingCreditSumm=  CAST(resultDouble AS CHARACTER) || '.00';
+			ELSE	 
+				SET agreem.tns:OutstandingCreditSumm= agreement.DebtSum;
+			END IF;		
+			
+						
+			SET agreem.tns:InterestRate			= agreement.PerRate;
+			SET agreem.tns:RepaymentAmount		= agreement.MonthSum;
+			SET agreem.tns:CreditPurpose		= agreement.CreditTarget;
+			SET agreem.tns:RepaymentType 		= agreement.PayScheme;
+			
+			SET agreem.tns:CreditType		 	= COALESCE(agreement.MBCreditType,agreement.CreditType);
+			
+			SET agreem.tns:CollateralType = COALESCE(agreement.CollateralType,agreement.PledgeKind);		
+					
+			SET agreem.tns:DealMemberRole		= COALESCE(agreement.MBRole,agreement.Role);
+			SET agreem.tns:RestructingFlag 		= agreement.Restruct;
+			SET agreem.tns:DebtAmortizationFlag	= agreement.ChargeOff;
+			SET agreem.tns:DoverieFlag			= InpRs.ProductType;
+			
+			IF NOT EXISTS(InpRs.ProductType[]) THEN
+				SET agreem.tns:DoverieFlag		= '2';
+			END IF;	
+											
+			SET agreem.tns:NullIinfoDelayFlag	= agreement.NoDelay;
+			SET agreem.tns:CurrentDelaySumm		= COALESCE(agreement.DelaySum, '0');			
+			
+			DECLARE delayInfo REFERENCE TO outRoot;
+			
+			FOR delInfo AS agreement.DelayInfo[] DO
+				CREATE LASTCHILD OF agreem AS delayInfo NAMESPACE tns NAME 'DelaysInfo';				
+				SET delayInfo.tns:DelayStartDate 		= delInfo.StartDelayDate;
+				IF FIELDVALUE(delInfo.EndDelayDate) <> '' THEN
+					SET delayInfo.tns:DelayFinishtDate 		= FIELDVALUE(delInfo.EndDelayDate);
+				ELSE 
+					SET delayInfo.tns:DelayFinishtDate 		= CAST(CURRENT_DATE AS CHARACTER FORMAT 'yyyy-MM-dd');
+				END IF;
+				SET delayInfo.tns:DelayMaxSumm 			= delInfo.MaxDelaySum;
+				
+			END FOR;			
+		
+		SET counter = counter + 1;
+			
+		END FOR;
+
+		SET outRoot.tns:BKIReport			= InpRs.Report;
+	END;
+	 
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;	
+END MODULE;
+
+/*
+ * Ответ от ГЦВП
+ */
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_GCVPResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/GCVP/res';
+		DECLARE tns NAMESPACE TNS1;		
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAMESPACE tns NAME 'GCVPResponse';		
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.KZGetPensionRs;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.tns:GCVPResponse;
+		
+		DECLARE outRoot REFERENCE TO OutRs;
+		
+		CREATE LASTCHILD OF OutRs AS outRoot NAMESPACE tns NAME 'GCVPRes';
+			
+		SET OutputRoot.XMLNSC.tns:GCVPResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;		
+		
+		SET outRoot.tns:GeneralInfo.tns:MsgID			=	Environment.UserProperties.RqUID;
+		SET outRoot.tns:GeneralInfo.tns:MsgFrom		=	'TSM_GCVP';
+		SET outRoot.tns:GeneralInfo.tns:MsgDate		=	Environment.UserProperties.RqTm;
+		
+		SET outRoot.tns:ErrorInfo.tns:ErrorCode			=	COALESCE(InputBody.*:*[<].Status.*:StatusCode, '');
+		SET outRoot.tns:ErrorInfo.tns:ErrorDescription	=	COALESCE(InputBody.*:*[<].Status.*:StatusDesc, '');
+		
+		SET outRoot.tns:DealMemberID		= InpRs.PersonInfo.PersonId;
+		
+		DECLARE pensionTax REFERENCE TO OutRs; 
+		
+		FOR pensionRec AS InpRs.PensionRecord[] DO
+			CREATE LASTCHILD OF outRoot AS pensionTax NAMESPACE tns NAME 'PensionTaxResponseAttributes';
+			
+			SET pensionTax.tns:DealMemberID		= pensionRec.PersonInfo.PersonId;
+			SET pensionTax.tns:TransferDate		= pensionRec.DatePmt;
+			SET pensionTax.tns:CompanyName		= COALESCE(FIELDVALUE(pensionRec.OrgInfo.orgs:Name), '');
+			SET pensionTax.tns:Value			= ROUND(CAST(pensionRec.SumMon AS DECIMAL), 0);--REPLACE(pensionRec.SumMon,',','.');
+				
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+	 
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+
+
+
+
+/* KZSendMDMPrivateClientDataRs */
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_EPKIndividualResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE varDealMemberID    CHARACTER;
+		DECLARE varDealMemberEPKID CHARACTER;
+		DECLARE varIndividualsNumberInRequest INTEGER 0;
+		
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/EPKIndividualEnrichment/res';
+		DECLARE tns NAMESPACE TNS1;	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'EPKIndividualEnrichmentResponse'; 
+		
+		SET OutputRoot.XMLNSC.tns:EPKIndividualEnrichmentResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varEPKIndividualRes REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varEPKIndividualRes NAMESPACE tns NAME 'EPKIndividualEnrichmentRes'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varEPKIndividualRes;
+		CREATE LASTCHILD OF varEPKIndividualRes AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  InputRoot.XMLNSC.*[<].RqUID;
+		SET varGeneralInfo.tns:MsgFrom		  =  'EPK_FL_ENRICH';	
+		SET varGeneralInfo.tns:MsgDate		  =  InputRoot.XMLNSC.*[<].RqTm;	
+
+		DECLARE varErrorInfo REFERENCE TO varEPKIndividualRes;
+		CREATE LASTCHILD OF varEPKIndividualRes AS varErrorInfo NAMESPACE tns NAME 'ErrorInfo';
+				
+	    SET varErrorInfo.tns:ErrorCode                =  COALESCE(inRef.Status.*:StatusCode, '0');
+		SET varErrorInfo.tns:ErrorDescription		  =  COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),' ');	
+
+		FOR inPersonInfo AS inRef.PersonInfo[] DO			
+           SET varIndividualsNumberInRequest = varIndividualsNumberInRequest + 1;	
+		END FOR;
+		SET varEPKIndividualRes.tns:IndividualsNumberInRequest  =  varIndividualsNumberInRequest;	
+
+		DECLARE varIndividualResponseAttributes REFERENCE TO varEPKIndividualRes;
+		FOR inPersonInfo AS inRef.PersonInfo[] DO			
+			FOR inPersonIdExt AS inPersonInfo.PersonIdExt[] DO
+				IF inPersonIdExt.Key = 'TSMMB' THEN
+		    	   SET varDealMemberID                 =  inPersonIdExt.Value;
+				END IF;
+				IF inPersonIdExt.Key = 'CIF' THEN
+		    	   SET varDealMemberEPKID              =  inPersonIdExt.Value;
+				END IF;
+			END FOR;
+
+			CREATE LASTCHILD OF varEPKIndividualRes AS varIndividualResponseAttributes NAMESPACE tns NAME 'DealMemberResponseAttributes';
+					
+			SET varIndividualResponseAttributes.tns:DealMemberID                    =  varDealMemberID;
+			SET varIndividualResponseAttributes.tns:DealMemberEPKID                 =  varDealMemberEPKID;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* KZSendMDMLegalClientDataRs */
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_EPKCompanyResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/EPKCompanyEnrichment/res';
+		DECLARE tns NAMESPACE TNS1;	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'EPKCompanyEnrichmentResponse'; 
+		
+		SET OutputRoot.XMLNSC.tns:EPKCompanyEnrichmentResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varEPKIndividualRes REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varEPKIndividualRes NAMESPACE tns NAME 'EPKCompanyEnrichmentRes'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varEPKIndividualRes;
+		CREATE LASTCHILD OF varEPKIndividualRes AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  InputRoot.XMLNSC.*[<].RqUID;
+		SET varGeneralInfo.tns:MsgFrom		  =  'EPK_OUT_UL';	
+		SET varGeneralInfo.tns:MsgDate		  =  InputRoot.XMLNSC.*[<].RqTm;	
+
+		DECLARE varErrorInfo REFERENCE TO varEPKIndividualRes;
+		CREATE LASTCHILD OF varEPKIndividualRes AS varErrorInfo NAMESPACE tns NAME 'ErrorInfo';
+				
+	    SET varErrorInfo.tns:ErrorCode                =  COALESCE(inRef.Status.*:StatusCode, '0');
+		SET varErrorInfo.tns:ErrorDescription		  =  COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),' ');	
+		
+		DECLARE varIndividualResponseAttributes REFERENCE TO varEPKIndividualRes;
+				
+		CREATE LASTCHILD OF varEPKIndividualRes AS varIndividualResponseAttributes NAMESPACE tns NAME 'DealMemberResponseAttributes';
+				
+		SET varIndividualResponseAttributes.tns:DealMemberID                    =  COALESCE(inRef.OrgInfo[1].OrgIdExt[2].Value, ' ');
+		SET varIndividualResponseAttributes.tns:DealMemberEPKID                 =  COALESCE(inRef.OrgInfo[1].OrgIdExt[1].Value, ' ');
+		   		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_GetBackOffice
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/QPragmaEnrichment/res';
+		DECLARE tns NAMESPACE TNS1;	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE origMess REFERENCE TO OutputRoot.XMLNSC.OrigMess.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'QPragmaEnrichmentResponse';
+		
+		SET OutputRoot.XMLNSC.tns:QPragmaEnrichmentResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS oRef NAMESPACE tns NAME 'QPragmaEnrichmentRes';  
+		
+		DECLARE generalInfo REFERENCE TO oRef;
+		
+		CREATE LASTCHILD OF oRef AS generalInfo NAMESPACE tns NAME 'GeneralInfo';
+		
+		SET generalInfo.tns:MsgID			=  inRef.RqUID;
+		SET generalInfo.tns:MsgFrom			=  'TSM_OUT_PRAGMA';
+		SET generalInfo.tns:MsgDate			=  inRef.RqTm;
+		
+		DECLARE errorInfo REFERENCE TO oRef;
+		
+		CREATE LASTCHILD OF oRef AS errorInfo NAMESPACE tns NAME 'ErrorInfo';
+		
+		SET errorInfo.tns:ErrorCode		   =  SUBSTRING(COALESCE(inRef.Status.*:StatusCode, '0') FROM 1 FOR 3);
+		SET errorInfo.tns:ErrorDescription =  COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),' ');
+		
+		SET oRef.tns:ApplicationID		=  Environment.UserProperties.OrigMess.*[<].LoanInfo.DocNumber;
+		SET oRef.tns:ApplicationDate	=  COALESCE(inRef.DocDate, '1900-01-01');	
+		SET oRef.tns:ResultD			=  COALESCE(inRef.Code, '5');
+
+		SET oRef.tns:ErrorDescription	=  COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),' ');
+				
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForTransact_ConvertMDO_AML_SBDKResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	    CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/AML_SBDK/res';
+		DECLARE tns NAMESPACE TNS1;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'AML_SBDKResponse'; 
+		
+		SET OutputRoot.XMLNSC.tns:AML_SBDKResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varAML_SBDKRes REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varAML_SBDKRes NAMESPACE tns NAME 'AML_SBDKRes'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varAML_SBDKRes;
+		CREATE LASTCHILD OF varAML_SBDKRes AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  InputRoot.XMLNSC.*[<].RqUID;
+		SET varGeneralInfo.tns:MsgFrom		  =  Environment.UserProperties.MsgFrom;	
+		SET varGeneralInfo.tns:MsgDate		  =  InputRoot.XMLNSC.*[<].RqTm;	
+
+		DECLARE varErrorInfo REFERENCE TO varAML_SBDKRes;
+		CREATE LASTCHILD OF varAML_SBDKRes AS varErrorInfo NAMESPACE tns NAME 'ErrorInfo';
+				
+		DECLARE varErrorCode CHARACTER '0';
+
+		IF EXISTS(inRef.Status.*:StatusDesc[]) THEN
+		    SET varErrorInfo.tns:ErrorCode                =  COALESCE(inRef.Status.*:StatusCode, '0');
+		    SET varErrorCode 				              =  COALESCE(inRef.Status.*:StatusCode, '0');
+			SET varErrorInfo.tns:ErrorDescription		  =  COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),' ');	
+		ELSE	
+		    SET varErrorInfo.tns:ErrorCode                =  '0';
+		    SET varErrorCode 				              =  '0';
+			SET varErrorInfo.tns:ErrorDescription		  =  COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),' ');	
+		END IF;
+
+		DECLARE varSBDKPresenceFlag CHARACTER 0;
+		DECLARE varDealMemberResponseAttributes REFERENCE TO varAML_SBDKRes;
+			
+		CREATE LASTCHILD OF varAML_SBDKRes AS varDealMemberResponseAttributes NAMESPACE tns NAME 'DealMemberResponseAttributes';
+
+		/* Заглушка
+		SET varSBDKPresenceFlag = replaceAbsentValue(inRef.BLStatus,'0');
+		IF varSBDKPresenceFlag NOT IN ('1', '0') THEN */
+		   SET varSBDKPresenceFlag = '2';
+	    ---END IF; 
+		    
+		SET varDealMemberResponseAttributes.tns:SBDKPresenceFlag                    =  varSBDKPresenceFlag; ---29/05/2015 u00671 временно по умлочанию 2  
+		SET varDealMemberResponseAttributes.tns:AMLPresenceFlag                     =  CASE WHEN varErrorCode <> '0' THEN '3' ELSE replaceAbsentValue(inRef.TerrStatus,'0') END;
+
+		RETURN TRUE;
+	END;			
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_LSBOOResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+	    CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/LSBOO/res';
+		DECLARE tns NAMESPACE TNS1;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'LSBOOResponse'; 
+		
+		SET OutputRoot.XMLNSC.tns:LSBOOResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+				
+        DECLARE varLSBOORes REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varLSBOORes NAMESPACE tns NAME 'LSBOORes'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varLSBOORes;
+		CREATE LASTCHILD OF varLSBOORes AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  inRef.RqUID;
+		SET varGeneralInfo.tns:MsgFrom		  =  Environment.UserProperties.MsgFrom;	
+		SET varGeneralInfo.tns:MsgDate		  =  inRef.RqTm;	
+
+		DECLARE varErrorInfo REFERENCE TO varLSBOORes;
+		CREATE LASTCHILD OF varLSBOORes AS varErrorInfo NAMESPACE tns NAME 'ErrorInfo';
+				
+	    SET varErrorInfo.tns:ErrorCode                =  COALESCE(inRef.Status.*:StatusCode, '0');
+		SET varErrorInfo.tns:ErrorDescription		  =  COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),' ');	
+
+		DECLARE varDealMemberResponseAttributes REFERENCE TO varLSBOORes;
+					
+		CREATE LASTCHILD OF varLSBOORes AS varDealMemberResponseAttributes NAMESPACE tns NAME 'DealMemberResponseAttributes';
+				
+		IF NOT EXISTS(inRef.GSLResponse.GSLResponseAttributes.NotFound[]) THEN
+	       SET varDealMemberResponseAttributes.tns:LSBOOPresenceFlag =  1; -- 1 - Участник найден в списке ЛСБОО
+	    ELSE 
+	       SET varDealMemberResponseAttributes.tns:LSBOOPresenceFlag =  2; -- 2 - Участник не найден в списке ЛСБОО
+		END IF;		
+	    	 
+		RETURN TRUE;
+	END;			
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE ResponseForTransact_ConvertMDO_EPKCompanyResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+	    CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'EPKCompanyResponse'; 
+		
+		SET OutputRoot.XMLNSC.tns:EPKCompanyResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varEPKCompanyRes REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varEPKCompanyRes NAMESPACE tns NAME 'EPKCompanyRes'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varEPKCompanyRes;
+		CREATE LASTCHILD OF varEPKCompanyRes AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  InputRoot.XMLNSC.*[<].RqUID;
+		SET varGeneralInfo.tns:MsgFrom		  =  Environment.UserProperties.MsgFrom;	
+		SET varGeneralInfo.tns:MsgDate		  =  InputRoot.XMLNSC.*[<].RqTm;	
+
+		DECLARE varErrorInfo REFERENCE TO varEPKCompanyRes;
+		CREATE LASTCHILD OF varEPKCompanyRes AS varErrorInfo NAMESPACE tns NAME 'ErrorInfo';
+				
+	    SET varErrorInfo.tns:ErrorCode                =  COALESCE(inRef.Status.*:StatusCode, '0');
+		SET varErrorInfo.tns:ErrorDescription		  =  COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),' ');	
+
+		DECLARE varCompanyResponseAttributes REFERENCE TO varEPKCompanyRes;
+			
+		CREATE LASTCHILD OF varEPKCompanyRes AS varCompanyResponseAttributes NAMESPACE tns NAME 'CompanyResponseAttributes';
+				
+		SET varCompanyResponseAttributes.tns:DealMemberID                    =  ' ';
+		SET varCompanyResponseAttributes.tns:DealMemberEPKID                 =  ' ';
+		SET varCompanyResponseAttributes.tns:LegalForm                       =  ' ';
+		SET varCompanyResponseAttributes.tns:CompanyName                     =  ' ';
+		SET varCompanyResponseAttributes.tns:RegistrationDate                =  ' ';
+		SET varCompanyResponseAttributes.tns:ClientCategory                  =  ' ';
+
+		RETURN TRUE;
+	END;			
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_EEPKCompanyResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	    CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE varValue           CHARACTER '';
+		DECLARE varDealMemberID    CHARACTER;
+		DECLARE varDealMemberEPKID CHARACTER;
+		DECLARE varCompaniesNumberInResponse INTEGER 0;
+
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZGetMDMLegalInfoByAttrRs;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/EPKCompany/res';
+		DECLARE tns NAMESPACE TNS1;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'EPKCompanyResponse'; 
+		
+		SET OutputRoot.XMLNSC.tns:EPKCompanyResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varEPKCompanyRes REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varEPKCompanyRes NAMESPACE tns NAME 'EPKCompanyRes'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varEPKCompanyRes;
+		CREATE LASTCHILD OF varEPKCompanyRes AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  InputRoot.XMLNSC.*[<].RqUID;
+		SET varGeneralInfo.tns:MsgFrom		  =  'EPK_UL';
+		SET varGeneralInfo.tns:MsgDate		  =  InputRoot.XMLNSC.*[<].RqTm;	
+
+		DECLARE varErrorInfo REFERENCE TO varEPKCompanyRes;
+		CREATE LASTCHILD OF varEPKCompanyRes AS varErrorInfo NAMESPACE tns NAME 'ErrorInfo';
+				
+	    SET varErrorInfo.tns:ErrorCode                =  COALESCE(InputRoot.XMLNSC.*[<].Status.*:StatusCode, '0');
+		SET varErrorInfo.tns:ErrorDescription		  =  COALESCE(FIELDVALUE(InputRoot.XMLNSC.*[<].Status.*:StatusDesc),' ');	
+
+		FOR inOrgInfo AS inRef.OrgInfo[] DO			
+			FOR inOrgIdExt AS inOrgInfo.OrgIdExt[] DO
+				IF inOrgIdExt.Key = 'CIF' THEN
+		    	   SET varValue                 =  SUBSTRING(inOrgIdExt.Value FROM 1 FOR 1);
+				END IF;
+			END FOR;
+				
+		    IF varValue <> '-' THEN
+	           SET varCompaniesNumberInResponse = varCompaniesNumberInResponse + 1;	
+		    END IF;
+		    SET varValue = '';
+		END FOR;
+
+	    SET varEPKCompanyRes.tns:CompaniesNumberInResponse  =  varCompaniesNumberInResponse;	
+		
+		DECLARE varCompanyResponseAttributes REFERENCE TO varEPKCompanyRes;
+		FOR inOrgInfo AS inRef.OrgInfo[] DO			
+			FOR inOrgIdExt AS inOrgInfo.OrgIdExt[] DO
+				CASE
+				WHEN inOrgIdExt.Key = 'BIN' THEN
+  				    SET varDealMemberID          =  inOrgIdExt.Value;
+				WHEN inOrgIdExt.Key = 'CIF' THEN
+		    		SET varDealMemberEPKID       =  inOrgIdExt.Value;
+  				    SET varValue                 =  SUBSTRING(inOrgIdExt.Value FROM 1 FOR 1);
+				END CASE;
+			END FOR;
+
+	        IF varValue <> '-' THEN
+			    CREATE LASTCHILD OF varEPKCompanyRes AS varCompanyResponseAttributes NAMESPACE tns NAME 'CompanyResponseAttributes';
+	
+			    SET varCompanyResponseAttributes.tns:DealMemberID                    =  varDealMemberID;
+			    SET varCompanyResponseAttributes.tns:DealMemberEPKID                 =  varDealMemberEPKID;
+			    SET varCompanyResponseAttributes.tns:LegalForm                       =  inOrgInfo.OrgAttr.Form;
+			    SET varCompanyResponseAttributes.tns:CompanyName                     =  inOrgInfo.OrgAttr.FullName;
+
+			    IF inOrgInfo.*:EstablishDt <> '' THEN 
+			       SET varCompanyResponseAttributes.tns:RegistrationDate                =  inOrgInfo.*:EstablishDt;
+			    END IF; 
+			       
+			    IF inOrgInfo.OrgAttr.Category <> '' THEN
+			      SET varCompanyResponseAttributes.tns:ClientCategory                  =  inOrgInfo.OrgAttr.Category;
+			    END IF; 
+		    END IF;
+		    SET varValue = '';
+		END FOR;
+
+		RETURN TRUE;
+	END;			
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_EEPKIndividualResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE varValue           CHARACTER '';
+		DECLARE varDealMemberID    CHARACTER;
+		DECLARE varDealMemberEPKID CHARACTER;
+		DECLARE varClientCategory  CHARACTER 'None';
+		DECLARE varIndividualsNumberInResponse INTEGER 0;
+
+	    CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZGetMDMPersonInfoByAttrRs;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/EPKIndividual/res';
+		DECLARE tns NAMESPACE TNS1;
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'EPKIndividualResponse'; 
+		
+		SET OutputRoot.XMLNSC.tns:EPKIndividualResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varEPKIndividualRes REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varEPKIndividualRes NAMESPACE tns NAME 'EPKIndividualRes'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varEPKIndividualRes;
+		CREATE LASTCHILD OF varEPKIndividualRes AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  InputRoot.XMLNSC.*[<].RqUID;
+		SET varGeneralInfo.tns:MsgFrom		  =  'EPK_FL';	
+		SET varGeneralInfo.tns:MsgDate		  =  InputRoot.XMLNSC.*[<].RqTm;	
+
+		DECLARE varErrorInfo REFERENCE TO varEPKIndividualRes;
+		CREATE LASTCHILD OF varEPKIndividualRes AS varErrorInfo NAMESPACE tns NAME 'ErrorInfo';
+				
+	    SET varErrorInfo.tns:ErrorCode                =  COALESCE(InputRoot.XMLNSC.*[<].Status.*:StatusCode, '0');
+		SET varErrorInfo.tns:ErrorDescription		  =  COALESCE(FIELDVALUE(InputRoot.XMLNSC.*[<].Status.*:StatusDesc),' ');	
+
+		FOR inPersonInfo AS inRef.PersonInfo[] DO			
+			FOR inPersonIdExt AS inPersonInfo.PersonIdExt[] DO
+				IF inPersonIdExt.Key = 'CIF' THEN
+		    	   SET varValue                 =  SUBSTRING(inPersonIdExt.Value FROM 1 FOR 1);
+				END IF;
+			END FOR;
+				
+		    IF varValue <> '-' THEN
+	           SET varIndividualsNumberInResponse = varIndividualsNumberInResponse + 1;	
+		    END IF;
+		    SET varValue = '';
+		END FOR;
+
+		SET varEPKIndividualRes.tns:IndividualsNumberInResponse  =  varIndividualsNumberInResponse;	
+
+		DECLARE varIndividualResponseAttributes REFERENCE TO varEPKIndividualRes;
+		
+		FOR inPersonInfo AS inRef.PersonInfo[] DO			
+			FOR inPersonIdExt AS inPersonInfo.PersonIdExt[] DO
+				CASE
+				WHEN inPersonIdExt.Key = 'IIN' THEN
+  				    SET varDealMemberID                    =  inPersonIdExt.Value;
+				WHEN inPersonIdExt.Key = 'CIF' THEN
+		    		SET varDealMemberEPKID                 =  inPersonIdExt.Value;
+	 	     	    SET varValue                           =  SUBSTRING(inPersonIdExt.Value FROM 1 FOR 1);
+				END CASE;
+
+			END FOR;
+
+	        IF varValue <> '-' THEN
+			    CREATE LASTCHILD OF varEPKIndividualRes AS varIndividualResponseAttributes NAMESPACE tns NAME 'IndividualResponseAttributes';
+			    
+			    SET varIndividualResponseAttributes.tns:DealMemberID                    =  varDealMemberID;
+				SET varIndividualResponseAttributes.tns:DealMemberEPKID                 =  varDealMemberEPKID;
+			    SET varIndividualResponseAttributes.tns:LastName                        =  inPersonInfo.*:PersonName.*:LastName;
+			    SET varIndividualResponseAttributes.tns:FirstName                       =  inPersonInfo.*:PersonName.*:FirstName;
+			    SET varIndividualResponseAttributes.tns:Patronymic                      =  inPersonInfo.*:PersonName.*:MiddleName;
+			    SET varIndividualResponseAttributes.tns:BirthDate                       =  inPersonInfo.*:BirthDt;
+	
+				FOR inSign AS inPersonInfo.Signs.Sign[] DO
+					CASE
+					WHEN LOWER(inSign.SignType) = 'customer_cat' THEN
+	  				    SET varClientCategory                    =  inSign.Value;
+					END CASE;
+				END FOR;
+	
+			    SET varIndividualResponseAttributes.tns:ClientCategory                  =  varClientCategory;
+		    END IF;
+		    SET varValue = '';
+		END FOR;
+
+		RETURN TRUE;
+	END;			
+END MODULE;
+
+
+/*
+ * AML Повторный
+ */
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_AMLResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/AML/res';
+		DECLARE tns NAMESPACE TNS1;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'AMLResponse'; 
+		
+		SET OutputRoot.XMLNSC.tns:AMLResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varAML_SBDKRes REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varAML_SBDKRes NAMESPACE tns NAME 'AMLRes'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varAML_SBDKRes;
+		CREATE LASTCHILD OF varAML_SBDKRes AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  InputRoot.XMLNSC.*[<].RqUID;
+		SET varGeneralInfo.tns:MsgFrom		  =  'TSM_AML_CONFIRM';	
+		SET varGeneralInfo.tns:MsgDate		  =  InputRoot.XMLNSC.*[<].RqTm;	
+
+		DECLARE varErrorInfo REFERENCE TO varAML_SBDKRes;
+		CREATE LASTCHILD OF varAML_SBDKRes AS varErrorInfo NAMESPACE tns NAME 'ErrorInfo';
+				
+	    SET varErrorInfo.tns:ErrorCode                =  COALESCE(inRef.Status.*:StatusCode, '0');
+		SET varErrorInfo.tns:ErrorDescription		  =  COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),' ');	
+
+		DECLARE varDealMemberResponseAttributes REFERENCE TO varAML_SBDKRes;
+		CREATE LASTCHILD OF varAML_SBDKRes AS varDealMemberResponseAttributes NAMESPACE tns NAME 'DealMemberResponseAttributes';
+				
+	    SET varDealMemberResponseAttributes.tns:DealMemberAMLpresence                     =  CASE WHEN inRef.Status.*:StatusCode <> '0' THEN '3' ELSE replaceAbsentValue(inRef.TerrStatus,'0') END;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE GetBackOfficeDateNfRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	    CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZGetBackOfficeDateNf;		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/TSMEnrichment/req';
+		DECLARE tns NAMESPACE TNS1;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'TSMEnrichmentRequest'; 
+		
+		SET OutputRoot.XMLNSC.tns:TSMEnrichmentRequest.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varTSMEnrichmentReq REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varTSMEnrichmentReq NAMESPACE tns NAME 'TSMEnrichmentReq'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varTSMEnrichmentReq;
+		CREATE LASTCHILD OF varTSMEnrichmentReq AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  inRef.RqUID;
+		SET varGeneralInfo.tns:MsgFrom		  =  'PRAGMA_FINAL';	
+		SET varGeneralInfo.tns:MsgDate		  =  inRef.RqTm;	
+		
+		DECLARE varApplicationRequestAttributes REFERENCE TO varTSMEnrichmentReq;
+			
+		CREATE LASTCHILD OF varTSMEnrichmentReq AS varApplicationRequestAttributes NAMESPACE tns NAME 'ApplicationRequestAttributes';
+		    
+		SET varApplicationRequestAttributes.tns:ApplicationID                  = inRef.TSMUID;       
+		SET varApplicationRequestAttributes.tns:ApplicationDate                = inRef.DocDate;       
+		SET varApplicationRequestAttributes.tns:ApplicationState    		   = inRef.ResultCode;       
+
+		RETURN TRUE;
+	END;		
+
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForMB_ConvertMDO_OrgSetDataRichRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/EPKCompanyEnrichment/res';
+		DECLARE tns NAMESPACE TNS1;	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'EPKCompanyEnrichmentResponse'; 
+		
+		SET OutputRoot.XMLNSC.tns:EPKCompanyEnrichmentResponse.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varEPKIndividualRes REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varEPKIndividualRes NAMESPACE tns NAME 'EPKCompanyEnrichmentRes'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varEPKIndividualRes;
+		CREATE LASTCHILD OF varEPKIndividualRes AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  InputRoot.XMLNSC.*[<].RqUID;
+		SET varGeneralInfo.tns:MsgFrom		  =  'EPK_OUT_UL';	
+		SET varGeneralInfo.tns:MsgDate		  =  InputRoot.XMLNSC.*[<].RqTm;	
+
+		DECLARE varErrorInfo REFERENCE TO varEPKIndividualRes;
+		CREATE LASTCHILD OF varEPKIndividualRes AS varErrorInfo NAMESPACE tns NAME 'ErrorInfo';
+				
+	    SET varErrorInfo.tns:ErrorCode                =  COALESCE(inRef.Status.*:StatusCode, '0');
+		SET varErrorInfo.tns:ErrorDescription		  =  COALESCE(FIELDVALUE(inRef.Status.*:StatusDesc),' ');	
+		
+		DECLARE varIndividualResponseAttributes REFERENCE TO varEPKIndividualRes;
+				
+		CREATE LASTCHILD OF varEPKIndividualRes AS varIndividualResponseAttributes NAMESPACE tns NAME 'DealMemberResponseAttributes';		
+				
+		SET varIndividualResponseAttributes.tns:DealMemberID                    =  COALESCE(inRef.OrgInfo[1].OrgIdExt[2].Value, ' ');
+		SET varIndividualResponseAttributes.tns:DealMemberEPKID                 =  COALESCE(inRef.OrgInfo[1].OrgIdExt[1].Value, ' ');
+		   		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+

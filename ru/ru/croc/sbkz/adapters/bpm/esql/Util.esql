@@ -1,0 +1,191 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.bpm.esql
+PATH ru.croc.sbkz.utils;
+
+--Статус рейтинга
+CREATE FUNCTION RatingStatus(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+	WHEN 'ACTUAL' THEN 'Actual'
+	WHEN 'CONF_UW_MANAGER' THEN 'Confirm boss'
+	WHEN 'CALC_BY_UW' THEN 'Calculate Anderrajter'
+	WHEN 'CALC_BY_LO' THEN 'Rating analitic'
+		ELSE 
+			param
+	END;
+END;
+
+
+CREATE FUNCTION true_false(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+	WHEN 'X' THEN 'true'
+	WHEN 'N' THEN 'false'
+		ELSE 
+			param
+	END;
+END;
+
+CREATE FUNCTION trueFsap(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+	WHEN 'true' THEN 'X'
+	WHEN 'false' THEN 'N'
+		ELSE 
+			param
+	END;
+END;
+
+-- Область лимитов
+CREATE FUNCTION LimitRange(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+	WHEN 'L01' THEN '11'
+	WHEN 'D01' THEN '11'
+	WHEN 'N01' THEN '11'
+	WHEN 'P01' THEN '11'
+	WHEN 'L11' THEN '11'
+	WHEN 'L12' THEN '11'
+	WHEN 'L13' THEN '11'
+	WHEN 'L14' THEN '11'
+	WHEN 'L15' THEN '11'
+	WHEN 'L16' THEN '11'
+	WHEN 'L17' THEN '11'				
+	WHEN 'L18' THEN '11'
+	WHEN 'L19' THEN '11'
+	WHEN 'L20' THEN '11'
+	WHEN 'L21' THEN '11'
+	WHEN 'L22' THEN '11'
+	WHEN 'L23' THEN '11'
+	WHEN 'L24' THEN '11'
+	WHEN 'L25' THEN '11'
+	WHEN 'L26' THEN '11'
+	WHEN 'L27' THEN '11'
+	WHEN 'L28' THEN '11'
+	WHEN 'L29' THEN '11'
+		ELSE 
+			param
+	END;
+END;
+
+--Рейтинговая модель
+CREATE FUNCTION RatingModel(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+	WHEN 'K_CC' THEN 'SBRF_DRBP'
+	WHEN 'K_PF' THEN 'SBRF_DRPR'
+	WHEN 'K_PF_CON' THEN 'SBRF_DRPR'
+		ELSE 
+			param
+	END;	
+END;
+
+--- Справочник «Группа продуктов»
+CREATE FUNCTION funGrpProduct(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN 'GUARN' THEN 'CO'
+		WHEN 'SBBGR' THEN 'CO'
+		WHEN 'CSHGR' THEN 'CO'
+		WHEN 'INVSTL' THEN 'CO'
+		WHEN 'INVFIN' THEN 'CO'
+		WHEN 'CONTL' THEN 'CO'
+		WHEN 'CORPL' THEN 'CO'
+		WHEN 'CIFREL' THEN 'CO'
+		WHEN 'SUBSL' THEN 'CO'
+		WHEN 'PUBLL' THEN 'CO'
+		WHEN 'MARGL' THEN 'CO'
+		WHEN 'MEZFIN' THEN 'CO'
+		WHEN 'OBJFIN' THEN 'CO'
+		WHEN 'OVERD' THEN 'CO'
+		WHEN 'PRFIN' THEN 'CO'
+		WHEN 'SBLSN' THEN 'CO'
+		WHEN 'SBFCTR' THEN 'CO'
+		WHEN 'FACTRN' THEN 'CO'
+		WHEN 'LEASN' THEN 'CO'
+		WHEN 'LEVBO' THEN 'CO'
+		WHEN 'OTHER' THEN 'CO'
+		WHEN 'HML' THEN 'CO'
+		WHEN 'EPL' THEN 'FM'
+		WHEN 'FPL' THEN 'FM'
+		WHEN 'PSL' THEN 'FM'
+		WHEN 'DLL' THEN 'FM'
+	ELSE 'Нет такой группы продуктов'									
+	END;
+END;
+
+
+CREATE FUNCTION trueFsap2(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+	WHEN 'true' THEN 'X'
+	WHEN 'false' THEN ' '
+		ELSE 
+			param
+	END;
+END;
+
+-- Статус сделки
+CREATE FUNCTION DealStat(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param 
+	WHEN 'Resolved-Accepted' THEN 'Approved'
+	WHEN 'Resolved-Canceled' THEN 'Rejected'
+		ELSE 
+			param
+	END; 
+END;
+ 
+--Режим кредитования
+CREATE FUNCTION CreditModeFunc(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param 
+	WHEN 'KZ_Revolving_CL' THEN 'VKL'
+	WHEN 'KZ_Nonrevolving_CL' THEN 'NKL'
+	WHEN 'KZ_Loan' THEN 'Credit Contract'
+	WHEN 'KZ_BGuarantee' THEN 'Contract Garanty'
+	WHEN 'KZ_Unpaid_LC' THEN 'Statement Format Calculations'	
+	WHEN 'KZ_Overdraft' THEN 'Contract Credit Overdraft'
+	WHEN 'KZ_JGuarantee' THEN 'Contract Sponsorship'
+	WHEN 'KZ_Precious_Metals_Loan' THEN 'Loan Agreement'					
+		ELSE 
+			param
+	END;
+END;
+
+--Инструмент кредитования
+CREATE FUNCTION CreditInstrumentFunc(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param 
+	WHEN 'KZ_Revolving_CL' THEN 'Credit'
+	WHEN 'KZ_Nonrevolving_CL' THEN 'Credit'
+	WHEN 'KZ_Loan' THEN 'Credit'
+	WHEN 'KZ_BGuarantee' THEN 'Guarantee/Bail'
+	WHEN 'KZ_Unpaid_LC' THEN 'Unpaid Letter of Credit'	
+	WHEN 'KZ_Overdraft' THEN 'Credit'
+	WHEN 'KZ_JGuarantee' THEN 'Guarantee/Bail'
+	WHEN 'KZ_Precious_Metals_Loan' THEN 'Loan in Precious Metals'					
+		ELSE 
+			param
+	END;
+END;
+
+--Тип основного рейтинга
+CREATE FUNCTION TypeRateFunc(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param 
+	WHEN 'Borrower Rating' THEN 'Account'
+	WHEN 'Project Rating' THEN 'Project'					
+		ELSE 
+			param
+	END;
+END;
+
+CREATE FUNCTION trueFalseSAP(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+	WHEN 'true' THEN 'X'
+	WHEN 'false' THEN ''
+		ELSE 
+			param
+	END;
+END;

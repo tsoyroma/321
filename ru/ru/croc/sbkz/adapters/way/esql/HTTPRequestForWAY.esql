@@ -1,0 +1,2352 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.way.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+/**
+* Устанавливает параметры и пути отправки ответного MQ-сообщения.
+**/
+CREATE COMPUTE MODULE HTTPRequestForWAY_PrepareRespHeaders
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+	
+		SET OutputRoot.HTTPResponseHeader = NULL;
+		-- Восстанавливаем все заголовки
+		IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.BLOB DOMAIN('MQMD') NAME 'MQMD';
+		END IF;
+		SET OutputRoot.MQMD = Environment.Variables.InputMQMD;
+	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+	
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		--CALL SetMQReplyDestination(Environment.UserProperties, OutputLocalEnvironment);
+		
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = Environment.UserProperties.ReplyToQ;
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName =	Environment.UserProperties.ReplyToQMgr;
+		
+		SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ ** Форматирования сообщение из SBOL RS в WAY4
+ **/
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetPrivateClientAccountListWAY4Rq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Information';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE information REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS information NAME 'Information';
+		
+		SET information.RegNumber 	= inRoot.RegNumber;
+		SET information.ObjectType 	= 'Contract';
+		SET information.ActionType	= 'Inquiry';				
+		
+		DECLARE resultDtls REFERENCE TO information;
+		DECLARE parm REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS resultDtls NAME 'ResultDtls';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Balance';
+		SET parm.Value		=	'AVAILABLE,PAYMENT,RETAIL,STMT_BALANCE,TOTAL_DUE,OVD_01,CR_LIMIT';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Product';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'ContractAddInfo';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Status';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Address';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Parent';
+		SET parm.Value		=	'Y';
+		
+		SET information.ObjectFor.ClientIDT.ClientInfo.ClientNumber	=	inRoot.IIN;		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_SaveOrigMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.Source.MQMD 			= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 		= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties	= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 			= InputBody;		
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertWAY_ERROR
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		-- Получение описания ошибки
+		DECLARE sErrDescr CHARACTER;
+		DECLARE sErrNumber CHARACTER;
+		CALL ru.croc.sbrf.mdm.common.GetExcDescription(InputExceptionList, sErrDescr, sErrNumber);
+
+		-- Формирование структуры сообщения-ответа
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.UFXMsg AS outRef;	
+		
+		SET outRef.(XMLNSC.Attribute)"direction"		=  'Rs';
+		SET outRef.(XMLNSC.Attribute)"msg_type"			=  'Information';
+		SET outRef.(XMLNSC.Attribute)"resp_class"		=  'I';
+		SET outRef.(XMLNSC.Attribute)"resp_code"		=  '-400';
+		SET outRef.(XMLNSC.Attribute)"resp_text"		=  sErrDescr;
+		SET outRef.(XMLNSC.Attribute)"scheme"			=  'WAY4Appl';
+		SET outRef.(XMLNSC.Attribute)"version"			=  '2.0';	
+					
+		SET outRef.MsgId	=	Environment.UserProperties.RqUID;
+		
+		DECLARE source REFERENCE TO outRef;
+		
+		CREATE FIELD outRef.Source AS source;
+		
+		SET source.(XMLNSC.Attribute)"app"				=  'Web';
+		
+		CREATE FIELD outRef.MsgData;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_WAYCardBlockRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWAYCardBlockRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type"  = 'Application';
+		SET outRoot.(XMLNSC.Attribute)"scheme"    = 'WAY4Appl';
+		SET outRoot.(XMLNSC.Attribute)"version"   = '2.0';
+		
+		SET Environment.UserProperties.OperUID = inRoot.*:OperUID;
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+
+		DECLARE source REFERENCE TO outRoot;
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+
+		DECLARE msgData REFERENCE TO outRoot;
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE App REFERENCE TO msgData;		
+		CREATE LASTCHILD OF msgData AS App NAME 'Application';
+				
+		SET App.RegNumber                = inRoot.RegNumber;	
+		SET App.Requestor.ContractNumber = inRoot.ContractNumber;			
+		SET App.ObjectType = 'Status';			
+		SET App.ActionType = 'Update';			
+		
+		DECLARE Result REFERENCE TO App;		
+		CREATE LASTCHILD OF App AS Result NAME 'ResultDtls';
+
+		SET Result.Parm.ParmCode = 'AcceptRq';			
+		SET Result.Parm.Value = 'Y';			
+
+		DECLARE Obj REFERENCE TO App;		
+		CREATE LASTCHILD OF App AS Obj NAME 'ObjectFor';
+
+		DECLARE Cont REFERENCE TO Obj;		
+		CREATE LASTCHILD OF Obj AS Cont NAME 'ContractIDT';
+
+		SET Cont.ContractNumber = inRoot.ContractNumber;			
+
+		DECLARE Cli REFERENCE TO Cont;		
+		CREATE LASTCHILD OF Cont AS Cli NAME 'Client';
+
+		DECLARE Info REFERENCE TO Cli;		
+		CREATE LASTCHILD OF Cli AS Info NAME 'ClientInfo';
+
+		SET Info.ClientNumber = inRoot.ClientNumber;			
+
+		DECLARE Data REFERENCE TO App;		
+		CREATE LASTCHILD OF App AS Data NAME 'Data';
+
+		DECLARE Set REFERENCE TO Data;		
+		CREATE LASTCHILD OF Data AS Set NAME 'SetStatus';
+		
+		SET Set.StatusCode    = inRoot.StatusCode;			
+		SET Set.StatusComment = inRoot.StatusComment;			
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_WAYCardUnblockRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWAYCardUnblockRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type"  = 'Application';
+		SET outRoot.(XMLNSC.Attribute)"scheme"    = 'WAY4Appl';
+		SET outRoot.(XMLNSC.Attribute)"version"   = '2.0';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+
+		DECLARE source REFERENCE TO outRoot;
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		SET Environment.UserProperties.OperUID = inRoot.*:OperUID;
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE App REFERENCE TO msgData;		
+		CREATE LASTCHILD OF msgData AS App NAME 'Application';
+				
+		SET App.RegNumber                = inRoot.RegNumber;	
+		SET App.Requestor.ContractNumber = inRoot.ContractNumber;			
+		SET App.ObjectType = 'Status';			
+		SET App.ActionType = 'Update';			
+		
+		DECLARE Result REFERENCE TO App;		
+		CREATE LASTCHILD OF App AS Result NAME 'ResultDtls';
+
+		SET Result.Parm.ParmCode = 'AcceptRq';			
+		SET Result.Parm.Value = 'Y';			
+
+		DECLARE Obj REFERENCE TO App;		
+		CREATE LASTCHILD OF App AS Obj NAME 'ObjectFor';
+
+		DECLARE Cont REFERENCE TO Obj;		
+		CREATE LASTCHILD OF Obj AS Cont NAME 'ContractIDT';
+
+		SET Cont.ContractNumber = inRoot.ContractNumber;			
+
+		DECLARE Cli REFERENCE TO Cont;		
+		CREATE LASTCHILD OF Cont AS Cli NAME 'Client';
+
+		DECLARE Info REFERENCE TO Cli;		
+		CREATE LASTCHILD OF Cli AS Info NAME 'ClientInfo';
+
+		SET Info.ClientNumber = inRoot.ClientNumber;			
+
+		DECLARE Data REFERENCE TO App;		
+		CREATE LASTCHILD OF App AS Data NAME 'Data';
+
+		DECLARE Set REFERENCE TO Data;		
+		CREATE LASTCHILD OF Data AS Set NAME 'SetStatus';
+		
+		SET Set.StatusCode    = '00';--inRoot.StatusCode;			
+		SET Set.StatusComment = 'Card OK';--inRoot.StatusComment;			
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZGetPrivateClientAccountListWAY4Rq' THEN
+			SET labelName = 'GetPrivateClientAccountListWAY4Rq';
+		WHEN 'KZWAYCardBlockRq' THEN
+			SET labelName = 'WAYCardBlockRq';
+		WHEN 'KZWAYCardUnblockRq' THEN
+			SET labelName = 'WAYCardUnblockRq';
+		WHEN 'KZGetOrderingByCardRq' THEN
+			SET labelName = 'WAYCarOrderRq';	
+		WHEN 'KZGetFullInformationCardRq' THEN
+			SET labelName = 'WAYGetFullCardRq';
+		WHEN 'KZGetFullExtCardRq' THEN
+			SET labelName = 'WAYGetFullExtCardRq';
+		WHEN 'KZWayUfxP2PRq' THEN
+			SET labelName = 'WAYCard2CardRq';
+		WHEN 'KZWAYAuthRetailRq' THEN
+			SET labelName = 'WAYAuthRetailRq';					
+		WHEN 'KZWay4AccDebitAuthRq' THEN
+			SET labelName = 'Way4AccDebitAuthRq';
+		WHEN 'KZWay4AccDebitAuthRevRq' THEN
+			SET labelName = 'Way4AccDebitAuthRevRq';			
+		WHEN 'KZWay4AccDebitFinAdvRq' THEN
+			SET labelName = 'Way4AccDebitFinAdvRq';			
+		WHEN 'KZWAY4ExchRatesRq' THEN
+			SET labelName = 'WAY4ExchRatesRq';			
+		WHEN 'KZGetPhoneCardsFromWay4Rq' THEN
+			SET labelName = 'GetPhoneCardsFromWay4Rq';
+		WHEN 'KZWAYFinAdvRq' THEN
+			SET labelName = 'WAYFinAdvRq';
+		WHEN 'KZWAYAuthRqAccCreditRq' THEN
+			SET labelName = 'WAYAuthRqAccCreditRq';
+		WHEN 'KZWAYFinRqAccCreditRq' THEN
+			SET labelName = 'WAYFinRqAccCreditRq';
+		WHEN 'KZWAYAuthRevRqAccCreditRq' THEN
+			SET labelName = 'WAYAuthRevRqAccCreditRq';		
+		WHEN 'KZCardAddSMSRq' THEN
+			SET labelName = 'CardAddSMSRq';	
+		WHEN 'KZCardChangeAddSMSRq' THEN
+			SET labelName = 'CardChangeAddSMSRq';
+		WHEN 'KZCardChangeSMSRq' THEN
+			SET labelName = 'CardChangeSMSRq';
+		WHEN 'KZWayCardLimListRq' THEN
+			SET labelName = 'WayCardLimListRq';
+		WHEN 'KZWayCardLimEnableRq' THEN
+			SET labelName = 'WayCardLimEnableRq';
+		WHEN 'KZWayCardLimDisableRq' THEN
+			SET labelName = 'WayCardLimDisableRq';	
+		WHEN 'KZWayCardLimEditRq' THEN
+			SET labelName = 'WayCardLimEditRq';	
+		WHEN 'KZCardOffSMSRq' THEN
+			SET labelName = 'CardOffSMSRq';
+		WHEN 'KZWAYAuthRevAdvRq' THEN
+			SET labelName = 'WAYAuthRevAdvRq';
+		WHEN 'KZWayClientInqRq' THEN
+			SET labelName = 'WayClientInqRq';
+		WHEN 'KZWayGetPhoneRq' THEN
+			SET labelName = 'WayGetPhoneRq';
+		WHEN 'KZWAYAuthRqNewDepRq' THEN
+			SET labelName = 'WayAuthRqNewDepRq';
+		WHEN 'KZWAYAuthRevRqNewDepRq' THEN
+			SET labelName = 'WayAuthRevRqNewDepRq';
+		WHEN 'KZWAYAuthFinRqNewDepRq' THEN
+			SET labelName = 'WayAuthFinRqNewDepRq';
+		WHEN 'KZCardListPhoneRq' THEN
+			SET labelName = 'WayCardListPhoneRq';
+		WHEN 'KZWayUpdateClientRq' THEN
+			SET labelName = 'WayUpdateClientRq';	
+		WHEN 'KZWay4SbolAddRq' THEN
+			SET labelName = 'WaySbolAddRq';			
+		WHEN 'KZCRMCardAddSMSRq' THEN
+			SET labelName = 'CRMCardAddSMSRq';								 			
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in HTTPRequestForWAY', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Интерфейс CRFULL(CCAcctFullStmtInqRq) получение полной выписки по карте -- u06068 04.12.2014
+ 	
+ 	KZGetOrderingByCardRq -> WAYCardOrderRq;
+  
+ */
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WAYCardOrderRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetOrderingByCardRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode = '01000S';			
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.RegNumber;
+		
+		SET doc.LocalDt = SUBSTRING(REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ') FROM 0 FOR 20);
+		
+		SET doc.Requestor.ContractNumber = inRoot.CardNumber;
+		SET doc.Source.ContractNumber    = '03806767';
+		
+		DECLARE resultDtls REFERENCE TO doc;
+		DECLARE parm REFERENCE TO doc;
+				
+		CREATE LASTCHILD OF doc AS resultDtls NAME 'ResultDtls';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'StmtType';
+		SET parm.Value		=	'Additional';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Balance';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'StmtContType';
+		SET parm.Value		=	'All';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'RequestedLanguage';
+		SET parm.Value		=	'ENG';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'DateFrom';
+		SET parm.Value		=	inRoot.FromDate;
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'DateTo';
+		SET parm.Value		=	inRoot.ToDate;
+		
+		--SET information.ObjectFor.ClientIDT.ClientInfo.ClientNumber	=	inRoot.IIN;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Интерфейс CRDWI(CardAcctDInqRq) получение детальной информации о карте -- u06068 06.12.2014
+ 	
+  	KZGetFullInformationCardRq -> WAYGetFullCardRq
+ */
+ 
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WAYGetFullCardRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetFullInformationCardRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Information';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE information REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS information NAME 'Information';
+		
+		SET information.RegNumber 	= inRoot.RegNumber;
+		SET information.ObjectType 	= 'Contract';
+		SET information.ActionType	= 'Inquiry';				
+		
+		DECLARE resultDtls REFERENCE TO information;
+		DECLARE parm REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS resultDtls NAME 'ResultDtls';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Balance';
+		SET parm.Value		=	'AVAILABLE,PAYMENT,RETAIL,STMT_BALANCE,TOTAL_DUE,OVD_01,CR_LIMIT';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Product';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'ContractAddInfo';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Status';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Address';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Parent';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Client';
+		SET parm.Value		=	'Y';
+		
+		SET information.ObjectFor.ContractIDT.ContractNumber	=	inRoot.ContractNumber;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Интерфейс CREXT(CCAcctExtStmtInqRq) получение расширенной выписки по карте	 -- u06068 06.12.2014 
+   
+    CCAcctExtStmtInqRq -> WAYGetFullExtCardRq
+ */
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WAYGetFullExtCardRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetFullExtCardRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode = '01000S';			
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.RegNumber;
+
+		SET doc.LocalDt = SUBSTRING(REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ') FROM 0 FOR 20);--REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber = inRoot.CardNumber;
+		SET doc.Source.ContractNumber    = '03806767';
+		
+		DECLARE resultDtls REFERENCE TO doc;
+		DECLARE parm REFERENCE TO doc;
+				
+		CREATE LASTCHILD OF doc AS resultDtls NAME 'ResultDtls';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'StmtType';
+		SET parm.Value		=	'Additional';		
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'RequestedLanguage';
+		SET parm.Value		=	'ENG';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Balance';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'StmtContType';
+		SET parm.Value		=	'LastOperations';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'LastOperationsNumber';
+		SET parm.Value		=	inRoot.OpCount;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * 	Интерфейс TCC переводы с карты на карту XferAddRq -> WAY u06068 11.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WAYCard2CardRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWayUfxP2PRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'OrdReq';
+		SET doc.TransType.TransCode.ServiceCode = 'P2P';			
+		
+		SET doc.TransType.TransCondition				= ',WEB,KEY_ENTRY,NO_AUTH,NO_CARD,NO_CARDHOLDER,ECOM_SSL,TERM_UNATT,';
+		SET doc.TransType.TransRules.TransRule.ParmCode = 'CreditTransCondition'; 
+		SET doc.TransType.TransRules.TransRule.Value	= ',WEB,KEY_ENTRY,NO_AUTH,NO_CARD,NO_CARDHOLDER,ECOM_SSL,TERM_UNATT,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'SRN';
+		SET parmRef.Value		=  inRoot.RegNumber;
+		
+
+		SET doc.LocalDt = SUBSTRING(REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ') FROM 0 FOR 20);--REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.ContractNumber;
+		SET doc.Source.ContractNumber	    = '03806767';
+		SET doc.Destination.ContractNumber  = inRoot.DestinationContractNumber;
+		SET doc.Transaction.Currency		= inRoot.Currency;	
+		SET doc.Transaction.Amount			= inRoot.Amount;
+		IF inRoot.XferMethod = '5' THEN			
+			SET doc.Transaction.Extra.Type	  =	'AddInfo';
+			SET doc.Transaction.Extra.Details =	'USE_DOC_DATA;PTID=C07;RPBA=AA;';
+		ELSE
+			SET doc.Transaction.Extra.Type	  =	'AddInfo';
+			SET doc.Transaction.Extra.Details =	'USE_DOC_DATA;PTID=C07;RPBA=PP;';	
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс TBP_PAY проводки билингового платежа u06068 SBOLRS -> WAY -> SBOLRS 16.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WAYAuthRetailRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWAYAuthRetailRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_Retail_AuthReq';
+		
+		SET doc.TransType.TransCondition				= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.MadeOperationId;
+		
+		--SET doc.Description		=	inRoot.RecipientRec.CodeRecipientBS;
+		SET doc.Description			=	THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'way4code');
+		SET doc.LocalDt = REPLACE(CAST(inRoot.SBOLTm AS CHARACTER FORMAT 'YYYY-MM-dd HH:MM:SS'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.ContractNumber;
+		SET doc.Source.ContractNumber	    = '03806767';
+		--SET doc.Destination.ContractNumber  = inRoot.DestinationContractNumber;
+		SET doc.Transaction.Currency		= 'KZT';	
+		SET doc.Transaction.Amount			= THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Amount');
+		SET doc.Transaction.Extra.Type		= 'AddInfo';
+		SET doc.Transaction.Extra.Details	= 'SBOL_CheckAuthDuplicate;Biller='|| THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'way4code') ||';';		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_Way4AccDebitAuthRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWay4AccDebitAuthRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_AccDebit_AuthReq';		
+		
+		SET doc.TransType.TransCondition				= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		DECLARE parmRef   REFERENCE TO doc;		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.RRN;
+		
+		SET doc.Description = inRoot.Purpouse;
+
+		SET doc.LocalDt = SUBSTRING(REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ') FROM 0 FOR 20);--REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.ContractNumber;
+		SET doc.Source.ContractNumber	    = '03806767';
+		
+		DECLARE Transaction REFERENCE TO doc;
+		CREATE LASTCHILD OF doc AS Transaction NAME 'Transaction';
+		SET Transaction.Currency  = inRoot.Currency;
+		SET Transaction.Amount    = inRoot.Amount;
+
+		DECLARE Extra  REFERENCE TO doc;
+		CREATE LASTCHILD OF Transaction AS Extra NAME 'Extra';
+		
+		SET Extra.Type     = 'AddInfo';
+		SET Extra.Details  = 'SBOL_CheckAuthDuplicate;Biller=OwnAcc;';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_PrepareRespHeaders1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+	
+		SET OutputRoot.HTTPResponseHeader = NULL;
+		-- Восстанавливаем все заголовки
+		IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQMD') NAME 'MQMD';
+		END IF;
+		SET OutputRoot.MQMD = Environment.Variables.InputMQMD;
+	
+		RETURN TRUE;
+
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_GetPhoneCardsFromWay4Rq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetPhoneCardsFromWay4Rq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Information';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE information REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS information NAME 'Information';
+		
+		SET information.RegNumber 	= inRoot.OperUID;
+		SET information.ObjectType 	= 'Contract';
+		SET information.ActionType	= 'Inquiry';				
+		
+		DECLARE resultDtls REFERENCE TO information;
+		DECLARE parm REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS resultDtls NAME 'ResultDtls';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'ExtraRs';
+		SET parm.Value		=	'GET_SMS_ADDR';
+		
+		SET information.ObjectFor.ClientIDT.ClientInfo.ClientNumber	=	inRoot.CustPermId;		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс TBP_PAY проводки билингового платежа u06068 SBOLRS -> WAY -> SBOLRS 19.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WAYFinAdvRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWAYFinAdvRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_Retail_FinAdv';
+		
+		SET doc.TransType.TransCondition				= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.MadeOperationId;
+		
+		SET doc.Description		=	THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'way4code');
+		SET doc.LocalDt = REPLACE(CAST(inRoot.SBOLTm AS CHARACTER FORMAT 'YYYY-MM-dd HH:MM:SS'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.ContractNumber;
+		SET doc.Source.ContractNumber	    = '03806767';
+		--SET doc.Destination.ContractNumber  = inRoot.DestinationContractNumber;
+		SET doc.Transaction.Currency		= 'KZT';	
+		SET doc.Transaction.Amount			= THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Amount');
+		SET doc.Transaction.Extra.Type		= 'AddInfo';
+		SET doc.Transaction.Extra.Details	= 'SBOL_CheckAuthDuplicate;Biller=' || THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'way4code') || ';';	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_Way4AccDebitAuthRevRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWay4AccDebitAuthRevRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_AccDebit_AuthRev';		
+		
+		SET doc.TransType.TransCondition				= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		DECLARE parmRef   REFERENCE TO doc;		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.RRN;
+		
+		SET doc.Description = inRoot.Purpouse;--'Transfer to deposit';
+
+		SET doc.LocalDt = SUBSTRING(REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ') FROM 0 FOR 20);--REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.ContractNumber;
+		SET doc.Source.ContractNumber	    = '03806767';
+		
+		DECLARE Transaction REFERENCE TO doc;
+		CREATE LASTCHILD OF doc AS Transaction NAME 'Transaction';
+		SET Transaction.Currency  = inRoot.Currency;
+		SET Transaction.Amount    = inRoot.Amount;
+
+		DECLARE Extra  REFERENCE TO doc;
+		CREATE LASTCHILD OF Transaction AS Extra NAME 'Extra';
+		
+		SET Extra.Type     = 'AddInfo';
+		SET Extra.Details  = 'SBOL_CheckAuthDuplicate;Biller=OwnAcc;';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+ * Интерфейс TDC перевод денежных c текущего счета\депозита на свою карту (карт-счет) между счетами одного клиента u06068 20.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WAYAuthRqAccCreditRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWAYAuthRqAccCreditRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_AccCredit_AuthReq';
+		
+		SET doc.TransType.TransCondition		= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.RegNumber;
+		
+		SET doc.Description		=  inRoot.Purpose;
+
+		SET doc.LocalDt = SUBSTRING(REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ') FROM 0 FOR 20);--REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.ContractNumber;
+		SET doc.Source.ContractNumber	    = '03806767';
+		--SET doc.Destination.ContractNumber  = inRoot.DestinationContractNumber;
+		SET doc.Transaction.Currency		= inRoot.Currency;	
+		SET doc.Transaction.Amount			= inRoot.Amount;
+		SET doc.Transaction.Extra.Type		= 'AddInfo';
+		SET doc.Transaction.Extra.Details	= 'SBOL_CheckAuthDuplicate;';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WAYFinRqAccCreditRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWAYFinRqAccCreditRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_AccCredit_FinAdv';
+		
+		SET doc.TransType.TransCondition		= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.RegNumber;
+		
+		SET doc.Description		=  inRoot.Purpose;
+
+		SET doc.LocalDt = SUBSTRING(REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ') FROM 0 FOR 20);--REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.ContractNumber;
+		SET doc.Source.ContractNumber	    = '03806767';
+		--SET doc.Destination.ContractNumber  = inRoot.DestinationContractNumber;
+		SET doc.Transaction.Currency		= inRoot.Currency;	
+		SET doc.Transaction.Amount			= inRoot.Amount;
+		/*SET doc.Transaction.Extra.Type		= 'AddInfo';
+		SET doc.Transaction.Extra.Details	= 'SBOL_CheckAuthDuplicate;';*/
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDOWAY_WAYAuthRevRqAccCreditRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_AccCredit_AuthRev';
+		
+		SET doc.TransType.TransCondition		= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.RegNumber;
+		
+		SET doc.Description		=  inRoot.Purpose;
+
+		SET doc.LocalDt = SUBSTRING(REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ') FROM 0 FOR 20);--REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.ContractNumber;
+		SET doc.Source.ContractNumber	    = '03806767';
+		--SET doc.Destination.ContractNumber  = inRoot.DestinationContractNumber;
+		SET doc.Transaction.Currency		= inRoot.Currency;	
+		SET doc.Transaction.Amount			= inRoot.Amount;
+		SET doc.Transaction.Extra.Type		= 'AddInfo';
+		SET doc.Transaction.Extra.Details	= 'SBOL_CheckAuthDuplicate;';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_Way4AccDebitFinAdvRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWay4AccDebitFinAdvRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_AccDebit_FinAdv';		
+		
+		SET doc.TransType.TransCondition				= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		DECLARE parmRef   REFERENCE TO doc;		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.RRN;
+		
+		SET doc.Description = inRoot.Purpouse;--'Transfer to deposit';
+
+		SET doc.LocalDt = SUBSTRING(REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ') FROM 0 FOR 20);--REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.ContractNumber;
+		SET doc.Source.ContractNumber	    = '03806767';
+		
+		DECLARE Transaction REFERENCE TO doc;
+		CREATE LASTCHILD OF doc AS Transaction NAME 'Transaction';
+		SET Transaction.Currency  = inRoot.Currency;
+		SET Transaction.Amount    = inRoot.Amount;
+
+		DECLARE Extra  REFERENCE TO doc;
+		CREATE LASTCHILD OF Transaction AS Extra NAME 'Extra';
+		
+		SET Extra.Type     = 'AddInfo';
+		SET Extra.Details  = 'SBOL_CheckAuthDuplicate;Biller=OwnAcc;';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_CardAddSMSRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZCardAddSMSRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq'; 
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Application';						
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE application REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS application NAME 'Application';
+		
+		SET application.RegNumber 					= inRoot.RegNumber;
+		SET application.Requestor.ContractNumber 	= inRoot.CardAcctId.CardNum;		
+		SET application.ObjectType 	= 'Event';
+		SET application.ActionType	= 'Add';				
+		SET application.ObjectFor.ContractIDT.ContractNumber 	= inRoot.CardAcctId.CardNum;
+		
+		SET application.ObjectFor.ContractIDT.Client.ClientInfo.ClientNumber 	= inRoot.ClientNumber;
+		SET application.Data.QueEvent.ActionCode = 'ADD_SMS1';
+		SET application.Data.QueEvent.Comment = 'PHONE2=' || FIELDVALUE(inRoot.CardAcctId.AddrSMS) || ';';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_CardChangeSMSRq
+  	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZCardChangeSMSRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq'; 
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Application';						
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE application REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS application NAME 'Application';
+		
+		--SET application.RegNumber 					= inRoot.RqUID;
+		SET application.RegNumber					= inRoot.OperUID;
+		SET application.Institution					= '0038';
+		SET application.OrderDprt					= '0038';
+			
+		--SET application.Requestor.ContractNumber 	= inRoot.CardAcctId.CardNum;		
+		SET application.ObjectType 	= 'ClientAddress';
+		SET application.ActionType	= 'Update';				
+		SET application.ObjectFor.ClientIDT.ClientInfo.ClientNumber 	= inRoot.CustId.CustPermId;
+		SET application.ObjectFor.ClientIDT.ClientInfo.ShortName		= '<<<NONE>>>';	
+		
+		/*SET application.ObjectFor.ContractIDT.Client.ClientInfo.ClientNumber 	= inRoot.CustId.CustPermId;
+		SET application.Data.QueEvent.ActionCode = 'OFF_SMS1';
+		SET application.Data.QueEvent.Comment = 'PHONE2=' || FIELDVALUE(inRoot.AddrSMSChk) || ';';*/
+		
+		SET application.Data.Address.AddressType = inRoot.PhoneIdentity;
+		SET application.Data.Address.PostalCode	 = inRoot.CardAcctId.AddrSMS;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс CRLIMLIST отображение списка лимитов u06068 24.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WayCardLimListRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWayCardLimListRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Information';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE information REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS information NAME 'Information';
+		
+		SET information.RegNumber 	= inRoot.OperUID;
+		SET information.ObjectType 	= 'Contract';
+		SET information.ActionType	= 'Inquiry';				
+		
+		DECLARE resultDtls REFERENCE TO information;
+		DECLARE parm REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS resultDtls NAME 'ResultDtls';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Usage';
+		SET parm.Value		=	'Y';
+		
+		SET information.ObjectFor.ContractIDT.ContractNumber	=	inRoot.ContractNumber;
+		
+		SET information.Requestor.ContractNumber				=	inRoot.ContractNumber;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс CRLIMENABLE включение лимита u06068 25.12.2014 
+ */
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WayCardLimEnableRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWayCardLimEnableRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Application';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE information REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS information NAME 'Application';
+		
+		SET information.RegNumber 	= inRoot.OperUID;
+		SET information.Requestor.ContractNumber				=	inRoot.ContractNumber;
+		
+		SET information.ObjectType 	= 'Usage';
+		SET information.ActionType	= 'ActivatePersonal';				
+		
+		SET information.ObjectFor.ContractIDT.ContractNumber	=	inRoot.ContractNumber;
+		SET information.ObjectFor.ContractIDT.Client.ClientInfo.ClientNumber = inRoot.ClientNumber;
+		
+		DECLARE resultDtls REFERENCE TO information;
+		DECLARE parm REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS resultDtls NAME 'Data';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Usage';		
+		
+		SET parm.Code = inRoot.LimitCode;
+		SET parm.ActivityPeriod.Activation  = 'Activate';
+		SET parm.ActivityPeriod.DateFrom    = CAST(CURRENT_DATE AS CHARACTER FORMAT 'yyyy-MM-dd');
+		SET parm.ActivityPeriod.DateTo		= CAST(CURRENT_DATE AS CHARACTER FORMAT 'yyyy-MM-dd');
+			
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Интерфейс CRLIMDISABLE отключение лимита u06068 25.12.2014
+ */
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WayCardLimDisableRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWayCardLimDisableRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Application';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE information REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS information NAME 'Application';
+		
+		SET information.RegNumber 	= inRoot.OperUID;
+		SET information.Requestor.ContractNumber				=	inRoot.ContractNumber;
+		
+		SET information.ObjectType 	= 'Usage';
+		SET information.ActionType	= 'ActivatePersonal';				
+		
+		SET information.ObjectFor.ContractIDT.ContractNumber	=	inRoot.ContractNumber;
+		SET information.ObjectFor.ContractIDT.Client.ClientInfo.ClientNumber = inRoot.ClientNumber;
+		
+		DECLARE resultDtls REFERENCE TO information;
+		DECLARE parm REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS resultDtls NAME 'Data';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Usage';		
+		
+		SET parm.Code = inRoot.LimitCode;
+		SET parm.ActivityPeriod.Activation  = 'Deactivate';
+		SET parm.ActivityPeriod.DateFrom    = CAST(CURRENT_DATE AS CHARACTER FORMAT 'yyyy-MM-dd');
+		SET parm.ActivityPeriod.DateTo		= CAST(CURRENT_DATE AS CHARACTER FORMAT 'yyyy-MM-dd');
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WayCardLimEditRq
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWayCardLimEditRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Application';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE information REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS information NAME 'Application';
+		
+		SET information.RegNumber 						= inRoot.OperUID;
+		SET information.Requestor.ContractNumber		= inRoot.CardAcctId.CardNum;
+		
+		SET information.ObjectType 	= 'Usage';
+		SET information.ActionType	= 'ActivatePersonal';				
+		
+		SET information.ObjectFor.ContractIDT.ContractNumber	=	inRoot.CardAcctId.CardNum;
+		SET information.ObjectFor.ContractIDT.Client.ClientInfo.ClientNumber = inRoot.ClientNumber;
+		
+		DECLARE resultDtls REFERENCE TO information;
+		DECLARE parm REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS resultDtls NAME 'Data';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Usage';		
+		
+		SET parm.Code = inRoot.CardLimList.LimItem.LimCode;
+		SET parm.MaxAmount.Amount  		= inRoot.CardLimList.LimItem.LimVal;
+		SET parm.MaxAmount.Currency   	= inRoot.CardLimList.LimItem.LimValCurr;
+		SET parm.ActivityPeriod.Activation  = 'Activate';
+		SET parm.ActivityPeriod.DateFrom    = inRoot.CardLimList.LimItem.LimPrevDate;
+		SET parm.ActivityPeriod.DateTo		= inRoot.CardLimList.LimItem.LimLastDate;		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_CardOffSMSRq
+   	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZCardOffSMSRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq'; 
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Application';						
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE application REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS application NAME 'Application';
+		
+		SET application.RegNumber 					= inRoot.RqUID;
+		SET application.Requestor.ContractNumber 	= inRoot.CardAcctId.CardNum;		
+		SET application.ObjectType 	= 'Event';
+		SET application.ActionType	= 'Add';				
+		SET application.ObjectFor.ContractIDT.ContractNumber 	= inRoot.CardAcctId.CardNum;
+		
+		SET application.ObjectFor.ContractIDT.Client.ClientInfo.ClientNumber 	= inRoot.CustId.CustPermId;
+		SET application.Data.QueEvent.ActionCode = 'OFF_SMS1';
+		SET application.Data.QueEvent.Comment = 'PHONE2=' || FIELDVALUE(inRoot.CardAcctId.AddrSMSChk) || ';';
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_CardChangeAddSMSRq
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZCardChangeAddSMSRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq'; 
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Application';						
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE application REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS application NAME 'Application';
+		
+		SET application.RegNumber 					= inRoot.RegNumber;
+		SET application.Requestor.ContractNumber 	= inRoot.CardAcctId.CardNum;		
+		SET application.ObjectType 	= 'Event';
+		SET application.ActionType	= 'Add';				
+		SET application.ObjectFor.ContractIDT.ContractNumber 	= inRoot.CardAcctId.CardNum;
+		
+		SET application.ObjectFor.ContractIDT.Client.ClientInfo.ClientNumber 	= inRoot.ClientNumber;
+		SET application.Data.QueEvent.ActionCode = 'ADD_SMS1';
+		SET application.Data.QueEvent.Comment = 'PHONE2=' || FIELDVALUE(inRoot.CardAcctId.AddrSMS) || ';';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WAY4ExchRatesRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWAY4ExchRatesRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type"  = 'ConfigurationInfo';
+		SET outRoot.(XMLNSC.Attribute)"version"   = '2.0';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE Conf REFERENCE TO msgData;		
+		CREATE LASTCHILD OF msgData AS Conf NAME 'ConfigurationInfo';		
+		SET Conf.RegNumber 	    = inRoot.RqUID;		
+		SET Conf.ObjectType 	= 'ExchangeRate';		
+		SET Conf.ActionType 	= 'Inquiry';		
+		
+		DECLARE ResultDtls REFERENCE TO Conf;
+		CREATE LASTCHILD OF Conf AS ResultDtls NAME 'ResultDtls';
+
+		DECLARE FilterRef   REFERENCE TO Conf;		
+		CREATE LASTCHILD OF ResultDtls AS FilterRef NAME 'Filter';
+		SET FilterRef.Type	=  'FxRate';
+		SET FilterRef.Code	=  'ActiveOnly';
+/*		
+		DECLARE parmRef   REFERENCE TO Conf;		
+		CREATE LASTCHILD OF ResultDtls AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'DateFrom';
+		SET parmRef.Value		=  CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd');
+
+		CREATE LASTCHILD OF ResultDtls AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'DateTo';
+		SET parmRef.Value		=  CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd');
+
+		DECLARE ObjectFor REFERENCE TO Conf;
+		CREATE LASTCHILD OF Conf AS ObjectFor NAME 'ObjectFor';
+		SET ObjectFor.ContractIDT.ContractNumber  = '03806767';
+*/
+		DECLARE SourceFor REFERENCE TO Conf;
+		CREATE LASTCHILD OF Conf AS SourceFor NAME 'Source';
+		SET SourceFor.ContractNumber  = '03806767';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDOWAY_WAYAuthRevAdvRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWAYAuthRevAdvRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_Retail_AuthRev';
+		
+		SET doc.TransType.TransCondition				= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.MadeOperationId;
+		
+		SET doc.Description		=	THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'way4code');
+		SET doc.LocalDt = REPLACE(CAST(inRoot.SBOLTm AS CHARACTER FORMAT 'YYYY-MM-dd HH:MM:SS'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.ContractNumber;
+		SET doc.Source.ContractNumber	    = '03806767';
+		--SET doc.Destination.ContractNumber  = inRoot.DestinationContractNumber;
+		SET doc.Transaction.Currency		= 'KZT';	
+		SET doc.Transaction.Amount			= THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'Amount');
+		SET doc.Transaction.Extra.Type		= 'AddInfo';
+		SET doc.Transaction.Extra.Details	= 'SBOL_CheckAuthDuplicate;Biller=' || THE(SELECT ITEM attr.EnteredData.DataItem FROM inRoot.RecipientRec.Requisites.Requisite[] AS attr WHERE attr.NameBS = 'way4code') || ';';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *   Интерфейс CRERNROLL регистрации по номеру карты u06068 -- 03/04/2015 Запрос из SBOLRS -> WAY4 KZWayClientInqRq
+ */
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WAY4WayClientInqRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWayClientInqRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Information';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE information REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS information NAME 'Information';
+		
+		SET information.RegNumber 	= inRoot.OperUID;
+		SET information.ObjectType 	= 'Client';
+		SET information.ActionType	= 'Inquiry';				
+		
+		DECLARE resultDtls REFERENCE TO information;
+		DECLARE parm REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS resultDtls NAME 'ResultDtls';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Client';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Address';
+		SET parm.Value		=	'Y';
+				
+		SET information.ObjectFor.ClientIDT.RefContractNumber	=	inRoot.ContractNumber;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *   Интерфейс CRERNROLL регистрации по номеру карты u06068 -- 03/04/2015 Запрос из SBOLRS -> WAY4 KZWayGetPhoneRq
+ */
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WAY4WayGetPhoneRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWayGetPhoneRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Information';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE information REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS information NAME 'Information';
+		
+		SET information.RegNumber 	= inRoot.OperUID;
+		SET information.ObjectType 	= 'Contract';
+		SET information.ActionType	= 'Inquiry';				
+		
+		DECLARE resultDtls REFERENCE TO information;
+		DECLARE parm REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS resultDtls NAME 'ResultDtls';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'ExtraRs';
+		SET parm.Value		=	'GET_SMS_ADDR';
+				
+		SET information.ObjectFor.ClientIDT.RefContractNumber	=	inRoot.ContractNumber;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WayAuthRqNewDepRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWAYAuthRqNewDepRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_AccDebit_AuthReq';
+		
+		SET doc.TransType.TransCondition		= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.OperRRN;
+		
+		SET doc.Description		=  'Deposit creation transfer';
+
+		SET doc.LocalDt = SUBSTRING(REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ') FROM 0 FOR 20);--REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.CardAcctIdFrom.CardNum	;
+		SET doc.Source.ContractNumber	    = '03806767';
+		--SET doc.Destination.ContractNumber  = inRoot.DestinationContractNumber;
+		SET doc.Transaction.Currency		= inRoot.AgreemtInfo.AcctCur;	
+		SET doc.Transaction.Amount			= inRoot.AgreemtInfo.CurAmt;
+		SET doc.Transaction.Extra.Type		= 'AddInfo';
+		SET doc.Transaction.Extra.Details	= 'SBOL_CheckAuthDuplicate;Biller=OwnAcc;';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WayAuthRevRqNewDepRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWAYAuthRevRqNewDepRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_AccDebit_AuthRev';
+		
+		SET doc.TransType.TransCondition		= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.OperRRN;
+		
+		SET doc.Description		=  'Reversal. Deposit creation transfer';
+
+		SET doc.LocalDt = SUBSTRING(REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ') FROM 0 FOR 20);--REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.CardAcctIdFrom.CardNum	;
+		SET doc.Source.ContractNumber	    = '03806767';
+		--SET doc.Destination.ContractNumber  = inRoot.DestinationContractNumber;
+		SET doc.Transaction.Currency		= inRoot.AgreemtInfo.AcctCur;	
+		SET doc.Transaction.Amount			= inRoot.AgreemtInfo.CurAmt;
+		SET doc.Transaction.Extra.Type		= 'AddInfo';
+		SET doc.Transaction.Extra.Details	= 'SBOL_CheckAuthDuplicate;Biller=OwnAcc;';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WayAuthFinRqNewDepRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWAYAuthFinRqNewDepRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Doc';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Doc';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE doc REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS doc NAME 'Doc';		
+		SET doc.TransType.TransCode.MsgCode 	= 'SOA_Ufx_AccDebit_FinAdv';
+		
+		SET doc.TransType.TransCondition		= ',WEB,AUTHENTICATED,NO_CARD,ENET,NO_SECURE,LINE_SECURE,NO_CARDHOLDER,NO_MERCH,ECOMMERCE,ECOM_SSL,';
+		
+		DECLARE docRefSet REFERENCE TO doc;
+		DECLARE parmRef   REFERENCE TO doc;
+		
+		CREATE LASTCHILD OF doc AS docRefSet NAME 'DocRefSet';
+		
+		CREATE LASTCHILD OF docRefSet AS parmRef NAME 'Parm';
+		SET parmRef.ParmCode	=  'RRN';
+		SET parmRef.Value		=  inRoot.OperRRN;
+		
+		SET doc.Description		=  'Deposit creation transfer. DepAcctNum=' || inRoot.NewAccount;
+
+		SET doc.LocalDt = SUBSTRING(REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ') FROM 0 FOR 20);--REPLACE(CAST(inRoot.RqTm AS CHARACTER FORMAT 'YYYY-MM-dd hh:mm:ss'),'T',' ');
+		
+		SET doc.Requestor.ContractNumber 	= inRoot.CardAcctIdFrom.CardNum	;
+		SET doc.Source.ContractNumber	    = '03806767';
+		--SET doc.Destination.ContractNumber  = inRoot.DestinationContractNumber;
+		SET doc.Transaction.Currency		= inRoot.AgreemtInfo.AcctCur;	
+		SET doc.Transaction.Amount			= inRoot.AgreemtInfo.CurAmt;
+		SET doc.Transaction.Extra.Type		= 'AddInfo';
+		SET doc.Transaction.Extra.Details	= 'SBOL_CheckAuthDuplicate;Biller=OwnAcc;';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+ 
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WayCardListPhoneRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZCardListPhoneRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Information';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE information REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS information NAME 'Information';
+		
+		SET information.RegNumber 			= inRoot.OperUID;
+		SET information.Institution 		= '1111';
+		SET information.InstitutionIDType 	= 'Branch';
+		SET information.ObjectType 	= 'Contract';
+		SET information.ActionType	= 'Inquiry';				
+		
+		DECLARE resultDtls REFERENCE TO information;
+		DECLARE parm REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS resultDtls NAME 'ResultDtls';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'OrderingRule';
+		SET parm.Value		=	'PrdTypeCurr';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Contract';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'Status';
+		SET parm.Value		=	'Y';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Parm';		
+		SET parm.ParmCode	=	'ExtraRs';
+		SET parm.Value		=	'OrderContract';
+		
+		CREATE LASTCHILD OF resultDtls AS parm NAME 'Filter';		
+		SET parm.Type		=	'Contract';
+		SET parm.Code		=	'ValidCard';
+				
+		SET information.ObjectFor.ClientIDT.CustomIDT	=	'ClientMPhone';
+		SET information.ObjectFor.ClientIDT.CustomCode	=	inRoot.PhoneNumber;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WayUpdateClientRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWayUpdateClientRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Application';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE information REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS information NAME 'Application';
+		
+		SET information.RegNumber 			     = inRoot.OperUID;
+		SET information.Requestor.ContractNumber = inRoot.ContractNumber; 						
+		SET information.ObjectType 				 = 'Client';
+		SET information.ActionType               = 'Update';	
+						
+		DECLARE objectFor REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS objectFor NAME 'ObjectFor'; 				
+		
+		DECLARE contractIDT REFERENCE TO objectFor;
+		
+		CREATE LASTCHILD OF objectFor AS contractIDT NAME 'ContractIDT';
+						
+		SET contractIDT.ContractNumber	=	inRoot.ContractNumber; 
+		SET contractIDT.Client.ClientInfo.ClientNumber	= '<<<NONE>>>';
+		
+		SET information.Data.Client.AddInfo.ADDINFO04 = 'EXTERNAL_WB=Y;TAG=Y;';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_WayAddSbolRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZWay4SbolAddRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		 
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq';
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Information';
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE information REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS information NAME 'Information';
+		
+		SET information.RegNumber 			    = inRoot.RegNumber;
+		SET information.Institution				= '0001';	
+		SET information.InstitutionIDType 		= 'Branch';
+		SET information.ObjectType				= 'Client';
+		SET information.ActionType				= 'Inquiry';
+						
+		DECLARE resultdts REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS resultdts NAME 'ResultDtls';
+		
+		SET resultdts.Parm.ParmCode	= 'ExtraRs';
+		SET resultdts.Parm.Value	= 'LoginPasswordWB';
+						
+		DECLARE objectFor REFERENCE TO information;
+		
+		CREATE LASTCHILD OF information AS objectFor NAME 'ObjectFor'; 				
+		
+		DECLARE contractIDT REFERENCE TO objectFor;
+		
+		CREATE LASTCHILD OF objectFor AS contractIDT NAME 'ClientIDT';
+						
+		SET contractIDT.CustomIDT	= inRoot.CustomIDT; 
+		SET contractIDT.CustomCode	= inRoot.CustomCode;
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForWAY_ConvertMDO2WAY_CRMCardAddSMSRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZCRMCardAddSMSRq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		SET outRoot.(XMLNSC.Attribute)"direction" = 'Rq'; 
+		SET outRoot.(XMLNSC.Attribute)"msg_type" = 'Application';						
+		SET outRoot.(XMLNSC.Attribute)"scheme" = 'WAY4Appl';
+		SET outRoot.(XMLNSC.Attribute)"version" = '2.0';
+		
+		SET outRoot.MsgId	=	inRoot.RqUID;
+		
+		DECLARE source REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS source NAME 'Source';  
+		
+		SET source.(XMLNSC.Attribute)"app" = 'Web';  
+		
+		DECLARE msgData REFERENCE TO outRoot;
+		
+		CREATE LASTCHILD OF outRoot AS msgData NAME 'MsgData';
+		
+		DECLARE application REFERENCE TO msgData;
+		
+		CREATE LASTCHILD OF msgData AS application NAME 'Application';
+		
+		SET application.RegNumber 					= inRoot.RegNumber;
+		SET application.Requestor.ContractNumber 	= inRoot.CardAcctId.CardNum;		
+		SET application.ObjectType 	= 'Event';
+		SET application.ActionType	= 'Add';				
+		SET application.ObjectFor.ContractIDT.ContractNumber 	= inRoot.CardAcctId.CardNum;
+		
+		SET application.ObjectFor.ContractIDT.Client.ClientInfo.ClientNumber 	= inRoot.ClientNumber;
+		SET application.Data.QueEvent.ActionCode = inRoot.CardAcctId.ActionCode;
+		SET application.Data.QueEvent.Comment = 'PHONE2=' || FIELDVALUE(inRoot.CardAcctId.AddrSMS) || ';';
+		
+		RETURN TRUE;
+	END;
+END MODULE;

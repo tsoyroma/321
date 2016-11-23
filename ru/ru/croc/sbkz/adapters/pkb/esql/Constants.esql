@@ -1,0 +1,94 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pkb.esql
+
+DECLARE PERSON_ID_TYPE_RNN CONSTANT CHARACTER '1';
+DECLARE PERSON_ID_TYPE_IIN CONSTANT CHARACTER '2';
+DECLARE PERSON_ID_TYPE_UR  CONSTANT CHARACTER '3';
+
+DECLARE ID_TYPE_IMPORT_CODE_RNN CONSTANT CHARACTER '1';
+DECLARE ID_TYPE_IMPORT_CODE_IIN CONSTANT CHARACTER '14';
+DECLARE ID_TYPE_IMPORT_CODE_UR  CONSTANT CHARACTER '15';
+
+DECLARE REPORTFORMAT_XML CONSTANT CHARACTER '608';
+DECLARE REPORTFORMAT_HTML CONSTANT CHARACTER '607';
+
+DECLARE REPORT_CCSID CONSTANT INTEGER 1208;
+DECLARE PKB_BKI CONSTANT CHARACTER 'PKB';
+
+DECLARE XML_NODELAY_POS CONSTANT CHARACTER '1';
+DECLARE XML_NODELAY_NEG CONSTANT CHARACTER '2';
+
+DECLARE STATUS_CODE_OK CONSTANT CHARACTER '0';
+
+/**
+ * Создает в переданной ссылке раздел PKBRoles,
+ * в котором устанавливает константные значения для описания
+ * ролей и их идентификаторов.
+ **/
+CREATE PROCEDURE AssignPKBRoleList(IN envTree REFERENCE)
+BEGIN	
+	SET envTree.PKBRoles.RoleDesc[] = LIST {
+		'заёмщик|заемщик|принципал|созаемщик (присоединившееся лицо) с солидарными обязательствами',
+		'солидарный должник с солидарной ответственностью|правопреемник|должник с субсидиарной ответственностью|должник с долевой ответственностью|поручитель',
+		'гарант',
+		'залогодатель|представитель, действующий на основании доверенности|собственник/сособственник|кредитор, в пользу которого выдана банковская гарантия/поручительство'
+	};
+	
+	SET envTree.PKBRoles.RoleId[] = LIST {
+		'1',
+		'2',
+		'3',
+		'4'
+	};	
+END;
+
+CREATE FUNCTION SetMBRole(IN type CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE type
+		WHEN 'Заемщик' THEN '1'
+		WHEN 'Созаемщик' THEN '2'
+		WHEN 'Гарант' THEN '3'
+		WHEN 'Нет информации' THEN '4'
+		WHEN 'Залогодатель' THEN '4'
+		WHEN 'Правопреемник' THEN '4'
+		WHEN 'Работодатель' THEN '4'
+		WHEN 'Собственник/Сособственник' THEN '4'
+		WHEN 'Жена/Муж ' THEN '4'
+		WHEN 'Кредитор, в пользу которого выдана банковская гарантия/поручительство' THEN '4'
+		WHEN 'Должник с субсидиарной ответственностью' THEN '2'
+		WHEN 'Должник с долевой ответственностью' THEN '2'
+		WHEN 'Поручитель' THEN '3'
+		WHEN 'Заёмщик' THEN '1'
+		WHEN 'ClaimHolder' THEN '4'
+		WHEN 'Созаемщик (присоединившееся лицо) с солидарными обязательствами' THEN '2'
+		WHEN 'Гарант' THEN '3'
+		WHEN 'PolicyHolder' THEN '4'
+		WHEN 'Принципал' THEN '4'
+		WHEN 'Представитель, действующий на основании доверенности' THEN '4'
+		ELSE '4'									
+	END;
+END;
+ 
+CREATE FUNCTION getTypeGuarantee(IN type CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE type
+		WHEN 'Бланковые' THEN '1'
+		WHEN 'Залог недвижимости жилой/коммерческой' THEN '2'
+		WHEN 'Залог транспортных средств' THEN '2'
+		WHEN 'Залог оборудования и специальной техники' THEN '2'
+		WHEN 'Залог имущественных прав' THEN '2'
+		WHEN 'Залог ценных бумаг и драгоценных металлов' THEN '2'
+		WHEN 'Залог товаров в обороте' THEN '2'
+		WHEN 'Залог имущества, поступающего в собственность в будущем' THEN '2'
+		WHEN 'Залог объектов незавершенного строительства' THEN '2'
+		WHEN 'Залог денег, размещенных на сбер.счете/заклад денег' THEN '2'
+		WHEN 'Залог иного имущества, неизъятого из гражданского оборота' THEN '2'
+		WHEN 'Должник с долевой ответственностью' THEN '2'
+		WHEN 'Гарантия/поручительство физического лица' THEN '1'
+		WHEN 'Гарантия/поручительство юридического лица' THEN '1'
+		WHEN 'Другие способы обеспечения' THEN '2'
+		WHEN 'Созаемщик (присоединившееся лицо) с солидарными обязательствами' THEN '2'		
+		ELSE '2'									
+	END;
+END;
+
+DECLARE ROLEDESC_DELIMITER CONSTANT CHARACTER '|';

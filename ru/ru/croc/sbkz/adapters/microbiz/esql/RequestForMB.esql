@@ -1,0 +1,173 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.microbiz.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+/* Результат выдачи кредита */ 
+CREATE COMPUTE MODULE FileRequestForMB_ConvertMDO_TSMEnrichmentRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	    CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZTSMEnrichmentRequest.TSMEnrichmentRequest.ApprovedSolutionsResp.ApprovedSolutionResp;		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/TSMEnrichment/req';
+		DECLARE tns NAMESPACE TNS1;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'TSMEnrichmentRequest'; 
+		
+		SET OutputRoot.XMLNSC.tns:TSMEnrichmentRequest.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varTSMEnrichmentReq REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varTSMEnrichmentReq NAMESPACE tns NAME 'TSMEnrichmentReq'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varTSMEnrichmentReq;
+		CREATE LASTCHILD OF varTSMEnrichmentReq AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  InputRoot.XMLNSC.*[<].RqUID;
+		SET varGeneralInfo.tns:MsgFrom		  =  inRef.KOD;	
+		SET varGeneralInfo.tns:MsgDate		  =  InputRoot.XMLNSC.*[<].RqTm;	
+		
+		DECLARE varApplicationRequestAttributes REFERENCE TO varTSMEnrichmentReq;
+					
+		CREATE LASTCHILD OF varTSMEnrichmentReq AS varApplicationRequestAttributes NAMESPACE tns NAME 'ApplicationRequestAttributes';
+		    
+		SET varApplicationRequestAttributes.tns:ApplicationID                  = inRef.Uid;       
+		SET varApplicationRequestAttributes.tns:ApplicationDate                = inRef.DateZ;       
+		SET varApplicationRequestAttributes.tns:ApplicationState    		   = inRef.ResultCode;       
+
+		RETURN TRUE;
+	END;			
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForMB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZTSMEnrichmentRequest' THEN
+			SET labelName = 'TSMEnrichmentRequest';
+		WHEN 'KZExpCurrencyRateRq' THEN
+			SET labelName = 'KZExpCurrencyRateRq';	
+		WHEN 'KZGetBackOfficeDateNf' THEN
+			SET labelName = 'KZGetBackOfficeDateNfRs';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown service in RequestForMB', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForMB_ConvertMDO_CurrencyRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 		
+		CALL CopyMessageHeaders();
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE msgType CHARACTER Environment.UserProperties.TransactOperation;
+		
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/CurrencySync/req';
+		DECLARE tns NAMESPACE TNS1;		
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAMESPACE tns NAME 'CurrencySyncRequest';		
+		
+		SET OutputRoot.XMLNSC.tns:CurrencySyncRequest.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.KZExpCurrencyRateRq;
+		
+		CREATE FIELD OutputRoot.XMLNSC.tns:CurrencySyncRequest.tns:CurrencySyncReq;
+		
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.tns:CurrencySyncRequest.tns:CurrencySyncReq;
+		
+		DECLARE generalInfo REFERENCE TO OutRs;
+		
+		CREATE LASTCHILD OF OutRs AS generalInfo NAMESPACE tns NAME 'GeneralInfo';
+		
+		SET generalInfo.tns:MsgID	=  InpRs.RqUID;
+		SET generalInfo.tns:MsgFrom	=  'BSSCurrencyRates';
+		SET generalInfo.tns:MsgDate =  InpRs.RqTm;
+		 
+		DECLARE currencyRequest REFERENCE TO OutRs;
+		
+		FOR currReq AS InpRs.CurrRateData.CurrRate[] DO
+		   IF currReq.RateType = 'discount' THEN
+		   	
+			CREATE LASTCHILD OF OutRs AS currencyRequest NAMESPACE tns NAME 'CurrencyRequestAttributes';			
+			
+				SET currencyRequest.tns:Currency_literal	=	currReq.CurrCode;
+				SET currencyRequest.tns:Currency_numerical	=	currReq.CurrDigitCode;
+				SET currencyRequest.tns:CurrencyName		=	currReq.CurrencyName; 
+				SET currencyRequest.tns:Country				=	currReq.BaseCurrCode;
+				SET currencyRequest.tns:Value				=	currReq.RateValue;
+				SET currencyRequest.tns:Date				=	REPLACE(SUBSTRING(currReq.StartDt FROM 0 FOR 17),'T','+');
+			
+			END IF;
+		
+		END FOR;	
+				
+		RETURN TRUE;
+	END;
+	 
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;	
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForMB_GetBackOfficeDateNfRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	    CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZGetBackOfficeDateNf;		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		DECLARE TNS1 CONSTANT CHARACTER 'http://sbrf.ru/sbt/kaz/sme/TSMEnrichment/req';
+		DECLARE tns NAMESPACE TNS1;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'TSMEnrichmentRequest'; 
+		
+		SET OutputRoot.XMLNSC.tns:TSMEnrichmentRequest.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+
+        DECLARE varTSMEnrichmentReq REFERENCE TO outRef;
+        CREATE LASTCHILD OF outRef AS varTSMEnrichmentReq NAMESPACE tns NAME 'TSMEnrichmentReq'; 
+
+		DECLARE varGeneralInfo REFERENCE TO varTSMEnrichmentReq;
+		CREATE LASTCHILD OF varTSMEnrichmentReq AS varGeneralInfo NAMESPACE tns NAME 'GeneralInfo';
+				
+		SET varGeneralInfo.tns:MsgID          =  inRef.RqUID;
+		SET varGeneralInfo.tns:MsgFrom		  =  'PRAGMA_FINAL';	
+		SET varGeneralInfo.tns:MsgDate		  =  inRef.RqTm;	
+		
+		DECLARE varApplicationRequestAttributes REFERENCE TO varTSMEnrichmentReq;
+		CREATE LASTCHILD OF varTSMEnrichmentReq AS varApplicationRequestAttributes NAMESPACE tns NAME 'ApplicationRequestAttributes';
+		    
+		SET varApplicationRequestAttributes.tns:ApplicationID                  = inRef.TSMUID;       
+		SET varApplicationRequestAttributes.tns:ApplicationDate                = inRef.DocDate;       
+		SET varApplicationRequestAttributes.tns:ApplicationState    		   = inRef.ResultCode;       
+
+		RETURN TRUE;
+	END;		
+END MODULE;

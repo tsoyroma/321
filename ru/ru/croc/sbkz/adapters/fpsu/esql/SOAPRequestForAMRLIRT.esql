@@ -1,0 +1,1263 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.fpsu.esql
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Внешняя переменная для указания URL веб-сервиса
+DECLARE HttpWebServiceUrl_LGD2 EXTERNAL CHARACTER 'UNKNOWN';
+DECLARE HttpWebServiceUrl_RAT2 EXTERNAL CHARACTER 'UNKNOWN';
+DECLARE HttpWebServiceUrl_MRK2 EXTERNAL CHARACTER 'UNKNOWN';
+
+-- Внешняя переменная для указания таймаута веб-сервиса
+DECLARE HttpWebServiceTimeout2 EXTERNAL CHARACTER 'UNKNOWN';
+
+-- Внешняя переменная для указания имени пользователя
+DECLARE HttpWebServiceUsername2 EXTERNAL CHARACTER 'UNKNOWN';
+-- Внешняя переменная для указания пароля
+DECLARE HttpWebServicePassword2 EXTERNAL CHARACTER 'UNKNOWN';
+
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_AMRLIRT_SaveOrigMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.Source.MQMD 			= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 		= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties	= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 			= InputBody;		
+		RETURN TRUE;
+	END;
+	 
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_AMRLIRT_DetectRequestOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+--		DECLARE Operation CHARACTER FIELDVALUE(InputRoot.XMLNSC.Envelope.*:Header.*:"operation-name");
+		DECLARE Operation CHARACTER FIELDVALUE(InputRoot.XMLNSC.*:Envelope.*:Header.*:"operation-name");
+		
+		DECLARE labelName CHARACTER;
+
+		CASE Operation			
+			WHEN 'SrvCalcRating' THEN
+				SET labelName = 'calculateRatingRq';
+			WHEN 'SrvConfirmRating' THEN
+				SET labelName = 'confirmRatingRq';
+			WHEN 'SrvUpdateRatingAMR' THEN
+				SET labelName = 'correctRatingRq';
+			WHEN 'SrvCorrectRating' THEN
+				SET labelName = 'correctRatingRq';
+				
+			WHEN 'SrvCalcLGD' THEN
+				SET labelName = 'calculateLGDRq';
+			WHEN 'SrvFinalizeLGD' THEN
+				SET labelName = 'finalizeLGDRq';
+	
+			WHEN 'SrvCalcDebtCapacity' THEN -- Расчет СКЕ
+				SET labelName = 'calculateDCRq';	
+			ELSE
+				-- Неизвестный тип сообщения
+				THROW USER EXCEPTION VALUES ('Unknown format XML in Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_Convert2SOAP_calculateRatingRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:Envelope.*:Body.*:calculateRatingRq.*:arg0;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+			
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE pd NAME 'calculate';
+				
+		SET OutputRoot.XMLNSC.pd:calculate.(XMLNSC.NamespaceDecl)xmlns:ser = pd;		
+		SET OutputRoot.XMLNSC.pd:calculate.(XMLNSC.NamespaceDecl)xmlns:xsi = ser1;
+		
+		DECLARE oRef REFERENCE TO outRef;
+						
+		CREATE FIELD outRef.pd:arg0 AS oRef;		 
+				
+		SET oRef.pd:RatingId  				= inRef.*:ratingId;
+		SET oRef.pd:Model    			    = inRef.*:model;
+		SET oRef.pd:ModelIntegrationId      = inRef.*:modelIntagrationId;
+		SET oRef.pd:AccountId				= inRef.*:accountId;
+		SET oRef.pd:UID						= inRef.*:uid;
+		SET oRef.pd:Account					= inRef.*:account;
+		SET oRef.pd:INN						= inRef.*:inn;
+		SET oRef.pd:KPP						= inRef.*:kpp;
+		SET oRef.pd:GSZId					= inRef.*:gszId;
+		SET oRef.pd:GSZ						= inRef.*:gsz;
+		SET oRef.pd:SubjectId				= inRef.*:subjectId;
+		SET oRef.pd:Subject					= inRef.*:subject;
+		SET oRef.pd:SubjectOKATO			= inRef.*:subjectOKATO;
+		SET oRef.pd:Project					= inRef.*:project;
+				
+		DECLARE rRef REFERENCE TO oRef;
+		DECLARE iRef REFERENCE TO inRef.*:requestor;
+		
+		CREATE FIELD oRef.pd:Requestor AS rRef;
+		
+		SET rRef.pd:Login 					= iRef.*:login;	 			   	 
+		SET rRef.pd:LastName				= iRef.*:lastName; 
+		SET rRef.pd:FirstName				= iRef.*:firstName;
+		SET rRef.pd:MiddleName				= iRef.*:middleName; 
+		SET rRef.pd:Division				= iRef.*:division; 
+		SET rRef.pd:DivisionCode			= iRef.*:divisionCode; 
+		SET rRef.pd:JobTitle				= iRef.*:jobTitle;
+		SET rRef.pd:Role					= iRef.*:role;
+		
+		DECLARE lRef REFERENCE TO oRef;
+		DECLARE ilRef REFERENCE TO inRef.*:listOfFixedFactor;
+		
+		CREATE FIELD oRef.pd:ListOfFixedFactor AS lRef;
+		
+		DECLARE I INTEGER 1;
+				
+		DECLARE J INTEGER CARDINALITY(ilRef.*[]); ---- ????
+		
+		WHILE I <= J DO
+													
+				SET lRef.pd:FixedFactor[I].pd:Factor 				= ilRef.*:fixedFactor[I].*:factor;
+				SET lRef.pd:FixedFactor[I].pd:FactorIntegrationId   = ilRef.*:fixedFactor[I].*:factorIntegrationId;
+				SET lRef.pd:FixedFactor[I].pd:Group 				= ilRef.*:fixedFactor[I].*:group;
+				SET lRef.pd:FixedFactor[I].pd:Value 				= ilRef.*:fixedFactor[I].*:value;
+				SET lRef.pd:FixedFactor[I].pd:ValueIntegrationId 	= ilRef.*:fixedFactor[I].*:valueIntegrationId;
+		
+			SET I = I + 1;
+			
+		END WHILE;
+		
+		DECLARE periodRef REFERENCE TO oRef;
+		DECLARE inPeriodRef REFERENCE TO inRef.*:listOfRatingPeriod;
+		
+		CREATE LASTCHILD OF oRef AS periodRef NAMESPACE pd NAME 'ListOfRatingPeriod';
+		
+		DECLARE K INTEGER 1;		
+		DECLARE L INTEGER CARDINALITY(inPeriodRef.*[]); ---- ???
+		
+		WHILE K <= L DO
+			
+			DECLARE G INTEGER CARDINALITY(inPeriodRef.*:ratingPeriod[K].*:listOfCardinalFactor.*[]);
+			DECLARE C INTEGER 1;
+			
+			SET periodRef.pd:RatingPeriod[K].pd:ReportDate 		= CAST(CAST(FIELDVALUE(inPeriodRef.*:ratingPeriod[K].*:reportDate) AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'dd.MM.yyyy');
+			SET periodRef.pd:RatingPeriod[K].pd:Period     		= inPeriodRef.*:ratingPeriod[K].*:period;
+			SET periodRef.pd:RatingPeriod[K].pd:StartDate		= CAST(CAST(FIELDVALUE(inPeriodRef.*:ratingPeriod[K].*:startDate) AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'dd.MM.yyyy');
+			SET periodRef.pd:RatingPeriod[K].pd:PeriodType		= inPeriodRef.*:ratingPeriod[K].*:type;
+			SET periodRef.pd:RatingPeriod[K].pd:Comments		= inPeriodRef.*:ratingPeriod[K].*:comments;
+			
+			WHILE C <= G DO
+				
+				SET periodRef.pd:RatingPeriod[K].pd:ListOfCardinalFactor.pd:CardinalFactor[C].pd:Factor 			  = inPeriodRef.*:ratingPeriod[K].*:listOfCardinalFactor.*:cardinalFactor[C].*:factor;
+				SET periodRef.pd:RatingPeriod[K].pd:ListOfCardinalFactor.pd:CardinalFactor[C].pd:FactorIntegrationId  = inPeriodRef.*:ratingPeriod[K].*:listOfCardinalFactor.*:cardinalFactor[C].*:factorIntegrationId;
+				SET periodRef.pd:RatingPeriod[K].pd:ListOfCardinalFactor.pd:CardinalFactor[C].pd:Group        		  = inPeriodRef.*:ratingPeriod[K].*:listOfCardinalFactor.*:cardinalFactor[C].*:group;
+				SET periodRef.pd:RatingPeriod[K].pd:ListOfCardinalFactor.pd:CardinalFactor[C].pd:NumValue			  = inPeriodRef.*:ratingPeriod[K].*:listOfCardinalFactor.*:cardinalFactor[C].*:numValue;
+			
+				SET C = C + 1;
+			
+			END WHILE;	
+			
+			SET K = K + 1;
+			
+		END WHILE;
+		/*
+		IF EXISTS(inRef.*:listOfRatingSupport[]) THEN
+		DECLARE supportRef REFERENCE TO oRef;
+		CREATE LASTCHILD OF oRef AS supportRef NAMESPACE pd NAME 'ListOfRatingSupport';
+		
+		
+		END IF;*/
+		IF EXISTS(inRef.*:listOfRatingSupport[]) THEN
+		DECLARE supportRef REFERENCE TO oRef;
+		DECLARE inSupportRef REFERENCE TO inRef.*:listOfRatingSupport;
+		
+		CREATE LASTCHILD OF oRef AS supportRef NAMESPACE pd NAME 'ListOfRatingSupport';
+		
+		DECLARE H INTEGER 1;
+		DECLARE O INTEGER CARDINALITY(inSupportRef.*[]); -- ???
+		
+		WHILE H <= O DO
+			
+			DECLARE T INTEGER CARDINALITY(inSupportRef.*:ratingSupport[H].*:listOfSupportFactor.*[]); -- ???
+			DECLARE P INTEGER 1;
+			
+			SET supportRef.pd:RatingSupport[H].pd:Name 					= inSupportRef.*:ratingSupport[H].*:name;
+			SET supportRef.pd:RatingSupport[H].pd:IntegrationId     	= inSupportRef.*:ratingSupport[H].*:integrationId;
+			
+			WHILE P <= T DO
+				
+				SET supportRef.pd:RatingSupport[H].pd:ListOfSupportFactor.pd:SupportFactor[P].pd:Factor 			  	= inSupportRef.*:ratingSupport[H].*:listOfSupportFactor.*:supportFactor[P].*:factor;
+				SET supportRef.pd:RatingSupport[H].pd:ListOfSupportFactor.pd:SupportFactor[P].pd:FactorIntegrationId  	= inSupportRef.*:ratingSupport[H].*:listOfSupportFactor.*:supportFactor[P].*:factorIntegrationId;
+				SET supportRef.pd:RatingSupport[H].pd:ListOfSupportFactor.pd:SupportFactor[P].pd:Group        			= inSupportRef.*:ratingSupport[H].*:listOfSupportFactor.*:supportFactor[P].*:group;
+				SET supportRef.pd:RatingSupport[H].pd:ListOfSupportFactor.pd:SupportFactor[P].pd:Value			    	= inSupportRef.*:ratingSupport[H].*:listOfSupportFactor.*:supportFactor[P].*:value;
+				SET supportRef.pd:RatingSupport[H].pd:ListOfSupportFactor.pd:SupportFactor[P].pd:ValueIntegrationId  	= inSupportRef.*:ratingSupport[H].*:listOfSupportFactor.*:supportFactor[P].*:valueIntegrationId;
+				
+				SET P = P + 1;
+			
+			END WHILE;	
+			
+			SET H = H + 1;
+					
+		END WHILE;		 
+		END IF; 
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_RAT2;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout2;
+		
+		SET Environment.UserProperties.SPName = 'BPM_NCP';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_Convert2SOAP_confirmRatingRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:Envelope.*:Body.*:confirmRatingRq.*:arg0;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+			
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE pd NAME 'confirm';
+				
+		SET OutputRoot.XMLNSC.pd:confirm.(XMLNSC.NamespaceDecl)xmlns:ser = pd;		
+		SET OutputRoot.XMLNSC.pd:confirm.(XMLNSC.NamespaceDecl)xmlns:xsi = ser1;
+		
+		DECLARE oRef REFERENCE TO outRef;
+						
+		CREATE FIELD outRef.pd:arg0 AS oRef;		 
+				
+		SET oRef.pd:RatingValue				= inRef.*:ratingValue;		
+		SET oRef.pd:RatingId  				= inRef.*:ratingId;
+		SET oRef.pd:Model    			    = inRef.*:model;
+		SET oRef.pd:ModelIntegrationId      = inRef.*:modelIntegrationId;
+				
+		DECLARE rRef REFERENCE TO oRef;
+		DECLARE iRef REFERENCE TO inRef.*:requestor;
+		
+		CREATE FIELD oRef.pd:Requestor AS rRef;
+		
+		SET rRef.pd:Login 					= iRef.*:login;	 			   	 
+		SET rRef.pd:LastName				= iRef.*:lastName; 
+		SET rRef.pd:FirstName				= iRef.*:firstName;
+		SET rRef.pd:MiddleName				= iRef.*:middleName; 
+		SET rRef.pd:Division				= iRef.*:division; 
+		SET rRef.pd:DivisionCode			= iRef.*:divisionCode; 
+		SET rRef.pd:JobTitle				= iRef.*:jobTitle;
+		SET rRef.pd:Role					= iRef.*:role; 
+		 
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_RAT2;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout2;
+		SET Environment.UserProperties.SPName = 'BPM_NCP';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_Convert2SOAP_correctRatingRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:Envelope.*:Body.*:correctRatingRq.*:arg0;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE pd NAME 'correct';
+				
+		SET OutputRoot.XMLNSC.pd:correct.(XMLNSC.NamespaceDecl)xmlns:ser = pd;		
+		SET OutputRoot.XMLNSC.pd:correct.(XMLNSC.NamespaceDecl)xmlns:xsi = ser1;
+		
+		DECLARE oRef REFERENCE TO outRef;
+						
+		CREATE FIELD outRef.pd:arg0 AS oRef;		 
+				
+		SET oRef.pd:RatingId  				= inRef.*:ratingId;
+		SET oRef.pd:Model    			    = inRef.*:model;
+		SET oRef.pd:ModelIntegrationId      = inRef.*:modelIntegrationId;
+		SET oRef.pd:CorrectValue			= inRef.*:correctValue;
+		SET oRef.pd:Comments				= inRef.*:comments;
+		SET oRef.pd:Status					= funStatusRaiting(inRef.*:status);
+		SET oRef.pd:AdjustmentReason		= inRef.*:adjustmentReason;
+		
+		DECLARE rRef REFERENCE TO oRef;
+		DECLARE iRef REFERENCE TO inRef.*:requestor;
+		
+		CREATE FIELD oRef.pd:Requestor AS rRef;
+		
+		SET rRef.pd:Login 					= iRef.*:login;	 			   	 
+		SET rRef.pd:LastName				= iRef.*:lastName; 
+		SET rRef.pd:FirstName				= iRef.*:firstName;
+		SET rRef.pd:MiddleName				= iRef.*:middleName; 
+		SET rRef.pd:Division				= iRef.*:division; 
+		SET rRef.pd:DivisionCode			= iRef.*:divisionCode; 
+		SET rRef.pd:JobTitle				= iRef.*:jobTitle;
+		SET rRef.pd:Role					= funSprRole(iRef.*:role); 
+		 
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_RAT2;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout2;
+		SET Environment.UserProperties.SPName = 'BPM_NCP';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_Convert2SOAP_calculateLGDRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN				
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:Envelope.*:Body.*:calculateLGDRq;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE space NAME 'calculationRequest';
+		
+		SET OutputRoot.XMLNSC.space:calculationRequest.(XMLNSC.NamespaceDecl)xmlns = space1;		
+		SET OutputRoot.XMLNSC.space:calculationRequest.(XMLNSC.NamespaceDecl)xmlns:ns2 = space;
+		
+		SET outRef.space:ProductType = inRef.*:productType; 
+		SET outRef.space:Product     = inRef.*:product;
+		SET outRef.space:AgrNum	     = inRef.*:agrNum;
+		SET outRef.space:AgrDate     = CAST(CAST(FIELDVALUE(inRef.*:agrDate) AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'dd.MM.yyyy');
+--		SET outRef.space:LGDType     = inRef.*:lgdType;	
+		SET outRef.space:LGDType     = funLGDType(inRef.*:lgdType);	
+		SET outRef.space:CRMId       = inRef.*:crmId;
+		SET outRef.space:Comment     = inRef.*:comment;
+		SET outRef.space:Debt		 = CAST(CAST(inRef.*:debt AS DECIMAL) AS CHARACTER FORMAT '##############0.0#:groupsep=.:decsep=,');		
+		SET outRef.space:Rate        = REPLACE(inRef.*:rate,'.',',');
+		SET outRef.space:LoanMode    = inRef.*:loanMode;
+		SET outRef.space:LoanSum	 = CAST(CAST(inRef.*:loanSum AS DECIMAL) AS CHARACTER FORMAT '##############0.0#:groupsep=.:decsep=,');
+		SET outRef.space:AgrEndDate  = CAST(CAST(FIELDVALUE(inRef.*:agrEndDate) AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'dd.MM.yyyy');
+		SET outRef.space:Rating	   	 = inRef.*:rating;
+		SET outRef.space:Limit	     = CAST(CAST(inRef.*:limit AS DECIMAL) AS CHARACTER FORMAT '##############0.0#:groupsep=.:decsep=,');
+		SET outRef.space:Model       = inRef.*:model;
+		
+		SET outRef.space:UnutilizedLimit 		= REPLACE(inRef.*:unutilizedLimit, '.', ',');
+		SET outRef.space:AgreementNum    		= inRef.*:agreementNum;
+		
+		SET outRef.space:Account.space:INN	 	= inRef.*:account.*:inn;
+		SET outRef.space:Account.space:Name 	= inRef.*:account.*:name;
+		SET outRef.space:User.space:FIO 		= inRef.*:user.*:fio;
+		SET outRef.space:User.space:Position 	= inRef.*:user.*:position;
+		SET outRef.space:User.space:TDivision 	= inRef.*:user.*:tDivision;
+		SET outRef.space:User.space:FDivision 	= inRef.*:user.*:fDivision;
+		
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER CARDINALITY(inRef.*:listOfCollateral.*[]); 
+		
+		WHILE I <= J DO
+			DECLARE L INTEGER CARDINALITY(inRef.*:listOfCollateral.*:collateral[I].*[]);
+			DECLARE K INTEGER 1;
+			---/*
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:CRMId = inRef.*:listOfCollateral.*:collateral[I].*:crmId;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:CollType = inRef.*:listOfCollateral.*:collateral[I].*:collType;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:AssessType = inRef.*:listOfCollateral.*:collateral[I].*:assessType;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:AssessSource = inRef.*:listOfCollateral.*:collateral[I].*:assessSource;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:Assessment = CAST(CAST(inRef.*:listOfCollateral.*:collateral[I].*:assessment AS DECIMAL) AS CHARACTER FORMAT '##############0.0#:groupsep=.:decsep=,');
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:BusinessValue = inRef.*:listOfCollateral.*:collateral[I].*:businessValue;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:ExpertRate    = inRef.*:listOfCollateral.*:collateral[I].*:expertRate;
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:PortfSize	  = inRef.*:listOfCollateral.*:collateral[I].*:portfSize;	
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:AssessmentDate = CAST(CAST(FIELDVALUE(inRef.*:listOfCollateral.*:collateral[I].*:assessmentDate) AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'dd.MM.yyyy');	  			
+			SET outRef.space:ListOfCollateral.space:Collateral[I].space:PDRate         = inRef.*:listOfCollateral.*:collateral[I].*:pdrate; 
+			---*/
+			/*
+			WHILE K <= L DO
+				
+				SET outRef.space:ListOfCollateral.space:Collateral[I].space:*[K] = inRef.*:listOfCollateral.*:collateral[I].*[K];
+			
+				SET K = K + 1;
+							
+			END WHILE;
+			*/			
+			SET I = I + 1;
+			
+		END WHILE;
+		
+		SET outRef.space:User.space:FDivision 	= inRef.*:user.*:fDivision;
+					
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_LGD2;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout2;
+		SET Environment.UserProperties.SPName = 'BPM_NCP';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_Convert2SOAP_finalizeLGDRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:Envelope.*:Body.*:finalizeLGDRq;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<]; 
+				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE space NAME 'finalizationRequest';
+				
+		SET OutputRoot.XMLNSC.space:finalizationRequest.(XMLNSC.NamespaceDecl)xmlns:ser = space;		
+		SET OutputRoot.XMLNSC.space:finalizationRequest.(XMLNSC.NamespaceDecl)xmlns:xsi = ser1;
+		
+		SET outRef.space:FIO      	= inRef.*:fio;	
+		SET outRef.space:Position 	= inRef.*:position;
+		SET outRef.space:CRMId    	= inRef.*:crmId;
+		SET outRef.space:Type     	= funFinLGDType(inRef.*:type);	 
+		 
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_LGD2;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout2;
+		SET Environment.UserProperties.SPName = 'BPM_NCP';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_Convert2SOAP_calculateDCRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);		
+		
+		DECLARE NS_FPSU_MRK CONSTANT CHARACTER 'http://service.mrk.sberbank.luxoft.com/';
+		DECLARE space NAMESPACE NS_FPSU_MRK;
+		
+		DECLARE NS_FPSU_SER1 CONSTANT CHARACTER 'http://www.w3.org/2001/XMLSchema-instance';
+		DECLARE ser1 NAMESPACE NS_FPSU_SER1;
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:Envelope.*:Body.*:calculateDCRq;
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<]; 
+				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE space NAME 'markerRequest';
+				
+		SET OutputRoot.XMLNSC.space:markerRequest.(XMLNSC.NamespaceDecl)xmlns:ser = space;		
+		SET OutputRoot.XMLNSC.space:markerRequest.(XMLNSC.NamespaceDecl)xmlns:xsi = ser1;
+
+		SET outRef.space:CRMIdOpportunity      				= 'KZ_' || inRef.*:crmId;	
+		SET outRef.space:RateCounter         				= inRef.*:rating;	
+---		SET outRef.space:TypeFO 							= inRef.*:finReportType;
+		SET outRef.space:TypeFO 							= inRef.*:finReportType;--fun_finReportType(inRef.*:finReportType);
+		SET outRef.space:Model    							= 'MRK_DB';--inRef.*:model;
+		SET outRef.space:TypeMarkerCount					= inRef.*:rmkType;
+		
+		SET outRef.space:NonCurrentAssetsRSBY				= inRef.*:nonCurrentAssetsNFRS;
+		SET outRef.space:CurrentAssetsRSBY					= inRef.*:currentAssetsNFRS;			
+		SET outRef.space:NonCurrentAssetsIFRS				= inRef.*:nonCurrentAssetsIFRS;
+		SET outRef.space:CurrentAssetsIFRS					= inRef.*:currentAssetsIFRS;
+		SET outRef.space:LongTermDebtRSBY					= inRef.*:longTermDebtNFRS;
+		SET outRef.space:ShortTermDebtRSBY					= inRef.*:shortTermDebtNFRS;
+		SET outRef.space:LongTermDebtIFRS					= inRef.*:longTermDebtNFRS;
+		SET outRef.space:ShortTermDebtIFRS					= inRef.*:shortTermDebtNFRS;
+		SET outRef.space:EBITDARSBY							= inRef.*:ebitdaNFRS;
+		SET outRef.space:NumQuarterRSBY						= inRef.*:quarterNumNFRS;
+		SET outRef.space:EBITDAIFRS							= inRef.*:ebitdaIFRS;
+		SET outRef.space:NumQuarterIFRS						= inRef.*:quarterNumIFRS;
+		
+		SET outRef.space:CurrencyCode    					= inRef.*:currencyCode;
+		SET outRef.space:CurrencyCodeForFO    				= inRef.*:currencyCodeForFinReport;
+		SET outRef.space:CurrencyCourse    					= inRef.*:currencyRate;
+		SET outRef.space:CurrencyFutureCourse    			= inRef.*:futureCurrencyRate;
+		SET outRef.space:CurrentExchangeRate    			= inRef.*:currentCurrencyRate;
+/*
+		SET outRef.space:Purpose							= inRef.*:
+		SET outRef.space:Year								= inRef.*:
+		SET outRef.space:GovDebt							= inRef.*:
+		SET outRef.space:CreditGovDebt						= inRef.*:
+		SET outRef.space:Credit								= inRef.*:
+		SET outRef.space:Liabilities						= inRef.*:
+		SET outRef.space:Liabilities_Next					= inRef.*:
+		SET outRef.space:Income								= inRef.*:
+		SET outRef.space:Income_Next						= inRef.*:
+		SET outRef.space:PlannedCredit						= inRef.*:
+		SET outRef.space:PlannedCredit_Next					= inRef.*:
+		SET outRef.space:Account							= inRef.*:
+		*/
+		SET outRef.space:Account.space:INN    				= '1000000000'; 
+		SET outRef.space:Account.space:Name    		  		= inRef.*:account.*:name;
+		SET outRef.space:Account.space:SBRFPriority    		= inRef.*:account.*:sbrfPriority;
+--		SET outRef.space:Account.space:SBRFIndustry    		= inRef.*:accountList.*:sbrfIndustry;
+		SET outRef.space:Account.space:SBRFIndustry    		= COALESCE(funsbrfIndustry(inRef.*:account.*:sbrfIndustry), 'Прочее');
+		 
+		SET outRef.space:User.space:FIO			= inRef.*:user.*:fio;
+		SET outRef.space:User.space:Position	= inRef.*:user.*:position;
+		SET outRef.space:User.space:TDivision	= 'KZ_' || inRef.*:user.*:tDivision;
+		SET outRef.space:User.space:FDivision	= 'KZ_' || inRef.*:user.*:fDivision;
+		
+		FOR inacclist AS inRef.*:accountList.*:account[] DO
+			DECLARE newacc REFERENCE TO outRef;
+			CREATE LASTCHILD OF outRef AS newacc NAMESPACE space NAME 'AccountList';		
+		SET newacc.space:INN    				= inRef.*:accountList.*:account.*:inn;
+		SET newacc.space:Name    		  		= inRef.*:accountList.*:account.*:name;
+		SET newacc.space:SBRFPriority    		= inRef.*:accountList.*:account.*:sbrfPriority;
+--		SET outRef.space:Account.space:SBRFIndustry    		= inRef.*:accountList.*:sbrfIndustry;
+		SET newacc.space:SBRFIndustry    		= COALESCE(funsbrfIndustry(inRef.*:accountList.*:account.*:sbrfIndustry), 'Прочее');
+		END FOR;
+		
+		-- Установка параметров для SoapRequest
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl_MRK2;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout2;
+		SET Environment.UserProperties.SPName = 'BPM_NCP';
+		RETURN TRUE; 
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN		
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+	
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		CALL SetMQReplyDestination(Environment.UserProperties.Source, OutputLocalEnvironment);
+		
+		SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_DetectResponseOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		DECLARE labelName CHARACTER;
+			CASE Operation 
+			WHEN 'calculationResponse' THEN
+				SET labelName = 'calculationResponse2';
+			WHEN 'finalizationResponse' THEN
+				SET labelName = 'finalizationResponse2';
+			WHEN 'confirmResponse' THEN
+				SET labelName = 'confirmResponse2';
+			WHEN 'correctResponse' THEN
+				SET labelName = 'correctResponse2';
+			WHEN 'calculateResponse' THEN
+				SET labelName = 'calculateResponse2';
+			WHEN 'StructResponse' THEN
+				SET labelName = 'StructResponse2';				
+			WHEN 'markerResponse' THEN
+				SET labelName = 'markerResponse2';
+				ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in SOAPRequestForFPSU', Operation);
+		END CASE;	
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_ConvertFPSU2MDO_calculateResponse2
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:calculateResponse.return;
+		DECLARE crrs NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/CalculateRatingRs/1.00/';
+--		DECLARE crrs NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/CalculateRatingRs/';
+		--DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+
+--		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/';
+		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/esb/envelope/';
+		
+		DECLARE origRef REFERENCE TO Environment.UserProperties.Source.Body.*:*[<];
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'Envelope';		
+		SET OutputRoot.XMLNSC.tns:Envelope.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+		--SET OutputRoot.XMLNSC.tns:Envelope.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;		
+		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef NAMESPACE tns NAME 'Header';
+		--SET OutputRoot.XMLNSC.*:Envelope.tns:Header.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';
+	 	SET oRef.tns:"message-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"message-id");
+	 	
+		DECLARE request_time CHARACTER;
+        SET request_time = SUBSTRING(FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"request-time") FROM 1 FOR 19);
+	 	
+--	 	SET oRef.tns:"request-time" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"request-time");
+	 	SET oRef.tns:"request-time" = request_time || 'Z';
+	 	
+	 	/*
+	 	SET oRef.tns:"correlation-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"correlation-id");
+	 	SET oRef.tns:"eis-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"eis-name");
+	 	SET oRef.tns:"system-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"system-id");
+	 	*/
+	 	SET oRef.tns:"operation-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"operation-name");
+	 	/*
+	 	SET oRef.tns:"operation-version" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"operation-version");
+	 	SET oRef.tns:"user-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"user-id");
+	 	SET oRef.tns:"user-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"user-name");
+	 	*/
+		DECLARE oRef1 REFERENCE TO oRef;
+		
+		DECLARE tns2 NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef1 NAMESPACE tns NAME 'Body';
+		--SET oRef1.(XMLNSC.NamespaceDecl)xmlns:cr = 'http://sbrf.ru/NCP/CRM/';
+	  	
+	  	DECLARE CalcOREF REFERENCE TO oRef1;
+	  	CREATE LASTCHILD OF oRef1 AS CalcOREF NAMESPACE tns2 NAME 'calculateRatingRs';	
+	  	SET oRef1.tns2:calculateRatingRs.(XMLNSC.NamespaceDecl)xmlns:tns = tns2;
+	  	SET oRef1.tns2:calculateRatingRs.(XMLNSC.NamespaceDecl)xmlns:crrs = crrs;
+	  	--SET oRef1.tns2:calculateRatingRs.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+	  	
+	  	DECLARE ret REFERENCE TO CalcOREF;
+	  	CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateRatingRs AS ret NAMESPACE crrs NAME 'return';	
+		SET ret.crrs:errorCode        			= inRef.*:ErrorCode;		
+		SET ret.crrs:errorMessage     			= inRef.*:ErrorMessage;
+		
+		IF inRef.*:ErrorCode = 0 THEN
+			IF EXISTS(inRef.*:ListOfResultRating[]) THEN
+			DECLARE lorr REFERENCE TO ret;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateRatingRs.*:return AS lorr NAMESPACE crrs NAME 'listOfResultRating';
+			FOR inresrating AS inRef.*:ListOfResultRating.*:ResultRating[] DO
+				DECLARE rr REFERENCE TO lorr;
+				CREATE LASTCHILD OF lorr AS rr NAMESPACE crrs NAME 'resultRating';
+				SET rr.crrs:isPrimary 	= funIsPrimary(inresrating.*:IsPrimary);
+				SET rr.crrs:name 		= inresrating.*:Name;	
+				SET rr.crrs:value 		= inresrating.*:Value;
+				SET rr.crrs:type 		= inresrating.*:Type;
+			END FOR;
+			END IF;
+			
+			IF EXISTS(inRef.*:ListOfCalculatedFactor[]) THEN
+			DECLARE locf REFERENCE TO ret;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateRatingRs.*:return AS locf NAMESPACE crrs NAME 'listOfCalculatedFactor';
+			FOR incalcfact AS inRef.*:ListOfResultRating.*:CalculatedFactor[] DO
+				DECLARE cf REFERENCE TO locf;
+				CREATE LASTCHILD OF locf AS cf NAMESPACE crrs NAME 'calculatedFactor';
+				SET cf.crrs:code 		= incalcfact.*:Code;
+				SET cf.crrs:name 		= incalcfact.*:Name;	
+				SET cf.crrs:value 		= incalcfact.*:Value;
+			END FOR;
+			END IF;
+			
+			IF EXISTS(inRef.*:ListOfAddParameter[]) THEN
+			DECLARE loap REFERENCE TO ret;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateRatingRs.*:return AS loap NAMESPACE crrs NAME 'listOfAddParameter';
+			FOR inaddpar AS inRef.*:ListOfResultRating.*:AddParameter[] DO
+				DECLARE ap REFERENCE TO loap;
+				CREATE LASTCHILD OF loap AS ap NAMESPACE crrs NAME 'addParameter';
+				SET ap.crrs:order 		= inaddpar.*:Order;
+				SET ap.crrs:name 		= inaddpar.*:Name;	
+				SET ap.crrs:value 		= inaddpar.*:Value;	
+			END FOR;
+			END IF;
+
+			/*
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER CARDINALITY(inRef.ListOfResultRating.*[]);
+									
+		WHILE I <= J DO
+		
+			--SET ret.crrs:listOfResultRating.crrs:*[I] = inRef.ListOfResultRating.*[I]; 
+			SET ret.crrs:listOfResultRating.crrs:*[I].crrs:isPrimary = inRef.ListOfResultRating.*[I].IsPrimary; 
+			SET ret.crrs:listOfResultRating.crrs:*[I].crrs:name		 = inRef.ListOfResultRating.*[I].Name; 
+			SET ret.crrs:listOfResultRating.crrs:*[I].crrs:value	 = inRef.ListOfResultRating.*[I].Value; 
+			SET ret.crrs:listOfResultRating.crrs:*[I].crrs:type		 = inRef.ListOfResultRating.*[I].Type; 
+			SET I = I + 1;
+		
+		END WHILE;	 							
+		
+		DECLARE K INTEGER 1;
+		DECLARE L INTEGER CARDINALITY(inRef.ListOfCalculatedFactor.*[]);
+				 					
+		WHILE K <= L DO
+		
+			--SET ret.crrs:listOfCalculatedFactor.crrs:*[K] = inRef.ListOfCalculatedFactor.*[K]; 
+			SET ret.crrs:listOfCalculatedFactor.crrs:*[K].crrs:code = inRef.ListOfCalculatedFactor.*[K].Code; 
+			SET ret.crrs:listOfCalculatedFactor.crrs:*[K].crrs:name = inRef.ListOfCalculatedFactor.*[K].Name; 
+			SET ret.crrs:listOfCalculatedFactor.crrs:*[K].crrs:value = inRef.ListOfCalculatedFactor.*[K].Value; 
+			SET K = K + 1;
+			
+		END WHILE;
+		 
+		DECLARE E INTEGER 1;
+		DECLARE R INTEGER CARDINALITY(inRef.ListOfAddParameter.*[]);
+				 					
+		WHILE E <= R DO
+		
+			--SET ret.crrs:listOfAddParameter.crrs:*[E] = inRef.ListOfAddParameter.*[E]; 
+			SET ret.crrs:listOfAddParameter.crrs:*[E].crrs:order = inRef.ListOfAddParameter.*[E].Order; 
+			SET ret.crrs:listOfAddParameter.crrs:*[E].crrs:name = inRef.ListOfAddParameter.*[E].Name; 
+			SET ret.crrs:listOfAddParameter.crrs:*[E].crrs:value = inRef.ListOfAddParameter.*[E].Value; 
+			SET E = E + 1;
+			
+		END WHILE;
+		ELSE
+			DECLARE lorr REFERENCE TO ret;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateRatingRs.*:return AS lorr NAMESPACE crrs NAME 'listOfResultRating';
+			DECLARE rr REFERENCE TO lorr;
+			CREATE LASTCHILD OF lorr AS rr NAMESPACE crrs NAME 'resultRating';
+			SET rr.crrs:isPrimary 	= true;
+			SET rr.crrs:name 		= ' ';	
+			SET rr.crrs:value 		= 0;
+			SET rr.crrs:type 		= ' ';
+			CREATE LASTCHILD OF lorr AS rr NAMESPACE crrs NAME 'resultRating';
+			SET rr.crrs:isPrimary 	= true;
+			SET rr.crrs:name 		= ' ';	
+			SET rr.crrs:value 		= 0;
+			SET rr.crrs:type 		= ' ';
+			CREATE LASTCHILD OF lorr AS rr NAMESPACE crrs NAME 'resultRating';
+			SET rr.crrs:isPrimary 	= true;
+			SET rr.crrs:name 		= ' ';	
+			SET rr.crrs:value 		= 0;
+			SET rr.crrs:type 		= ' ';
+				
+			DECLARE locf REFERENCE TO ret;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateRatingRs.*:return AS locf NAMESPACE crrs NAME 'listOfCalculatedFactor';
+			DECLARE cf REFERENCE TO locf;
+			CREATE LASTCHILD OF locf AS cf NAMESPACE crrs NAME 'calculatedFactor';
+			SET cf.crrs:code 		= ' ';
+			SET cf.crrs:name 		= ' ';	
+			SET cf.crrs:value 		= ' ';
+			CREATE LASTCHILD OF locf AS cf NAMESPACE crrs NAME 'calculatedFactor';
+			SET cf.crrs:code 		= ' ';
+			SET cf.crrs:name 		= ' ';	
+			SET cf.crrs:value 		= ' ';			
+			CREATE LASTCHILD OF locf AS cf NAMESPACE crrs NAME 'calculatedFactor';
+			SET cf.crrs:code 		= ' ';
+			SET cf.crrs:name 		= ' ';	
+			SET cf.crrs:value 		= ' ';
+			
+			DECLARE loap REFERENCE TO ret;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateRatingRs.*:return AS loap NAMESPACE crrs NAME 'listOfAddParameter';
+			DECLARE ap REFERENCE TO loap;
+			CREATE LASTCHILD OF loap AS ap NAMESPACE crrs NAME 'addParameter';
+			SET ap.crrs:order 		= 1;
+			SET ap.crrs:name 		= ' ';	
+			SET ap.crrs:value 		= ' ';		
+			CREATE LASTCHILD OF loap AS ap NAMESPACE crrs NAME 'addParameter';
+			SET ap.crrs:order 		= 1;
+			SET ap.crrs:name 		= ' ';	
+			SET ap.crrs:value 		= ' ';	
+			CREATE LASTCHILD OF loap AS ap NAMESPACE crrs NAME 'addParameter';
+			SET ap.crrs:order 		= 1;
+			SET ap.crrs:name 		= ' ';	
+			SET ap.crrs:value 		= ' ';		
+				*/			
+		END IF;	 							
+									
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_ConvertFPSU2MDO_ConfirmResponse2
+  	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:confirmResponse.return;
+		DECLARE conrs NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/ConfirmRatingRs/1.00/';
+--		DECLARE conrs NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/ConfirmRatingRs/';
+		--DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+
+--		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/';
+		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/esb/envelope/';
+		
+		DECLARE origRef REFERENCE TO Environment.UserProperties.Source.Body.*:*[<];
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'Envelope';
+		
+		SET OutputRoot.XMLNSC.tns:Envelope.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+		--SET OutputRoot.XMLNSC.tns:Envelope.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;	
+			
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef NAMESPACE tns NAME 'Header';
+		--SET OutputRoot.XMLNSC.*:Envelope.tns:Header.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';
+	 	SET oRef.tns:"message-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"message-id");
+	 	SET oRef.tns:"request-time" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"request-time");
+	 	SET oRef.tns:"correlation-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"correlation-id");
+	 	SET oRef.tns:"eis-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"eis-name");
+	 	SET oRef.tns:"system-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"system-id");
+	 	SET oRef.tns:"operation-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"operation-name");
+	 	SET oRef.tns:"operation-version" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"operation-version");
+	 	SET oRef.tns:"user-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"user-id");
+	 	SET oRef.tns:"user-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"user-name");
+	 	
+		DECLARE oRef1 REFERENCE TO oRef;
+		
+		DECLARE tns2 NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef1 NAMESPACE tns NAME 'Body';
+		--SET oRef1.(XMLNSC.NamespaceDecl)xmlns:crm = 'http://sbrf.ru/NCP/CRM/';
+	  	
+	  	DECLARE CalcOREF REFERENCE TO oRef1;
+	  	CREATE LASTCHILD OF oRef1 AS CalcOREF NAMESPACE tns2 NAME 'confirmRatingRs';	
+	  	SET oRef1.tns2:confirmRatingRs.(XMLNSC.NamespaceDecl)xmlns:tns = tns2;
+	  	SET oRef1.tns2:confirmRatingRs.(XMLNSC.NamespaceDecl)xmlns:conrs = conrs;
+	  	--SET oRef1.tns2:confirmRatingRs.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+	  	
+	  	DECLARE ret REFERENCE TO CalcOREF;
+	  	CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:confirmRatingRs AS ret NAMESPACE conrs NAME 'return';	
+		SET ret.conrs:errorCode        			= inRef.*:ErrorCode;		
+		SET ret.conrs:errorMessage     			= inRef.*:ErrorMessage;
+		SET ret.conrs:defaultProbability     	= REPLACE(inRef.*:DefaultProbability, ',','.');
+
+		IF EXISTS(inRef.listOfAddParameter[]) THEN
+			DECLARE loap REFERENCE TO ret;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:confirmRatingRs.*:return AS loap NAMESPACE conrs NAME 'listOfAddParameter';
+			FOR inaddpar AS inRef.*:ListOfAddParameter.*:AddParameter[] DO
+				DECLARE ap REFERENCE TO loap;
+				CREATE LASTCHILD OF loap AS ap NAMESPACE conrs NAME 'addParameter';
+				SET ap.conrs:order 		= inaddpar.*:Order;
+				SET ap.conrs:name 		= inaddpar.*:Name;	
+				SET ap.conrs:value 		= inaddpar.*:Value;	
+			END FOR;
+		END IF;
+		--ELSE
+			/*
+			DECLARE loap REFERENCE TO ret;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:confirmRatingRs.*:return AS loap NAMESPACE conrs NAME 'listOfAddParameter';
+
+			DECLARE ap REFERENCE TO loap;
+			CREATE LASTCHILD OF loap AS ap NAMESPACE conrs NAME 'addParameter';
+			SET ap.conrs:order 		= '';
+			SET ap.conrs:name 		= '';	
+			SET ap.conrs:value 		= '';			
+		END IF;	*/
+		/*
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER CARDINALITY(inRef.listOfAddParameter.*[]);
+									
+		WHILE I <= J DO
+		
+			SET ret.conrs:addParameter.*[I] = inRef.addParameter.*[I]; 
+		
+			SET I = I + 1;
+		
+		END WHILE;	 									
+		*/
+		/*
+			IF EXISTS(inRef.ListOfAddParameter[]) THEN
+			DECLARE loap REFERENCE TO ret;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateRatingRs.*:return AS loap NAMESPACE conrso NAME 'listOfAddParameter';
+			FOR inaddpar AS inRef.ListOfResultRating.AddParameter[] DO
+				DECLARE ap REFERENCE TO loap;
+				CREATE LASTCHILD OF loap AS ap NAMESPACE crrs NAME 'addParameter';
+				SET ap.crrs:order 		= inaddpar.Order;
+				SET ap.crrs:name 		= inaddpar.Name;	
+				SET ap.crrs:value 		= inaddpar.Value;	
+			END FOR;
+			END IF;								
+						*/			
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_ConvertFPSU2MDO_CorrectResponse2
+   	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:correctResponse.return;
+		DECLARE corrs NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/CorrectRatingRs/1.00/';
+---		DECLARE corrs NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/CorrectRatingRs/';
+	--	DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+
+--		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/';
+		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/esb/envelope/';
+		
+		DECLARE origRef REFERENCE TO Environment.UserProperties.Source.Body.*:*[<];
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'Envelope';
+		
+		SET OutputRoot.XMLNSC.tns:Envelope.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+		--SET OutputRoot.XMLNSC.tns:Envelope.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef NAMESPACE tns NAME 'Header';
+		--SET OutputRoot.XMLNSC.*:Envelope.tns:Header.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';
+	 	SET oRef.tns:"message-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"message-id");
+	 	SET oRef.tns:"request-time" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"request-time");
+	 	SET oRef.tns:"correlation-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"correlation-id");
+	 	SET oRef.tns:"eis-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"eis-name");
+	 	SET oRef.tns:"system-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"system-id");
+	 	SET oRef.tns:"operation-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"operation-name");
+	 	SET oRef.tns:"operation-version" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"operation-version");
+	 	SET oRef.tns:"user-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"user-id");
+	 	SET oRef.tns:"user-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"user-name");
+	 	
+		DECLARE oRef1 REFERENCE TO oRef;
+
+		DECLARE tns2 NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef1 NAMESPACE tns NAME 'Body';
+		--SET oRef1.(XMLNSC.NamespaceDecl)xmlns:crm = 'http://sbrf.ru/NCP/CRM/';
+	  	
+	  	DECLARE CalcOREF REFERENCE TO oRef1;
+	  	CREATE LASTCHILD OF oRef1 AS CalcOREF NAMESPACE tns2 NAME 'correctRatingRs';	
+	  	SET oRef1.tns2:correctRatingRs.(XMLNSC.NamespaceDecl)xmlns:tns = tns2;
+	  	SET oRef1.tns2:correctRatingRs.(XMLNSC.NamespaceDecl)xmlns:corrs = corrs;
+	  	--SET oRef1.tns2:correctRatingRs.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+	  	
+	  	DECLARE ret REFERENCE TO CalcOREF;
+	  	CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:correctRatingRs AS ret NAMESPACE corrs NAME 'return';	
+		SET ret.corrs:errorCode        			= inRef.*:ErrorCode;		
+		SET ret.corrs:errorMessage     			= inRef.*:ErrorMessage;
+
+		IF EXISTS(inRef.*:listOfAddParameter[]) THEN
+			DECLARE loap REFERENCE TO ret;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:correctRatingRs.*:return AS loap NAMESPACE corrs NAME 'listOfAddParameter';
+			FOR inaddpar AS inRef.*:ListOfAddParameter.*:AddParameter[] DO
+				DECLARE ap REFERENCE TO loap;
+				CREATE LASTCHILD OF loap AS ap NAMESPACE corrs NAME 'addParameter';
+				SET ap.corrs:order 		= inaddpar.*:Order;
+				SET ap.corrs:name 		= inaddpar.*:Name;	
+				SET ap.corrs:value 		= inaddpar.*:Value;	
+			END FOR;
+		END IF;	
+/*
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER CARDINALITY(inRef.listOfAddParameter.*[]);
+									
+		WHILE I <= J DO
+		
+			SET ret.corrs:addParameter.*[I] = inRef.addParameter.*[I]; 
+		
+			SET I = I + 1;
+		
+		END WHILE;	 		
+*/									
+									
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_ConvertFPSU2MDO_CalculationResponse2
+    CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:calculationResponse;
+
+		DECLARE clrs NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/CalculateLGDRs/1.00/';
+--		DECLARE clrs NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/CalculateLGDRs/';
+
+		--DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+
+--		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/';
+		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/esb/envelope/';
+		
+		DECLARE origRef REFERENCE TO Environment.UserProperties.Source.Body.*:*[<];
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'Envelope';		
+		SET OutputRoot.XMLNSC.tns:Envelope.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+		--SET OutputRoot.XMLNSC.tns:Envelope.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;	
+				
+		DECLARE oRef REFERENCE TO outRef;		
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef NAMESPACE tns NAME 'Header';
+		--SET OutputRoot.XMLNSC.*:Envelope.tns:Header.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';
+	 	SET oRef.tns:"message-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"message-id");
+	 	SET oRef.tns:"request-time" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"request-time");
+	 	SET oRef.tns:"correlation-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"correlation-id");
+	 	SET oRef.tns:"eis-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"eis-name");
+	 	SET oRef.tns:"system-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"system-id");
+	 	SET oRef.tns:"operation-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"operation-name");
+	 	SET oRef.tns:"operation-version" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"operation-version");
+	 	SET oRef.tns:"user-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"user-id");
+	 	SET oRef.tns:"user-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"user-name");
+	 	
+		DECLARE oRef1 REFERENCE TO oRef;
+
+		DECLARE tns2 NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef1 NAMESPACE tns NAME 'Body';
+		--SET oRef1.(XMLNSC.NamespaceDecl)xmlns:crm = 'http://sbrf.ru/NCP/CRM/';
+	  	
+	  	DECLARE CalcOREF REFERENCE TO oRef1;
+	  	
+	  	CREATE LASTCHILD OF oRef1 AS CalcOREF NAMESPACE tns2 NAME 'calculateLGDRs';	
+	  	SET oRef1.tns2:calculateLGDRs.(XMLNSC.NamespaceDecl)xmlns:tns = tns2;
+--	  	SET oRef1.tns:calculateLGDRs.(XMLNSC.NamespaceDecl)xmlns:tns = 'http://sbrf.ru/NCP/AMRLIRT/';	  	
+	  	SET oRef1.tns2:calculateLGDRs.(XMLNSC.NamespaceDecl)xmlns:clrs = clrs;
+	  	--SET oRef1.tns:calculateLGDRs.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+	  	 
+	  	--DECLARE ret REFERENCE TO CalcOREF;
+	  	--CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateRatingRs AS ret NAMESPACE b NAME 'return';	
+	  	
+		SET CalcOREF.clrs:errorCode 	= inRef.*:ErrorCode;	
+		SET CalcOREF.clrs:errorMessage = inRef.*:ErrorMessage;	
+		SET CalcOREF.clrs:crmId     	= inRef.*:CRMId;
+
+		DECLARE LGDDate CHARACTER;
+        SET LGDDate = SUBSTRING(inRef.*:LGDDate FROM 1 FOR 10);
+		
+		IF inRef.*:ErrorCode = 0 THEN
+
+			SET CalcOREF.clrs:lgdType	 	= funLGDType2(inRef.*:LGDType); 
+			SET CalcOREF.clrs:lgdDate   	= CAST(CAST(LGDDate AS DATE FORMAT 'dd.MM.yyyy') AS CHARACTER FORMAT 'yyyy-MM-dd');
+			SET CalcOREF.clrs:pd		 	= REPLACE(inRef.*:PD, ',','.');
+			SET CalcOREF.clrs:lgd 			= REPLACE(inRef.*:LGD, ',','.');
+	
+			SET CalcOREF.clrs:ead		 	= REPLACE(inRef.*:EAD, ',','.');
+			SET CalcOREF.clrs:sum		 	= inRef.*:Sum;
+			IF CalcOREF.clrs:sum = '' THEN 
+				SET CalcOREF.clrs:sum		= '0.0';
+			END IF; 
+			SET CalcOREF.clrs:elPercent 	= REPLACE(inRef.*:ELPercent, ',','.');
+			SET CalcOREF.clrs:el		 	= REPLACE(inRef.*:EL, ',','.');
+			SET CalcOREF.clrs:totalValue 	= REPLACE(inRef.*:TotalValue, ',','.');
+			SET CalcOREF.clrs:totalColValueLgd = REPLACE(inRef.*:TotalCollValueLGD, ',','.');
+			SET CalcOREF.clrs:totalColValueEad = REPLACE(inRef.*:TotalCollValueEAD, ',','.');
+		
+
+
+				IF EXISTS(inRef.*:ListOfCollateral.*:Collateral[]) AND LENGTH(inRef.*:ListOfCollateral.*:Collateral.*:CRMId) > 1 THEN
+				DECLARE loc REFERENCE TO CalcOREF;
+				CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateLGDRs AS loc NAMESPACE clrs NAME 'listOfCollateral';
+				FOR incor AS inRef.*:ListOfCollateral.*:Collateral[] DO
+					DECLARE col REFERENCE TO loc;
+					CREATE LASTCHILD OF loc AS col NAMESPACE clrs NAME 'collateral';
+					SET col.clrs:crmId 		= incor.*:CRMId; 
+					SET col.clrs:collType 	= incor.*:CollType;
+					SET col.clrs:returnRate = REPLACE(incor.*:ReturnRate, ',', '.');
+					SET col.clrs:discountRate = REPLACE(incor.*:DiscountRate, ',', '.');
+					SET col.clrs:collValueEad = REPLACE(incor.*:CollValueEAD, ',', '.');
+					SET col.clrs:collValueLgd = REPLACE(incor.*:CollValueLGD, ',', '.');	
+				END FOR;
+			END IF;
+			 
+				IF EXISTS(inRef.*:ListOfAddParameter.*:AddParameter[]) THEN
+					DECLARE loap REFERENCE TO CalcOREF;
+					CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateLGDRs AS loap NAMESPACE clrs NAME 'listOfAddParameter';
+					FOR inaddpar AS inRef.*:ListOfAddParameter.*:AddParameter[] DO
+						DECLARE ap REFERENCE TO loap;
+						CREATE LASTCHILD OF loap AS ap NAMESPACE clrs NAME 'addParameter';
+						SET ap.clrs:order 		= inaddpar.*:Order;
+						SET ap.clrs:name 		= inaddpar.*:Name;	
+						SET ap.clrs:value 		= inaddpar.*:Value;	
+					END FOR;
+				END IF;
+						
+		END IF;							
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_ConvertFPSU2MDO_FinalizationResponse2
+    CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:finalizationResponse;
+		DECLARE flrs NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/FinalizeLGDRs/1.00/';
+--		DECLARE flrs NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/FinalizeLGDRs/';
+		--DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+
+--		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/';
+		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/esb/envelope/';
+
+		DECLARE origRef REFERENCE TO Environment.UserProperties.Source.Body.*:*[<];
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'Envelope';
+		
+		SET OutputRoot.XMLNSC.tns:Envelope.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+		---SET OutputRoot.XMLNSC.tns:Envelope.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef NAMESPACE tns NAME 'Header';
+		--SET OutputRoot.XMLNSC.*:Envelope.tns:Header.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';
+	 	SET oRef.tns:"message-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"message-id");
+	 	SET oRef.tns:"request-time" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"request-time");
+	 	SET oRef.tns:"correlation-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"correlation-id");
+	 	SET oRef.tns:"eis-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"eis-name");
+	 	SET oRef.tns:"system-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"system-id");
+	 	SET oRef.tns:"operation-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"operation-name");
+	 	SET oRef.tns:"operation-version" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"operation-version");
+	 	SET oRef.tns:"user-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"user-id");
+	 	SET oRef.tns:"user-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"user-name");
+	 	
+		DECLARE oRef1 REFERENCE TO oRef;
+
+		DECLARE tns2 NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef1 NAMESPACE tns NAME 'Body';
+		--SET oRef1.(XMLNSC.NamespaceDecl)xmlns:crm = 'http://sbrf.ru/NCP/CRM/';
+	  	
+	  	DECLARE CalcOREF REFERENCE TO oRef1;
+	  	CREATE LASTCHILD OF oRef1 AS CalcOREF NAMESPACE tns2 NAME 'finalizeLGDRs';	
+	  	SET oRef1.tns2:finalizeLGDRs.(XMLNSC.NamespaceDecl)xmlns:tns = tns2;
+	  	SET oRef1.tns2:finalizeLGDRs.(XMLNSC.NamespaceDecl)xmlns:flrs = flrs;	  	
+	  	---SET oRef1.tns2:finalizeLGDRs.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+
+	  	
+	  	--DECLARE ret REFERENCE TO CalcOREF;
+	  	--CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateRatingRs AS ret NAMESPACE b NAME 'return';	
+	  	 
+		SET CalcOREF.flrs:errorCode 		= inRef.*:ErrorCode;	
+		SET CalcOREF.flrs:errorMessage	 	= inRef.*:ErrorMessage;	
+		SET CalcOREF.flrs:crmId    			= inRef.*:CRMId;
+		SET CalcOREF.flrs:type	 			= inRef.*:Type;
+		
+		IF EXISTS(inRef.*:listOfAddParameter[]) THEN
+			DECLARE loap REFERENCE TO CalcOREF;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateLGDRs AS loap NAMESPACE flrs NAME 'listOfAddParameter';
+			FOR inaddpar AS inRef.*:ListOfAddParameter.*:AddParameter[] DO
+				DECLARE ap REFERENCE TO loap;
+				CREATE LASTCHILD OF loap AS ap NAMESPACE flrs NAME 'addParameter';
+				SET ap.flrs:order 		= inaddpar.*:Order;
+				SET ap.flrs:name 		= inaddpar.*:Name;	
+				SET ap.flrs:value 		= inaddpar.*:Value;	
+			END FOR;
+		END IF;
+									
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestForAMRLIRT_ConvertFPSU2MDO_markerResponse2
+    CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:markerResponse;
+		DECLARE cdcrs NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/CalculateDCRs/1.00/';
+		--DECLARE cdcrs NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/CalculateDCRs/';
+--		DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';
+
+--		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/';
+		DECLARE tns NAMESPACE 'http://sbrf.ru/NCP/esb/envelope/';
+		
+		DECLARE origRef REFERENCE TO Environment.UserProperties.Source.Body.*:*[<];
+		CALL FillMDOStandardElementsRs(outRef, Environment.UserProperties.Source.Body.*:*[<], OutputLocalEnvironment);		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAMESPACE tns NAME 'Envelope';
+		
+		SET OutputRoot.XMLNSC.tns:Envelope.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+		---SET OutputRoot.XMLNSC.tns:Envelope.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;		
+		DECLARE oRef REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef NAMESPACE tns NAME 'Header';
+		--SET OutputRoot.XMLNSC.*:Envelope.tns:Header.(XMLNSC.NamespaceDecl)xmlns:ns1 = 'http://sbrf.ru/NCP/esb/envelope/';
+	 	SET oRef.tns:"message-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"message-id");
+	 	SET oRef.tns:"request-time" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"request-time");
+	 	SET oRef.tns:"correlation-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"correlation-id");
+	 	SET oRef.tns:"eis-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"eis-name");
+	 	SET oRef.tns:"system-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"system-id");
+	 	SET oRef.tns:"operation-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"operation-name");
+	 	SET oRef.tns:"operation-version" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"operation-version");
+	 	SET oRef.tns:"user-id" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"user-id");
+	 	SET oRef.tns:"user-name" = FIELDVALUE(Environment.UserProperties.Source.Body.*:*[<].*:Header.*:"user-name");
+	 	
+		DECLARE oRef1 REFERENCE TO oRef;
+
+		DECLARE tns2 NAMESPACE 'http://sbrf.ru/NCP/AMRLIRT/';
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope AS oRef1 NAMESPACE tns NAME 'Body';
+		--SET oRef1.(XMLNSC.NamespaceDecl)xmlns:crm = 'http://sbrf.ru/NCP/CRM/';
+	  	
+	  	DECLARE CalcOREF REFERENCE TO oRef1;
+	  	CREATE LASTCHILD OF oRef1 AS CalcOREF NAMESPACE tns2 NAME 'calculateDCRs';	
+	  	SET oRef1.tns2:calculateDCRs.(XMLNSC.NamespaceDecl)xmlns:tns = tns2;
+----	  	SET oRef1.tns2:calculateDCRs.(XMLNSC.NamespaceDecl)xmlns:cdcrs = 'http://sbrf.ru/NCP/AMRLIRT/CalculateDCRs/';
+	  	SET oRef1.tns2:calculateDCRs.(XMLNSC.NamespaceDecl)xmlns:cdcrs = cdcrs;
+	  	---SET oRef1.tns2:calculateDCRs.(XMLNSC.NamespaceDecl)xmlns:xsi = xsi;
+	  	
+	  	--DECLARE ret REFERENCE TO CalcOREF;
+	  	--CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateRatingRs AS ret NAMESPACE b NAME 'return';	
+	  	
+		SET CalcOREF.cdcrs:errorCode        = inRef.*:ErrorCode;		
+		SET CalcOREF.cdcrs:errorMessage     = inRef.*:ErrorMessage;
+		SET CalcOREF.cdcrs:crmId			= inRef.*:CRMIdOpportunity;
+		
+		IF inRef.*:ErrorCode = 0 THEN
+			SET CalcOREF.cdcrs:rmk							= inRef.*:MarkerCreditVol;		
+			SET CalcOREF.cdcrs:debtCapacity					= SUBSTRING(inRef.*:FreeCreditVol BEFORE ',');
+			SET CalcOREF.cdcrs:rmkInDealCurrency			= inRef.*:CurrencyMarkerCreditVol; 
+			SET CalcOREF.cdcrs:debtCapacityInDealCurrency	= inRef.*:CurrencyFreeCreditVol;
+			SET CalcOREF.cdcrs:rmkForNextYear				= inRef.*:MarkerCreditVol_Next;
+			SET CalcOREF.cdcrs:debtCapacityForNextYear		= inRef.*:FreeCreditVol_Next;
+
+			DECLARE loap REFERENCE TO CalcOREF;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*:Envelope.*:Body.*:calculateDCRs AS loap NAMESPACE cdcrs NAME 'listOfAddParameter';
+			FOR inAddParameter AS inRef.*:ListOfAddParameter.*:AddParameter[] DO
+				DECLARE ap REFERENCE TO loap;
+				CREATE LASTCHILD OF loap AS ap NAMESPACE cdcrs NAME 'addParameter';
+				SET ap.cdcrs:order 		= inAddParameter.*:Order; 
+				SET ap.cdcrs:name 		= inAddParameter.*:Name;	
+				SET ap.cdcrs:value 		= inAddParameter.*:Value;	
+			END FOR;
+
+			/*			
+			DECLARE I INTEGER 1;
+			DECLARE J INTEGER CARDINALITY(inRef.*:listOfAddParameter.*[]);
+										
+			WHILE I <= J DO
+			
+				SET CalcOREF.cdcrs:addParameter.*[I] = inRef.addParameter.*[I]; 
+			
+				SET I = I + 1;
+			
+			END WHILE;
+			*/
+
+
+	  	END IF;								
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		 
+		RETURN TRUE;
+	END;
+END MODULE;

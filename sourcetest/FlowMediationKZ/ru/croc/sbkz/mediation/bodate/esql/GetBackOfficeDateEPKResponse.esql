@@ -1,0 +1,124 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.bodate.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+/**
+ * Обработка ответа ЕПК
+ **/
+CREATE COMPUTE MODULE GetBackOfficeDateEPKResponse_ProcessEPKResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		IF NOT EXISTS(OutputRoot.MQMD[]) THEN
+			CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		END IF;
+		SET OutputRoot.MQMD				= InputRoot.ComIbmAggregateReplyBody.ECHO.MQMD;
+		
+		IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE LASTCHILD OF OutputRoot DOMAIN('MQRFH2') NAME 'MQRFH2';
+		END IF;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE inRef REFERENCE TO InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC.*[<];
+		DECLARE personNum INTEGER CARDINALITY(inRef.PersonInfo[]);
+		DECLARE epkRef REFERENCE TO InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC.*[<].PersonInfo;
+		DECLARE docPriority INTEGER NULL;
+		DECLARE docRef REFERENCE TO inRef;
+		DECLARE msgDate DATE CAST(SUBSTRING(FIELDVALUE(inRef.RqTm) FROM 1 FOR 10) AS DATE FORMAT 'yyyy-MM-dd');
+		
+		-- выбор документа из ответа ЕПК
+		FOR idCard AS epkRef.*:IdentityCards.*:IdentityCard[] DO 
+			IF FIELDVALUE(idCard.*:ValidTo) <> '' THEN 
+				DECLARE docDate DATE CAST(FIELDVALUE(idCard.*:ValidTo) AS DATE FORMAT 'yyyy-MM-dd');
+				IF docDate > msgDate THEN
+					DECLARE priority INTEGER NULL;
+					SET priority = getEpkDoctypePriority(FIELDVALUE(idCard.*:IdType));
+					IF docPriority IS NULL OR docPriority < priority THEN
+						MOVE docRef TO idCard;
+						SET docPriority = priority;
+					END IF;
+				END IF;
+			END IF;
+		END FOR;
+				
+		IF personNum = 1 AND docPriority IS NOT NULL THEN
+			CREATE LASTCHILD OF OutputRoot.XMLNSC PARSE (   CAST(Environment.UserProperties.Source.Body AS BLOB CCSID 1208)
+																	CCSID 1208 OPTIONS FolderBitStream + ValidateNone);				
+			DECLARE prtRef REFERENCE TO OutputRoot.XMLNSC.*[<].LoanInfo.Participants;
+			
+			-- объединение блоков PersonInfo
+			FOR participant AS prtRef.Participant[] DO		
+				IF participant.PartType = '1' THEN	
+					SET epkRef.PersonIdExt[] 										= participant.PersonInfo.PersonIdExt[];
+					SET participant.PersonInfo										= epkRef;	
+					DECLARE cardNum INTEGER CARDINALITY(participant.PersonInfo.*:IdentityCards.*:IdentityCard[]);
+					DECLARE index INTEGER 1;
+					WHILE index <= cardNum DO
+						DELETE FIELD participant.PersonInfo.*:IdentityCards.*:IdentityCard[1];	
+						SET index = index + 1;
+					END WHILE;
+					SET participant.PersonInfo.*:IdentityCards.inds:IdentityCard	= docRef;	
+				END IF;
+			END FOR;		
+			
+		 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+			SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:pragma'; 
+		 	
+		 	SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = 'PragmaRequest';		 	
+			
+		ELSE 
+				
+			-- Восстанавливаем идентификатор ответного сообщения 
+			SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+			SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+		
+			CALL SetCommonMQReplyHeaders(OutputRoot);
+			
+			--Адресат ответного сообщения
+			CALL SetMQReplyDestination(Environment.UserProperties.Source, OutputLocalEnvironment);			
+			
+			DECLARE errorCode CHARACTER '';
+			DECLARE errorMessage CHARACTER '';
+			SET errorCode 			= '-1';
+			SET errorMessage 		= 'Неклассифицированная ошибка системы';
+			
+			DECLARE origRef REFERENCE TO InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC.*[<];
+			DECLARE outRef REFERENCE TO OutputRoot;
+			CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'KZGetBackOfficeDateRs';
+			SET outRef.(XMLNSC.NamespaceDecl)xmlns:ifxca 		= ifxca;
+			SET outRef.RqUID 									= origRef.RqUID;
+			SET outRef.RqTm 									= origRef.RqTm;
+			SET outRef.Status.ifxca:StatusCode					= errorCode;
+			SET outRef.Status.ifxca:StatusDesc 					= errorMessage;
+			
+			SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = 'ErrorResponse';	
+			
+		END IF;
+		
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+	
+	CREATE FUNCTION getEpkDoctypePriority(IN docType CHARACTER) RETURNS INTEGER 
+	BEGIN
+		RETURN CASE docType
+		WHEN '1' THEN 3
+		WHEN '3' THEN 2
+		WHEN '2' THEN 1
+		ELSE 0
+		END;
+	END;
+END MODULE;
+
+

@@ -1,0 +1,511 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crm.retail.esql
+
+DECLARE XSD_DATE_TIME_FORMAT CONSTANT CHARACTER 'IU';
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRq (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].MessageId;
+	SET outroot.*:*[<].RqTm		= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT XSD_DATE_TIME_FORMAT);
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].DataRq.Contract.SiebelContractId;
+	SET outroot.*:*[<].SPName	= 'CRMr';
+END;
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос в iMAP)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsForIMAPRq (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].MessageId;
+	SET outroot.*:*[<].RqTm		= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT XSD_DATE_TIME_FORMAT);
+	SET outroot.*:*[<].SPName	= 'CRMr';
+END;
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRs (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	SET outroot.*:*[<].(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+	
+	SET outroot.*:*[<].RqUID					= inroot.*:*[<].MessageId;
+	SET outroot.*:*[<].RqTm						= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT XSD_DATE_TIME_FORMAT);
+	SET outroot.*:*[<].Status.ifxca:StatusCode	= inroot.*:*[<].Status.ErrorCode;
+	SET outroot.*:*[<].Status.ifxca:Severity	= 'Info';
+	SET outroot.*:*[<].Status.ifxca:StatusCode	= inroot.*:*[<].Status.ErrorMessage;
+END;
+
+/**
+ * Заполнение стандартных полей CRM в сообщениях (ответ) (вариация 1)
+ **/
+CREATE PROCEDURE FillCRMStandartElementsRs (IN inroot REFERENCE, IN outroot REFERENCE, IN messageType CHARACTER)
+BEGIN
+	
+	SET outroot.*:*[<].MessageId	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].MessageType	= messageType;
+	SET outroot.*:*[<].Status.ErrorCode VALUE	= inroot.*:*[<].Status.*:StatusCode;
+	SET outroot.*:*[<].Status.ErrorMessage VALUE	= inroot.*:*[<].Status.*:StatusDesc;
+END;
+
+/**
+ * Заполнение стандартных полей CRM в сообщениях (ответ) (вариация 2)
+ **/
+CREATE PROCEDURE FillCRMStandartElementsRs2 (IN inroot REFERENCE, IN outroot REFERENCE, IN messageType CHARACTER)
+BEGIN
+	
+	SET outroot.*:*[<].MessageId		= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].MessageType		= messageType;
+	SET outroot.*:*[<].MessageDateTime	= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].StatusRs.ErrorCode VALUE	= inroot.*:*[<].Status.*:StatusCode;
+	SET outroot.*:*[<].StatusRs.ErrorMessage VALUE	= inroot.*:*[<].Status.*:StatusDesc;
+END;
+
+/**
+ * Заполнение стандартных полей CRM в сообщениях (запрос) (вариация 1)
+ **/
+CREATE PROCEDURE FillCRMStandartElementsRq (IN inroot REFERENCE, IN outroot REFERENCE, IN messageType CHARACTER)
+BEGIN
+	
+	SET outroot.*:*[<].MessageId	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].MessageType	= messageType;
+END;
+
+
+/**
+ * Заполнение стандартных полей CRM в сообщениях (запрос) (вариация 2)
+ **/
+CREATE PROCEDURE FillCRMStandartElementsRq2 (IN inroot REFERENCE, IN outroot REFERENCE, IN messageType CHARACTER)
+BEGIN
+	
+	SET outroot.*:*[<].MessageId		= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].MessageType		= messageType;
+	SET outroot.*:*[<].MessageDateTime	= inroot.*:*[<].RqTm;
+END;
+
+
+DECLARE CRM_DATE_FORMAT CONSTANT CHARACTER 'MM/dd/yyyy';
+DECLARE ESB_DATE_FORMAT CONSTANT CHARACTER 'yyyy-MM-dd';
+DECLARE CRM_DEFAULT_DATE CONSTANT CHARACTER '01/01/2001';
+
+/**
+ * Функция преобразования формата даты из CRM в КСШ
+ **/
+CREATE FUNCTION convertFromCRMDate (IN inDate CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF LENGTH(inDate) = LENGTH(CRM_DATE_FORMAT) THEN
+		RETURN CAST(CAST(inDate AS DATE FORMAT CRM_DATE_FORMAT) AS CHARACTER FORMAT ESB_DATE_FORMAT);
+	ELSE
+		RETURN inDate;
+	END IF;
+END;
+
+/**
+ * Функция преобразования формата даты из КСШ в CRM
+ **/
+CREATE FUNCTION convertToCRMDate (IN inDate CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF LENGTH(inDate) >= LENGTH(ESB_DATE_FORMAT) THEN
+		RETURN CAST(CAST(LEFT(inDate, LENGTH(ESB_DATE_FORMAT)) AS DATE FORMAT ESB_DATE_FORMAT) AS CHARACTER FORMAT CRM_DATE_FORMAT);
+	ELSE
+		RETURN inDate;
+	END IF;
+END;	
+
+/**
+ * Функция преобразования формата даты из КСШ в CRM
+ **/
+CREATE FUNCTION convertToCRMDateDefault (IN inDate CHARACTER, IN defaultValue CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF LENGTH(inDate) >= LENGTH(ESB_DATE_FORMAT) THEN
+		RETURN CAST(CAST(LEFT(inDate, LENGTH(ESB_DATE_FORMAT)) AS DATE FORMAT ESB_DATE_FORMAT) AS CHARACTER FORMAT CRM_DATE_FORMAT);
+	ELSE
+		RETURN defaultValue;
+	END IF;
+END;	
+
+CREATE FUNCTION recodeMaritalStatusToCRM (IN maritalStatus CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE maritalStatus
+		WHEN 'Single' THEN '1'
+		WHEN 'Divorced' THEN '2'
+		WHEN 'Married' THEN '3'
+		WHEN 'Civil' THEN '4'
+		WHEN 'Widow' THEN '5'
+		ELSE maritalStatus
+	END;
+END;
+
+CREATE FUNCTION recodeMaritalStatusFromCRM (IN maritalStatus CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE maritalStatus
+		WHEN '1' THEN 'Single'
+		WHEN '2' THEN 'Divorced'
+		WHEN '3' THEN 'Married'
+		WHEN '4' THEN 'Civil'
+		WHEN '5' THEN 'Widow'
+		ELSE maritalStatus
+	END;
+END;
+
+CREATE FUNCTION recodeAddressTypeToCRM (IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN 'Primary' THEN '1'
+		WHEN 'Home' THEN '2'
+		WHEN 'Secondary' THEN '3'
+		ELSE addressType
+	END;
+END;
+
+CREATE FUNCTION recodeAddressTypeFromCRM (IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN '1' THEN 'Primary'
+		WHEN '2' THEN 'Home'
+		WHEN '3' THEN 'Secondary'
+		ELSE addressType
+	END;
+END;
+
+CREATE FUNCTION recodeContactTypeToCRM (IN contactType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE contactType
+		WHEN 'Mobile' THEN '1'
+		WHEN 'Work' THEN '2'
+		WHEN 'Home' THEN '3'
+		WHEN 'DayFax' THEN '5'
+		WHEN 'DayPhone' THEN '8'
+		ELSE contactType
+	END;
+END;
+
+CREATE FUNCTION recodeContactTypeFromCRM (IN contactType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE contactType
+		WHEN '1' THEN 'Mobile'
+		WHEN '2' THEN 'Work'
+		WHEN '3' THEN 'Home'
+		WHEN '5' THEN 'DayFax'
+		WHEN '8' THEN 'DayPhone'
+		ELSE contactType
+	END;
+END;
+
+CREATE FUNCTION recodePersonStatusToCRM (IN personStatus CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE personStatus
+		WHEN 'АКТ' THEN '1'
+		WHEN 'АКТБОС' THEN '2'
+		WHEN 'НЕАКТ' THEN '3'
+		WHEN 'ПТЦ' THEN '4'
+		WHEN 'ЗАКР' THEN '5'
+		ELSE personStatus
+	END;
+END;
+
+CREATE FUNCTION recodeSegmentToCRM (IN segment CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE segment
+	    WHEN 'MMS' THEN 'MMS'
+		WHEN 'MAS' THEN 'MMS'
+		WHEN 'SBF' THEN 'SBF'
+		WHEN 'VIP' THEN 'SBF'
+		WHEN 'SBP' THEN 'SBP'
+		WHEN 'ZN' THEN 'SBP'
+		ELSE ''
+	END;
+END;
+
+CREATE FUNCTION recodePersonStatusFromCRM (IN personStatus CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE personStatus
+		WHEN '1' THEN 'АКТ'
+		WHEN '2' THEN 'АКТБОС'
+		WHEN '3' THEN 'НЕАКТ'
+		WHEN '4' THEN 'ПТЦ'
+		WHEN '5' THEN 'ЗАКР'
+		ELSE personStatus
+	END;
+END;
+
+CREATE FUNCTION recodeAccountCategoryToCRM (IN accountCategory CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE accountCategory
+		WHEN 'CLN' THEN '1'
+		WHEN 'STR' THEN '2'
+		WHEN 'VIP' THEN '3'
+		WHEN 'CSO' THEN '4'
+		WHEN 'NONE' THEN '5'
+		ELSE '5'
+	END;
+END;
+
+CREATE FUNCTION recodeAccountCategoryFromCRM (IN accountCategory CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE accountCategory
+		WHEN '1' THEN 'CLN'
+		WHEN '2' THEN 'STR'
+		WHEN '3' THEN 'VIP'
+		WHEN '4' THEN 'CSO'
+		WHEN '5' THEN 'NONE'
+		ELSE accountCategory
+	END;
+END;
+
+
+CREATE FUNCTION recodeGenderFromCRM (IN bVal CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE bVal
+		WHEN '1' THEN 'M'
+		WHEN '2' THEN 'F'
+		ELSE ''
+	END;
+END;
+
+CREATE FUNCTION recodeGenderToCRM (IN bVal CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE UPPER(bVal)
+		WHEN 'M' THEN '1'
+		WHEN 'F' THEN '2'
+		WHEN 'YES' THEN '1'
+		WHEN 'NO' THEN '2'
+		ELSE ''
+	END;
+END;
+
+CREATE FUNCTION recodeBooleanFromCRM (IN bVal CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE UPPER(bVal)
+		WHEN 'Y' THEN 'true'
+		WHEN 'N' THEN 'false'
+		ELSE ''
+	END;
+END;
+
+CREATE FUNCTION recodeBooleanToCRM (IN bVal CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE UPPER(bVal)
+		WHEN 'TRUE' THEN 'Y'
+		WHEN 'FALSE' THEN 'N'
+		ELSE ''
+	END;
+END;
+
+CREATE FUNCTION recodeClientTypeToCRM (IN cType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE UPPER(cType)
+		WHEN 'Ч' THEN '1'
+		WHEN 'Ю' THEN '2'
+		ELSE cType
+	END;
+END;
+
+CREATE PROCEDURE transformPersonDataFromESBToCRM(IN inRef REFERENCE, IN outRef REFERENCE)
+BEGIN
+	DECLARE integrationId CHARACTER NULL;
+	DECLARE iin CHARACTER NULL;
+	DECLARE dlNumber CHARACTER NULL;
+	DECLARE sic CHARACTER NULL;
+	DECLARE clientId CHARACTER NULL;
+
+	FOR inPersonIdExt AS inRef.PersonIdExt[] DO
+		CASE inPersonIdExt.Key
+		WHEN 'MABPK' THEN
+			SET integrationId = inPersonIdExt.Value;
+		WHEN 'IIN' THEN
+			SET iin = inPersonIdExt.Value;
+		WHEN 'RNN' THEN
+			SET dlNumber = inPersonIdExt.Value;
+		WHEN 'SIC' THEN
+			SET sic = inPersonIdExt.Value;
+		WHEN 'WAY' THEN
+			SET clientId = inPersonIdExt.Value;
+		END CASE;
+	END FOR;
+	
+	SET outRef.IntegrationId				= COALESCE(integrationId, '');
+	SET outRef.FirstName					= inRef.*:PersonName.*:FirstName;
+	SET outRef.LastName						= inRef.*:PersonName.*:LastName;
+	SET outRef.MiddleName					= inRef.*:PersonName.*:MiddleName;
+	SET outRef.MF							= recodeGenderToCRM(inRef.*:Gender);
+	SET outRef.Citizenship					= inRef.*:Citizenship;
+	SET outRef.IIN							= iin;
+	SET outRef.DLNumber						= dlNumber;
+	SET outRef.ContactStatus				= recodePersonStatusToCRM(inRef.PersonStatus);
+	SET outRef.Segment						= recodeSegmentToCRM(inRef.Segment);
+	SET outRef.StatDivision					= inRef.FirstContactBankInfo.*:BranchId;
+	SET outRef.QPragmaManager				= inRef.ABSManager;	
+	SET outRef.StatStatus					= inRef.IsAccepted;
+	SET outRef.StatDate						= convertToCRMDateDefault(inRef.DateOpen, CRM_DEFAULT_DATE);
+	SET outRef.Category						= inRef.ClientCategory;
+	SET outRef.SIC							= sic;
+	SET outRef.FPOP							= recodeBooleanToCRM(inRef.IsForeignPP);
+	SET outRef.Type							= '1';  --recodeClientTypeToCRM(inRef.ClientType);
+	SET outRef.LatLastName					= inRef.LatLastName;
+	SET outRef.LatFirstName					= inRef.LatFirstName;
+	SET outRef.Resident						= recodeBooleanToCRM(inRef.*:Resident);
+	SET outRef.BirthDate					= convertToCRMDate(inRef.*:BirthDt);
+	SET outRef.PlaceofBirth					= inRef.*:BirthPlace;
+	SET outRef.MaritalStatus				= recodeMaritalStatusToCRM(inRef.*:MaritalStatus);
+	SET outRef.Affiliation					= '';
+	SET outRef.AcceptStatus					= '';
+	
+	SET outRef.ClientID						= clientId;
+	SET outRef.AccountTitle					= inRef.ClientJobTitle;
+	SET outRef.AccountPlace					= inRef.ClientWorkPlace;
+	SET outRef.AccountCategory				= recodeAccountCategoryToCRM(inRef.ClientWorkPlaceCat);
+
+	SET outRef.Registration.IssuingCountry	= inRef.RegData.RegRecord.RegCountry;
+	SET outRef.Registration.RegNumber		= inRef.RegData.RegRecord.RegNumber;
+	SET outRef.Registration.Point			= inRef.RegData.RegRecord.RegPlace;
+	SET outRef.Registration.Account			= inRef.RegData.RegRecord.RegAgency;
+	SET outRef.Registration.IssueDate		= convertToCRMDate(inRef.RegData.RegRecord.RegDate);
+	SET outRef.Registration.ExpiryDate		= convertToCRMDate(inRef.RegData.RegRecord.ExpDate);
+	SET outRef.Registration.ReIssueDate		= convertToCRMDate(inRef.RegData.RegRecord.ReIssueDate);
+	SET outRef.Registration.CertificateDate	= convertToCRMDate(inRef.RegData.RegRecord.CertDate);
+	DECLARE localId CHARACTER;
+	FOR idRec AS inRef.RegData.RegRecord.IdRec[] DO
+		IF idRec.IdKey = 'ID' THEN
+			SET localId = idRec.IdValue;
+		END IF;
+	END FOR;
+	SET outRef.Registration.LocalId			= localId;
+	
+	/*
+	DECLARE outAlternatePhone REFERENCE TO outRef;
+	FOR inPhone AS inRef.Phones.Phone[] DO
+		CREATE LASTCHILD OF outRef AS outAlternatePhone NAME 'AlternatePhone';
+		SET outAlternatePhone.Active	= recodeBooleanToCRM(inPhone.IsActive);
+		SET outAlternatePhone.Allowed	= recodeBooleanToCRM(inPhone.Allowed);
+		SET outAlternatePhone.Type		= recodeContactTypeToCRM(inPhone.PhoneType);
+		SET outAlternatePhone.Phone		= inPhone.PhoneNum;
+		SET outAlternatePhone.From		= inPhone.From;
+		SET outAlternatePhone.Till		= inPhone.Till;
+	END FOR; */
+
+	DECLARE outCommunicationAddress REFERENCE TO outRef;
+	FOR inEMail AS inRef.EMails.EMail[] DO
+		CREATE LASTCHILD OF outRef AS outCommunicationAddress NAME 'CommunicationAddress';
+		SET outCommunicationAddress.Address	= inEMail.EMailAddr;
+		SET outCommunicationAddress.Active	= recodeBooleanToCRM(inEMail.Active);
+		SET outCommunicationAddress.Allowed	= recodeBooleanToCRM(inEMail.Allowed);
+	END FOR;
+
+	DECLARE outPersonalAddress REFERENCE TO outRef;
+	FOR inPostAddr AS inRef.*:ContactInfo.*:PostAddr[] DO
+		IF	inPostAddr.*:House <> '' AND
+			inPostAddr.*:Street <> '' AND
+			inPostAddr.*:City <> '' THEN
+			CREATE LASTCHILD OF outRef AS outPersonalAddress NAME 'PersonalAddress';
+			SET outPersonalAddress.Type			= CASE WHEN inPostAddr.*:AddrType <> '' THEN recodeAddressTypeToCRM(inPostAddr.*:AddrType) ELSE '2' END;
+			SET outPersonalAddress.PostalCode	= inPostAddr.*:PostalCode;
+			SET outPersonalAddress.House		= inPostAddr.*:House;
+			SET outPersonalAddress.Apt			= inPostAddr.*:Flat;
+			SET outPersonalAddress.District		= inPostAddr.*:District;
+			SET outPersonalAddress.Street		= inPostAddr.*:Street;
+			SET outPersonalAddress.Building		= inPostAddr.*:Building;
+			SET outPersonalAddress.County		= inPostAddr.*:StateProv;
+			SET outPersonalAddress.City			= inPostAddr.*:City;
+			SET outPersonalAddress.Country		= inPostAddr.*:Country;
+		END IF;
+	END FOR;
+
+	DECLARE outPubContactCredential REFERENCE TO outRef;
+	FOR inIdentityCard AS inRef.*:IdentityCards.*:IdentityCard[] DO
+		IF	inIdentityCard.*:IdType <> '' AND
+			inIdentityCard.*:IdNum <> '' THEN
+			CREATE LASTCHILD OF outRef AS outPubContactCredential NAME 'PubContactCredential';
+			SET outPubContactCredential.Category		= inIdentityCard.*:IdType;
+			SET outPubContactCredential.DocNumber		= inIdentityCard.*:IdNum;
+			SET outPubContactCredential.IssuingCountry	= inIdentityCard.*:IssuedBy;
+			SET outPubContactCredential.IssueDate		= convertToCRMDate(inIdentityCard.*:IssueDt);
+			SET outPubContactCredential.ExpiryDate		= convertToCRMDate(inIdentityCard.*:ValidTo);
+		END IF;
+	END FOR;
+
+	--SET outRef.FINCORPContactExperience.AccountIntegrationId	= '';
+	--SET outRef.FINCORPContactExperience.Title					= inRef.ClientJobTitle;
+	--SET outRef.FINCORPContactExperience.Place					= inRef.ClientWorkPlace;
+	--SET outRef.FINCORPContactExperience.AccountCategory			= inRef.ClientWorkPlaceCat;
+
+	DECLARE outPartyRelationshipTo REFERENCE TO outRef;
+	FOR inRelPerson AS inRef.RelPersons.RelPerson[] DO
+		CREATE LASTCHILD OF outRef AS outPartyRelationshipTo NAME 'PartyRelationshipTo';
+		DECLARE relatedPartyIntegratoinId CHARACTER;
+		FOR inRelPersonId AS inRelPerson.RelPersonId[] DO
+			IF inRelPersonId.Key = 'MABPK' THEN
+				SET relatedPartyIntegratoinId = inRelPersonId.Value;
+			END IF;
+		END FOR;
+		SET outPartyRelationshipTo.RelatedPartyIntegratoinId	= relatedPartyIntegratoinId;
+		SET outPartyRelationshipTo.RelationshipType				= CASE WHEN inRelPerson.RelationshipType <> '' THEN inRelPerson.RelationshipType ELSE '2' END;
+		SET outPartyRelationshipTo.RelationshipSubtype			= inRelPerson.RelationshipSubtype;
+		SET outPartyRelationshipTo.SiebelId						= '';
+		SET outPartyRelationshipTo.IntegrationId				= '';
+		SET outPartyRelationshipTo.EntityType					= inRelPerson.SubjectType;
+	END FOR;
+
+	DECLARE outAuthority REFERENCE TO outRef;
+	FOR inAuthority AS inRef.AuthorityList.Authority[] DO
+		DECLARE conIntegationId CHARACTER;
+		FOR inAuthPersonId AS inAuthority.AuthPersonId[] DO
+			IF inAuthPersonId.Key = 'MABPK' THEN
+				SET conIntegationId = inAuthPersonId.Value;
+			END IF;
+		END FOR;
+
+		IF	inAuthority.WarrantNumber <> '' AND
+			inAuthority.RegDate <> '' AND
+			inAuthority.IssueDate <> '' AND
+			inAuthority.ExpDate <> '' AND
+			conIntegationId <> '' THEN
+			
+			CREATE LASTCHILD OF outRef AS outAuthority NAME 'Authority';
+			SET outAuthority.SiebelId			= '';
+			SET outAuthority.IntegrationId		= '';
+			SET outAuthority.Active				= '';
+			SET outAuthority.WarrantNumber		= inAuthority.WarrantNumber;
+			SET outAuthority.RegDate			= convertToCRMDate(inAuthority.RegDate);
+			SET outAuthority.IssueDate			= convertToCRMDate(inAuthority.IssueDate);
+			SET outAuthority.ExpiryDate			= convertToCRMDate(inAuthority.ExpDate);
+			SET outAuthority.ConIntegationId	= conIntegationId;
+			SET outAuthority.NotaryName			= COALESCE(inAuthority.NotaryInfo.NotaryName, '');
+			SET outAuthority.NotaryLicense		= COALESCE(inAuthority.NotaryInfo.NotaryLicense, '');
+			SET outAuthority.NotaryLicenseDate	= convertToCRMDateDefault(inAuthority.NotaryInfo.NotaryLicenseDate, CRM_DEFAULT_DATE);
+			SET outAuthority.NotaryAddr			= COALESCE(inAuthority.NotaryInfo.NotaryAddress, '');
+			SET outAuthority.NotaryPhone		= inAuthority.NotaryInfo.NotaryPhone;
+	
+			SET outAuthority.FINSAccount.FINSAccountNumber	= inAuthority.AuthAccount.AccountId;
+			FOR inPermission AS inAuthority.AuthAccount.Permission[] DO
+				CREATE LASTCHILD OF outAuthority.FINSAccount NAME 'Permissions';
+				SET outAuthority.FINSAccount.Permissions[<].Permissions = inPermission;
+			END FOR;
+			IF NOT EXISTS(outAuthority.FINSAccount.*[]) THEN
+				SET outAuthority.FINSAccount = NULL;
+			END IF;
+		END IF;
+	END FOR;
+END;
+
+CREATE PROCEDURE FillCRMStandartElementsRq3 (IN inroot REFERENCE, IN outroot REFERENCE, IN messageType CHARACTER)
+BEGIN
+	
+	SET outroot.*:*[<].MessageId		= inroot.*:*[<].MsgId;
+	SET outroot.*:*[<].MessageType		= messageType;
+	SET outroot.*:*[<].MessageDateTime	= inroot.*:*[<].MessageDateTime;
+END;
+
+CREATE PROCEDURE FillCRMStandartElementsRq4 (IN InputRoot REFERENCE, IN OutputRoot REFERENCE, IN serviceCode CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF OutputRoot.XMLNSC NAME serviceCode;
+	DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+	
+	SET outRoot.MsgId			= InputRoot.XMLNSC.*[<].RqUID;
+	SET outRoot.ServiceCode		= InputRoot.XMLNSC.*[<].ServiceCode;
+ 	SET outRoot.MessageDateTime	= InputRoot.XMLNSC.*[<].RqTm;
+END;

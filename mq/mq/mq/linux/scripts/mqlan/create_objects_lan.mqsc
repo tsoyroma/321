@@ -1,0 +1,49 @@
+*создание листенера
+DEFINE LISTENER(LISTENER.LAN.DEMO) TRPTYPE (TCP) PORT(1416)
+
+alter qmgr chlauth(DISABLED)
+alter qmgr force ccsid(1208)
+
+*транспортная очередь
+DEFINE QLOCAL(Q.LAN.TRANSPORT) +
+USAGE(xmitq)
+
+*локальная очередь для GET запросов
+DEFINE QLOCAL(Q.SBOLDB.TO.LAN)
+
+*локальная очередь для POST запросов
+DEFINE QLOCAL(Q1.SBOLDB.TO.LAN)
+
+*удаленная очередь (для ответов)
+DEFINE QREMOTE(Q.SBOLDB.TO.DMZ) +
+RNAME(Q.SBOLDB.TO.DMZ) RQMNAME(M00.DEMO.DMZ.SBOLDB) +
+XMITQ(Q.LAN.TRANSPORT)
+
+*канал отправитель
+DEFINE CHANNEL(SC.DEMO.LAN.DMZ) +
+CHLTYPE(sdr) +
+XMITQ(Q.LAN.TRANSPORT) +
+TRPTYPE(tcp) +
+CONNAME('192.168.2.45(1416)')
+
+ALTER CHL CHLTYPE(SC.DEMO.LAN.DMZ) DISCINT(0)
+
+*канал получатель
+DEFINE CHANNEL(SC.DEMO.DMZ.LAN) +
+CHLTYPE(rcvr) +
+TRPTYPE(tcp)
+
+
+*канал соединение с сервером
+DEFINE CHANNEL(SC.DEMO.SBOLDB) +
+CHLTYPE(svrconn) +
+TRPTYPE(tcp) +
+SHARECNV(5)
+
+*канал соединение с сервером
+DEFINE CHANNEL(ESB.GW.SVRCONN) +
+CHLTYPE(svrconn) +
+TRPTYPE(tcp) +
+SHARECNV(5)
+
+END

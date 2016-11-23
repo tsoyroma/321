@@ -1,0 +1,86 @@
+BROKER SCHEMA ru.croc.sbrf.bp.common.esql
+
+
+CREATE COMPUTE MODULE RestoreCorrelIdFromRqUidSubflow_FillMsgId
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+
+		DECLARE MsgId BLOB;
+		DECLARE Error CHARACTER;
+
+		--доработка для запросов GFL в x-Bank
+		DECLARE input CHARACTER Environment.UserProperties.RqUID;
+
+		IF Environment.UserProperties.TargetOperation = 'GetForms190ForClientResponse'
+		OR Environment.UserProperties.TargetOperation = 'GetClientAccountsResponse' THEN
+			SET input = input || Environment.UserProperties.TargetOperation;
+		END IF;
+
+		CALL hash(input, MsgId, Error);
+
+		IF Error IS NOT NULL AND LENGTH(Error) > 0 THEN
+			THROW USER EXCEPTION VALUES ('' || Error);
+		END IF;
+
+		--Принудительно заменяем MsgId для идентификации сообщения в ответном потоке
+		SET OutputRoot.MQMD.MsgId = MsgId;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RestoreCorrelIdFromRqUidSubflow_FillCorrelId
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+
+		IF NOT EXISTS (OutputRoot.XMLNSC.OrigMess[]) OR OutputRoot.XMLNSC.OrigMess.UserProperties.CORREL_ID_SET <> TRUE THEN
+			--необходимо проставить CorellId в сообщении
+			DECLARE input CHARACTER 
+				COALESCE(
+					OutputRoot.XMLNSC.*:*[<].*:RqUID,
+					FIELDVALUE(OutputRoot.XMLNSC.CIT_REQUEST.DATA.*:*[>].*:RqUID.(XMLNSC.Attribute)Value),
+					FIELDVALUE(OutputRoot.XMLNSC.CIT_REQUEST.DATA.*:*[>].BEGIN_.*:RqUID.(XMLNSC.Attribute)Value),
+					FIELDVALUE(OutputRoot.XMLNSC.CIT_REQUEST.DATA.RqUID.(XMLNSC.Attribute)Value),
+					FIELDVALUE(OutputRoot.XMLNSC.CIT_REQUEST.SYSTEM.MAIN_ID.(XMLNSC.Attribute)Value)
+				);
+
+			IF input IS NULL OR LENGTH(input) < 1 THEN
+				THROW USER EXCEPTION VALUES ('Invalid message: required field ''RqUID'' is not found');
+			END IF;
+
+			DECLARE CorrelId BLOB;
+			DECLARE Error CHARACTER;
+
+			--доработка для запросов GFL в x-Bank
+			DECLARE TargetOperation CHARACTER FIELDNAME(OutputRoot.XMLNSC.*:*[<]);
+			IF TargetOperation = 'GetForms190ForClientResponse'
+			OR TargetOperation = 'GetClientAccountsResponse' THEN
+				SET input = input || TargetOperation;
+			END IF;
+
+			CALL hash(input, CorrelId, Error);
+
+			IF Error IS NOT NULL AND LENGTH(Error) > 0 THEN
+				THROW USER EXCEPTION VALUES ('' || Error);
+			END IF;
+
+			SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+			--Проставляем CorrelationId
+			SET OutputRoot.MQMD.CorrelId	= CorrelId;
+			SET OutputRoot.Properties.ReplyIdentifier = CorrelId;
+		END IF;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ *  Определение функции java хэшированяи строки
+ */
+CREATE PROCEDURE hash (IN input CHARACTER, OUT output BLOB, OUT error CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.hash";

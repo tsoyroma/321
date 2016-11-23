@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ComIbmAggregateReply.msgnode="ComIbmAggregateReply.msgnode" xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode" xmlns:ComIbmMQInput.msgnode="ComIbmMQInput.msgnode" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" xmlns:eflow="http://www.ibm.com/wbi/2005/eflow" xmlns:ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow="ru/croc/sbrf/bp/common/flow/ErrorHandlerSubflow.msgflow" xmlns:ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow"
+    xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility" nsURI="ru/croc/sbkz/mediation/common/flow/ResponseSubflow.msgflow"
+    nsPrefix="ru_croc_sbkz_mediation_common_flow_ResponseSubflow.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.InputQueueName" name="InputQueueName" lowerBound="1" defaultValueLiteral="inq_name">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.aggregateName" name="aggregateName" lowerBound="1" defaultValueLiteral="oper_name">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.EventReceiver" name="EventReceiver" lowerBound="1" defaultValueLiteral="oper_name">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.ErrHandEventReceiverProp" name="ErrHandEventReceiverProp" defaultValueLiteral="oper_name">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <eStructuralFeatures xmi:type="ecore:EAttribute" xmi:id="Property.SourceQueue" name="SourceQueue" defaultValueLiteral="inq_name">
+      <eType xmi:type="ecore:EDataType" href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+    </eStructuralFeatures>
+    <translation xmi:type="utility:TranslatableString" key="ResponseSubflow" bundleName="ru/croc/sbkz/mediation/common/flow/ResponseSubflow" pluginId="FlowMediationKZ"/>
+    <colorGraphic16 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/FlowMediationKZ/icons/full/obj16/ResponseSubflow.gif"/>
+    <colorGraphic32 xmi:type="utility:GIFFileGraphic" resourceName="platform:/plugin/FlowMediationKZ/icons/full/obj30/ResponseSubflow.gif"/>
+    <composition>
+      <nodes xmi:type="eflow:FCMSink" xmi:id="OutTerminal.Out" location="779,263">
+        <translation xmi:type="utility:TranslatableString" key="OutTerminal.Out" bundleName="ru/croc/sbkz/mediation/common/flow/ResponseSubflow" pluginId="FlowMediationKZ"/>
+      </nodes>
+      <nodes xmi:type="eflow:FCMSink" xmi:id="OutTerminal.UnkMessage" location="546,174">
+        <translation xmi:type="utility:TranslatableString" key="OutTerminal.UnkMessage" bundleName="ru/croc/sbkz/mediation/common/flow/ResponseSubflow" pluginId="FlowMediationKZ"/>
+      </nodes>
+      <nodes xmi:type="eflow:FCMSink" xmi:id="OutTerminal.Timeout" location="665,357">
+        <translation xmi:type="utility:TranslatableString" key="OutTerminal.Timeout" bundleName="ru/croc/sbkz/mediation/common/flow/ResponseSubflow" pluginId="FlowMediationKZ"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_EventLogSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_2" location="502,262" CurrentOperation="Получен ответ интеграционной логикой" CurrentEventSource="ESB" CurrentEventReceiver="ESB" IsAggregate="true" SourceQueue="ESB.WAY.RESPONSE">
+        <translation xmi:type="utility:ConstantString" string="ESB -> oper_name"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQInput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_3" location="76,268" messageDomainProperty="XMLNSC" parserXmlnscCommentsRetainMode="all">
+        <translation xmi:type="utility:ConstantString" string="InputQueue"/>
+      </nodes>
+      <nodes xmi:type="ru_croc_sbrf_bp_common_flow_ErrorHandlerSubflow.msgflow:FCMComposite_1" xmi:id="FCMComposite_1_4" location="169,268" EventReceiverProp="OPERATION" EventSourceProp="ESB">
+        <translation xmi:type="utility:ConstantString" string="InputErrorHandlerSubflow"/>
+      </nodes>
+      <nodes xmi:type="ComIbmAggregateReply.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_5" location="347,260" aggregateName="CRBLOCK">
+        <translation xmi:type="utility:ConstantString" string="AggregateReply"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_6" location="599,262" computeExpression="esql://routine/ru.croc.sbkz.mediation.common.esql#ResponseSubflow_GetDataFromCorrelationMessage.Main">
+        <translation xmi:type="utility:ConstantString" string="GetDataFromCorrelationMessage"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="OutTerminal.Timeout" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.timeout" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="OutTerminal.UnkMessage" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.unknown" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="OutTerminal.Out" sourceNode="FCMComposite_1_6" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_2" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.Input"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.catch" targetTerminalName="InTerminal.Input2"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_9" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.Input1"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_10" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_11" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.Output" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer>
+      <propertyDescriptor groupName="Group.MQInput" configurable="true" describedAttribute="Property.InputQueueName">
+        <propertyName xmi:type="utility:TranslatableString" key="Property.InputQueueName" bundleName="ru/croc/sbkz/mediation/common/flow/ResponseSubflow" pluginId="FlowMediationKZ"/>
+        <propertyDescriptor groupName="Group.Other" configurable="true" describedAttribute="Property.aggregateName">
+          <propertyName xmi:type="utility:TranslatableString" key="Property.aggregateName" bundleName="ComIbmAggregateReply" pluginId="com.ibm.etools.mft.ibmnodes"/>
+          <propertyDescriptor groupName="Group.Other" configurable="true" userDefined="true" describedAttribute="Property.EventReceiver">
+            <propertyName xmi:type="utility:TranslatableString" key="Property.EventReceiver" bundleName="ru/croc/sbkz/mediation/common/flow/ResponseSubflow" pluginId="FlowMediationKZ"/>
+            <propertyDescriptor groupName="Group.Other" configurable="true" userDefined="true" describedAttribute="Property.ErrHandEventReceiverProp">
+              <propertyName xmi:type="utility:TranslatableString" key="Property.ErrHandEventReceiverProp" bundleName="ru/croc/sbkz/mediation/common/flow/ResponseSubflow" pluginId="FlowMediationKZ"/>
+              <propertyDescriptor groupName="Group.Other" configurable="true" userDefined="true" describedAttribute="Property.SourceQueue">
+                <propertyName xmi:type="utility:TranslatableString" key="Property.SourceQueue" bundleName="ru/croc/sbrf/bp/common/flow/EventLogSubflow" pluginId="CommonFlows"/>
+              </propertyDescriptor>
+            </propertyDescriptor>
+          </propertyDescriptor>
+        </propertyDescriptor>
+      </propertyDescriptor>
+    </propertyOrganizer>
+    <attributeLinks promotedAttribute="Property.InputQueueName" overriddenNodes="FCMComposite_1_3">
+      <overriddenAttribute href="ComIbmMQInput.msgnode#Property.queueName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.aggregateName" overriddenNodes="FCMComposite_1_5">
+      <overriddenAttribute href="ComIbmAggregateReply.msgnode#Property.aggregateName"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.EventReceiver" overriddenNodes="FCMComposite_1_2">
+      <overriddenAttribute href="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow#Property.CurrentEventReceiver"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.ErrHandEventReceiverProp" overriddenNodes="FCMComposite_1_4">
+      <overriddenAttribute href="ru/croc/sbrf/bp/common/flow/ErrorHandlerSubflow.msgflow#Property.EventReceiverProp"/>
+    </attributeLinks>
+    <attributeLinks promotedAttribute="Property.SourceQueue" overriddenNodes="FCMComposite_1_2">
+      <overriddenAttribute href="ru/croc/sbrf/bp/common/flow/EventLogSubflow.msgflow#Property.SourceQueue"/>
+    </attributeLinks>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

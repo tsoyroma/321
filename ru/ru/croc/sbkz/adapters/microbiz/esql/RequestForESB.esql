@@ -1,0 +1,1373 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.microbiz.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'RequestGESV' THEN
+			SET labelName = 'RequestGESV'; -- in PRAGMA_NEW
+		WHEN 'CreditHistoryRequest' THEN
+			SET labelName = 'CreditHistoryRequest';	-- in PRAGMA_NEW and PRAGMA 
+		WHEN 'GSLRequest' THEN
+			SET labelName = 'GSLRequest'; -- in PRAGMA_NEW
+		WHEN 'BankAccountRequest' THEN
+			SET labelName = 'BankAccountRequest'; -- in PRAGMA_NEW
+		WHEN 'EPKCompanyRequest' THEN
+			SET labelName = 'EPKCompanyRequest'; -- in EPK
+		WHEN 'EPKIndividualRequest' THEN
+			SET labelName = 'EPKIndividualRequest'; -- in EPK
+		WHEN 'LSBOORequest' THEN
+			SET labelName = 'LSBOORequest'; -- in EPK
+		WHEN 'GCVPRequest' THEN
+			SET labelName = 'GCVPRequest'; -- in GCVP
+		WHEN 'AMLRequest' THEN
+			SET labelName = 'AMLRequest'; -- in AML 
+		WHEN 'EPKCompanyEnrichmentRequest' THEN
+			SET labelName = 'EPKCompanyEnrichmentRequest'; -- in EPK
+		WHEN 'EPKIndividualEnrichmentRequest' THEN
+			SET labelName = 'EPKIndividualEnrichmentRequest'; -- in EPK
+		WHEN 'QPragmaEnrichmentRequest' THEN
+			SET labelName = 'QPragmaEnrichmentRequest'; -- in PRAGMA_NEW		
+		WHEN 'AML_SBDKRequest' THEN
+			SET labelName = 'AML_SBDKRequest'; -- in PRAGMA_NEW and AML
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown service in RequestForESB(MB)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Запрос ГЭСВ */
+CREATE COMPUTE MODULE RequestForESB_Convert_RequestGESV
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZRequestGESV';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:RequestGESV.*:GESVRequest.*:CreditRequestAttributes;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZRequestGESV;
+		
+		SET outRef.RqUID					        = Environment.UserProperties.RqUID;
+		SET outRef.RqTm						        = Environment.UserProperties.RqTm;
+		SET Environment.UserProperties.MsgFrom      = InputRoot.XMLNSC.*:RequestGESV.*:GESVRequest.*:GeneralInfoType.*:MsgFrom;		
+
+		SET outRef.GetScheduleEffRate.Currency		            = inRef.*:CreditCurr;
+		SET outRef.GetScheduleEffRate.Period		            = inRef.*:CreditTerm;
+		SET outRef.GetScheduleEffRate.Sum		                = inRef.*:CreditSumm;
+		SET outRef.GetScheduleEffRate.Percent		            = inRef.*:InterestRate;
+		
+		IF inRef.*:RepaymentType = 1 THEN 
+		   SET outRef.GetScheduleEffRate.Method		            = 'A';
+		END IF; 
+		IF inRef.*:RepaymentType = 2 THEN 
+		   SET outRef.GetScheduleEffRate.Method		            = 'D';
+		END IF; 
+		
+		SET outRef.GetScheduleEffRate.SingleCommissionSum		= inRef.*:OnetimeFeeSumm;
+		SET outRef.GetScheduleEffRate.MonthCommissionSum		= inRef.*:MonthlyFeeSumm;
+		SET outRef.GetScheduleEffRate.QuarterCommissionSum   	= inRef.*:QuarterlyFeeSumm;
+		SET outRef.GetScheduleEffRate.YearCommissionSum		    = inRef.*:AnnualFeeSumm;
+		SET outRef.GetScheduleEffRate.IssueDate		            = inRef.*:IssueDate;
+		SET outRef.GetScheduleEffRate.FirstPayDate	   	        = inRef.*:FirstRePaymentDate;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_Convert_CreditHistoryRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZCreditHistoryRequest';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:CreditHistoryRequest.*:CreditHistoryReq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZCreditHistoryRequest;
+		
+		SET outRef.RqUID					        = Environment.UserProperties.RqUID;
+		SET outRef.RqTm						        = Environment.UserProperties.RqTm;
+		
+		SET Environment.UserProperties.TargetSPName = inRef.*:BKIID;
+		
+		DECLARE sysFields REFERENCE TO outRef;
+		DECLARE blockData REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS sysFields NAME 'SystemFields';
+		
+		SET sysFields.Uid		=	inRef.*:GeneralInfo.*:MsgID || inRef.*:ApplicationDate || inRef.*:GeneralInfo.*:MsgFrom;
+		SET sysFields.KOD		=	inRef.*:GeneralInfo.*:MsgFrom;
+		SET sysFields.DateReq	=   inRef.*:GeneralInfo.*:MsgDate;
+		SET sysFields.NumQuest	=	inRef.*:ApplicationID;
+		SET sysFields.IdBki		=	inRef.*:BKIID;
+		
+		CREATE LASTCHILD OF outRef AS blockData NAME 'BlockData';
+		
+		SET blockData.Type			=	inRef.*:DealMemberRequestAttributes.*:DealMemberType;
+		SET blockData.IinBin		=	inRef.*:DealMemberRequestAttributes.*:DealMemberID;
+		SET blockData.Family		=	inRef.*:DealMemberRequestAttributes.*:LastName;
+		SET blockData.Name			=	inRef.*:DealMemberRequestAttributes.*:FirstName;
+		SET blockData.SurName		= 	inRef.*:DealMemberRequestAttributes.*:Patronymic;
+		SET blockData.OldFamily 	=   inRef.*:DealMemberRequestAttributes.*:OldLastName;
+		SET blockData.CompanyName	=   inRef.*:DealMemberRequestAttributes.*:CompanyName;		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_CreditHistory_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+	 			
+		IF Environment.UserProperties.TargetSPName = 'PRAGMA' THEN
+			
+			SET OutputRoot.MQRFH2.usr.SystemId = 'urn:sbkzsystems:newpragma';
+			
+			PROPAGATE DELETE NONE;
+			
+			SET OutputRoot.MQRFH2.usr.SystemId = 'urn:sbkzsystems:pragma';
+			
+			PROPAGATE DELETE NONE;			
+		
+		ELSEIF Environment.UserProperties.TargetSPName = 'PKB' THEN
+			 
+			SET OutputRoot.MQRFH2.usr.SystemId = 'urn:sbkzsystems:pkb';
+			
+			PROPAGATE DELETE NONE;
+			
+		END IF;
+			
+		RETURN FALSE;
+	END;
+END MODULE;
+
+/* Запрос ГСЛ */
+CREATE COMPUTE MODULE RequestForESB_Convert_GSLRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGSLRequest';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:GSLRequest.*:GSLReq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZGSLRequest;
+		
+		SET outRef.RqUID					        = Environment.UserProperties.RqUID;
+		SET outRef.RqTm						        = Environment.UserProperties.RqTm;
+		SET Environment.UserProperties.MsgFrom      = InputRoot.XMLNSC.*:GSLRequest.*:GSLReq.*:GeneralInfo.*:MsgFrom;	
+		
+        DECLARE varDealMemberRequest REFERENCE TO outRef;
+		CREATE FIELD outRef.BlockInfos;
+		
+	    SET outRef.BlockInfos                       = InputRoot.XMLNSC;       
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Запрос информации по счетам в Банке */
+CREATE COMPUTE MODULE RequestForESB_Convert_BankAccountRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:BankAccountRequest.*:BankAccountReq;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountListRq';
+		
+		DECLARE ServiceAttr INTEGER 0;
+
+		SET outRoot.RqUID	=	Environment.UserProperties.RqUID;
+		SET outRoot.RqTm	=	Environment.UserProperties.RqTm;
+		SET Environment.UserProperties.MsgFrom      = inRoot.*:GeneralInfo.*:MsgFrom;	
+
+		SET outRoot.SPName	=	'TSMMB';
+		SET outRoot.RegNumber = Environment.UserProperties.RqUID;
+
+		FOR inAttributes AS inRoot.*:DealMemberRequestAttributes[] DO
+			IF inAttributes.*:DealMemberType = 1 THEN
+  			  CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+			  SET curElm.Key   = 'BIN';
+  			  SET curElm.Value = inAttributes.*:DealMemberID;
+			END IF;
+
+			IF inAttributes.*:DealMemberType = 2 THEN
+  			  CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+			  SET curElm.Key   = 'IIN';
+		      SET Environment.UserProperties.DealMemberID = inAttributes.*:DealMemberID;	
+  			  SET curElm.Value = inAttributes.*:DealMemberID;
+			END IF;
+			-------------------------------------------
+			IF ServiceAttr = 0 THEN 
+			   SET outRoot.ServiceAttr.AttrId    = 'VERS';
+			   SET outRoot.ServiceAttr.AttrValue = '2.0';
+		
+			   CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE 'ABS_ACCOUNT_ONLY';
+			END IF; 
+
+			PROPAGATE DELETE NONE;
+			
+			SET ServiceAttr = 1; 
+		    SET OutputRoot.XMLNSC.KZGetPrivateClientAccountListRq.PersonInfo.PersonIdExt = NULL;
+			-------------------------------------------			
+		END FOR;
+		
+		RETURN FALSE;
+	END;	
+END MODULE;
+
+/* Запрос в ЕПК по юридическому лицу */
+CREATE COMPUTE MODULE RequestForESB_Convert_EPKCompanyRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZEPKCompanyRequest';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:EPKCompanyRequest.*:EPKCompanyReq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZEPKCompanyRequest;
+		
+		SET outRef.RqUID					        = Environment.UserProperties.RqUID;
+		SET outRef.RqTm						        = Environment.UserProperties.RqTm;
+		SET outRef.SPName						    = 'TSMMB';
+		SET Environment.UserProperties.MsgFrom      = inRef.*:GeneralInfo.*:MsgFrom;	
+
+        DECLARE varCompanyRequestAttributes REFERENCE TO outRef;
+
+		FOR inAttributes AS inRef.*:CompanyRequestAttributes[] DO			
+          CREATE LASTCHILD OF outRef AS varCompanyRequestAttributes NAME 'PersonInfo'; 
+
+	      SET varCompanyRequestAttributes.DealMemberID                     = inAttributes.*:DealMemberID;       
+	      SET varCompanyRequestAttributes.CompaniesNumberInRequest         = 'KAZ';       
+		END FOR;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос "Обновление данных клиента в ЕПК": UpdatePersonDataToEpkRq -> KZSendMDMPrivateClientDataRq
+ **/ 
+
+/* Запрос в ЕПК по физическим лицам - EPKIndividualEnrichmentReq */
+CREATE COMPUTE MODULE RequestForESB_Convert_EPKIndividualRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSendMDMPrivateClientDataRq';	
+		
+		SET OutputRoot.XMLNSC.KZSendMDMPrivateClientDataRq.(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+		SET OutputRoot.XMLNSC.KZSendMDMPrivateClientDataRq.(XMLNSC.NamespaceDecl)xmlns:inds  = inds; 
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:*[<].*:*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZSendMDMPrivateClientDataRq;
+		DECLARE personInfo REFERENCE TO outRef;
+		DECLARE contInfo REFERENCE TO outRef;
+		DECLARE outAddr REFERENCE TO outRef;
+		DECLARE outCont REFERENCE TO outRef;
+		DECLARE idCard REFERENCE TO outRef;
+		DECLARE idExt REFERENCE TO outRef;
+		DECLARE relPerson REFERENCE TO outRef;
+		
+		SET outRef.RqUID					        = Environment.UserProperties.RqUID;
+		SET outRef.RqTm						        = Environment.UserProperties.RqTm;
+		SET outRef.SPName							= 'TSMMB';
+
+		FOR dealMemberAttributes AS inRef.*:DealMemberRequestAttributes[] DO		
+
+			CREATE LASTCHILD OF outRef AS personInfo NAME 'PersonInfo';
+			SET personInfo.inds:NameAddrType 					= 'Customer';
+			SET personInfo.inds:PersonName.inds:LastName		= dealMemberAttributes.*:LastName;
+			SET personInfo.inds:PersonName.inds:FirstName 		= dealMemberAttributes.*:FirstName;
+			SET personInfo.inds:PersonName.inds:MiddleName 		= dealMemberAttributes.*:Patronymic;
+			
+			CREATE LASTCHILD OF personInfo AS contInfo NAMESPACE inds NAME 'ContactInfo';
+			FOR addr AS dealMemberAttributes.*:AddressAttributes[] DO
+				CREATE LASTCHILD OF contInfo AS outAddr NAMESPACE ifxca NAME 'PostAddr';
+				SET outAddr.ifxca:Addr1				= addr.*:Address; 
+				SET outAddr.ifxca:AddrType			= recodeAddressTypeFromTransact(addr.*:AddressType); 
+				SET outAddr.ifxca:Addr1				= addr.*:Address; 				
+			END FOR;
+			
+			SET personInfo.inds:Manager 			= inRef.*:CILogin;
+			SET personInfo.inds:BirthDt 			= convertFromMicrobizDate(dealMemberAttributes.*:BirthDate);
+			SET personInfo.inds:Gender 				= recodeGenderFromTransact(dealMemberAttributes.*:Gender);
+			SET personInfo.inds:MaritalStatus 		= recodeMaritalStatusFromTransact(dealMemberAttributes.*:FamilyStatus);
+			
+			CREATE FIELD personInfo.inds:IdentityCards.inds:IdentityCard AS idCard;
+			SET idCard.inds:IdType					= recodeIdTypeFromTransact(dealMemberAttributes.*:IdentityDocument);
+			SET idCard.inds:IdNum					= dealMemberAttributes.*:IdentityDocumentID;
+			SET idCard.inds:IssueDt					= dealMemberAttributes.*:IdentityDocumentDate;
+			SET idCard.inds:IssuedBy				= dealMemberAttributes.*:IdentityDocumentAuthority;
+			SET idCard.inds:ValidTo					= dealMemberAttributes.*:IdentityDocumentTerm;
+			
+			SET personInfo.inds:BirthPlace			= dealMemberAttributes.*:BirthPlace;
+			SET personInfo.inds:Resident			= dealMemberAttributes.*:ResidentFlag;
+			SET personInfo.inds:Citizenship			= dealMemberAttributes.*:Nationality;
+			
+			CREATE LASTCHILD OF personInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key 							= 'IIN';
+			SET idExt.Value 						= dealMemberAttributes.*:DealMemberID;
+			CREATE LASTCHILD OF personInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key 							= 'CIF';
+			SET idExt.Value 						= dealMemberAttributes.*:DealMemberEPKID;
+			CREATE LASTCHILD OF personInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key 							= 'TSMMB';
+			SET idExt.Value 						= dealMemberAttributes.*:DealMemberID;
+			
+			CREATE FIELD personInfo.Phones;
+			FOR contact AS dealMemberAttributes.*:ContactAttributes[] DO 
+				IF contact.*:ContactType IN ('1', '2', '3', '4', '5') THEN
+					CREATE LASTCHILD OF personInfo.Phones AS outCont NAME 'Phone';
+					SET outCont.PhoneType			= recodePhoneTypeFromTransact(contact.*:ContactType);
+					SET outCont.PhoneNum			= contact.*:Value;
+				END IF;
+			END FOR;
+			
+			CREATE FIELD personInfo.EMails; -- В схеме нет информации по Email
+			FOR contact AS dealMemberAttributes.*:ContactAttributes[] DO 
+				IF contact.*:ContactType IN ('6') THEN
+					CREATE LASTCHILD OF personInfo.EMails AS outCont NAME 'EMail';
+					SET outCont.EMailAddr			= contact.*:Value;
+				END IF;
+			END FOR;
+			
+			CREATE FIELD personInfo.RelPersons;
+			FOR clientTouch AS dealMemberAttributes.*:RoleAttributes[] DO 
+				CREATE LASTCHILD OF personInfo.RelPersons AS relPerson NAME 'RelPerson';
+				SET relPerson.RelPersonId.Key 		= 'MABPK';
+				SET relPerson.RelPersonId.Value		= clientTouch.*:DealMemberEPKID;
+				SET relPerson.RelationshipType		= clientTouch.*:Link;
+			END FOR; 
+			
+			SET personInfo.IsForeignPP 				= recodeForeignIndFromTransact(dealMemberAttributes.*:IPDLFlag);
+			SET personInfo.Segment	 				= recodeSegmentFromTransact(dealMemberAttributes.*:Segment);
+			SET personInfo.ClientJobTitle 			= dealMemberAttributes.*:Position;
+			SET personInfo.ClientWorkPlace			= dealMemberAttributes.*:Job;
+			SET personInfo.CustCategory 			= dealMemberAttributes.*:ClientCategory;
+	
+		END FOR;
+		
+		SET Environment.UserProperties.TSMUID				= inRef.TSMUID;	
+	END;
+END MODULE;
+
+/* Определения тип клинета ФЛ или же ЮЛ, а так же определение системы PRAGMA или же PKB */
+CREATE COMPUTE MODULE RequestForESB_PrepareFilter
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.ClientType = InputRoot.XMLNSC.*[<].*[<].*:DealMemberRequestAttributes.*:DealMemberType;	
+		SET Environment.UserProperties.SystemType = InputRoot.XMLNSC.*[<].*[<].*:BKIID;
+		
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+	
+END MODULE;
+
+/*
+ * Если ЮЛ то FALSE, если ФЛ то TRUE
+ */
+CREATE FILTER MODULE RequestForESB_CorpOrRetail
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		IF Environment.UserProperties.ClientType = '1' THEN
+			RETURN FALSE;
+		ELSE 
+			RETURN TRUE;
+		END IF;	
+	END;
+END MODULE;
+
+/* Сервис обашение по ФЛ по ВКИ и ПКБ CreditHistoryRequest -> KZGetCreditHistoryRq */
+CREATE COMPUTE MODULE RequestForESB_Convert_CreditHistoryRetail
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN				 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetCreditHistoryRq';		
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.*:*[<].*:*[<];
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetCreditHistoryRq;
+		
+		SET OutRq.RqUID					        = Environment.UserProperties.RqUID;
+		SET OutRq.RqTm						    = Environment.UserProperties.RqTm;
+		 
+		SET OutRq.ApplicationNumber 							= InpRq.*:ApplicationID;
+		SET OutRq.BKI 											= InpRq.*:BKIID;	
+		SET OutRq.PersonInfo.inds:PersonName.inds:LastName 		= InpRq.*:DealMemberRequestAttributes.*:LastName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:FirstName 	= InpRq.*:DealMemberRequestAttributes.*:FirstName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName 	= InpRq.*:DealMemberRequestAttributes.*:Patronymic;
+		
+		IF FIELDVALUE(InpRq.*:DealMemberRequestAttributes.*:DealMemberType) = '3' OR FIELDVALUE(InpRq.*:DealMemberRequestAttributes.*:DealMemberType) = '1' THEN
+			SET OutRq.PersonInfo.PersonIdType	= '2';		
+		ELSE		
+			SET OutRq.PersonInfo.PersonIdType 	= InpRq.*:DealMemberRequestAttributes.*:DealMemberType;
+		END IF;
+		
+		SET OutRq.PersonInfo.PersonId 		= InpRq.*:DealMemberRequestAttributes.*:DealMemberID;
+		FOR oldName AS InpRq.*:DealMemberRequestAttributesType.*:OldLastName[] DO
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'OldLastName';
+			SET OutRq.PersonInfo.OldLastName[<] VALUE = oldName;
+		END FOR;
+
+		SET OutRq.DealMemberType 	= InpRq.*:DealMemberRequestAttributes.*:DealMemberType;
+		SET OutRq.CompanyName 	    = InpRq.*:DealMemberRequestAttributes.*:CompanyName;
+		
+		SET Environment.UserProperties.TSMUID				= InpRq.*:GeneralInfo.*:MsgID;
+		SET Environment.UserProperties.MsgFrom				= InpRq.*:GeneralInfo.*:MsgFrom;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Маршрутизация в PRAGMA или же в ПКБ физ. лица
+ */
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_CreditHistoryRetail
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/* Сервис обращение по Юр. лицу ВКИ и ПКБ CreditHistoryRequest -> KZGetCreditHistoryRq */
+CREATE COMPUTE MODULE RequestForESB_Convert_CreditHistoryCorp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetCreditHistoryRq';		
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.*:*[<].*:*[<];
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetCreditHistoryRq;
+		
+		SET OutRq.RqUID					        = Environment.UserProperties.RqUID;
+		SET OutRq.RqTm						    = Environment.UserProperties.RqTm;
+		
+		IF FIELDVALUE(InpRq.*:BKIID) = 'PRAGMA' THEN
+			SET OutRq.BKI							= 'PRAGMA_CORP';		
+			
+			SET Environment.UserProperties.BKI_TYPE = 'PRAGMA_CORP';
+			SET Environment.UserProperties.CompanyName = InpRq.*:DealMemberRequestAttributes.*:CompanyName;	 
+	
+			DECLARE debtors REFERENCE TO OutRq;
+				
+			CREATE LASTCHILD OF OutRq AS debtors NAME 'DebtorsID';
+			
+			SET debtors.DebtorID.Uid		=	InpRq.*:GeneralInfo.*:MsgID;
+			SET debtors.DebtorID.KOD		=   InpRq.*:GeneralInfo.*:MsgFrom;	
+			SET debtors.DebtorID.DateReq	=   InpRq.*:GeneralInfo.*:MsgDate;
+			SET debtors.DebtorID.NumQuest	=	InpRq.*:ApplicationID;
+			SET debtors.DebtorID.IdBki		=	InpRq.*:BKIID;
+			
+			IF FIELDVALUE(InpRq.*:DealMemberRequestAttributes.*:DealMemberType) = '1' THEN
+				SET debtors.DebtorID.TypeID			=	'2';
+			ELSE
+				SET debtors.DebtorID.TypeID			=	InpRq.*:DealMemberRequestAttributes.*:DealMemberType;
+			END IF;
+			SET debtors.DebtorID.ID				= 	InpRq.*:DealMemberRequestAttributes.*:DealMemberID;
+			SET debtors.DebtorID.LastName		=	InpRq.*:DealMemberRequestAttributes.*:LastName;
+			SET debtors.DebtorID.FirstName		=	InpRq.*:DealMemberRequestAttributes.*:FirstName;
+			SET debtors.DebtorID.MiddleName		=	InpRq.*:DealMemberRequestAttributes.*:Patronymic;	
+			SET debtors.DebtorID.OldLastName	=	InpRq.*:DealMemberRequestAttributes.*:OldLastName;
+
+			SET OutRq.DealMemberType		    = 	InpRq.*:DealMemberRequestAttributes.*:DealMemberType;
+			SET OutRq.CompanyName    			=	InpRq.*:DealMemberRequestAttributes.*:CompanyName;		
+		ELSE			
+			SET Environment.UserProperties.BKI_TYPE = 'PKB_CORP'; 
+			
+			SET OutRq.ApplicationNumber 		= InpRq.*:ApplicationID;
+			SET OutRq.BKI 						= InpRq.*:BKIID;
+			SET OutRq.PersonInfo.inds:PersonName.inds:LastName 		= InpRq.*:DealMemberRequestAttributes.*:LastName;
+			SET OutRq.PersonInfo.inds:PersonName.inds:FirstName 	= InpRq.*:DealMemberRequestAttributes.*:FirstName;
+			SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName 	= InpRq.*:DealMemberRequestAttributes.*:Patronymic;
+						
+			IF FIELDVALUE(InpRq.*:DealMemberRequestAttributes.*:DealMemberType) = '1' THEN
+				SET OutRq.PersonInfo.PersonIdType 	= '3';
+			ELSE	
+				SET OutRq.PersonInfo.PersonIdType 	= InpRq.*:DealMemberRequestAttributes.*:DealMemberType;
+			END IF;
+			
+			SET OutRq.PersonInfo.PersonId 		= InpRq.*:DealMemberRequestAttributes.*:DealMemberID;			
+			
+			FOR oldName AS InpRq.*:DealMemberRequestAttributesType.*:OldLastName[] DO
+				CREATE LASTCHILD OF OutRq.PersonInfo NAME 'OldLastName';
+				SET OutRq.PersonInfo.OldLastName[<] VALUE = oldName;
+			END FOR;
+			
+			SET Environment.UserProperties.TSMUID				= InpRq.*:GeneralInfo.*:MsgID;
+			SET Environment.UserProperties.MsgFrom				= InpRq.*:GeneralInfo.*:MsgFrom;			
+		END IF;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Маршрутизация по GCVP
+ */
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_GCVP
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN	
+		SET OutputRoot = InputRoot;
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		-- Всегда одна система для запроса -- ГЦВП: urn:sbkzsystems:gcvp
+		SET systemId 	= 'urn:sbkzsystems:gcvpweb';
+		SET adapterType = 'urn:sbkztypes:esb:adapter';
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Константа для указания, что ищем адаптер системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	-- Идентификатор системы, в адаптер которой необходимо отправить запрос
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Сервис по обращению в ГЦВП "GCVPRequest -> KZGetPensionRq"
+ */
+CREATE COMPUTE MODULE RequestForESB_Convert_GCVPRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN   
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetPensionRq';			
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.*:*[<].*:*[<];
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetPensionRq;
+		
+		SET OutRq.RqUID					        = Environment.UserProperties.RqUID;
+		SET OutRq.RqTm						    = Environment.UserProperties.RqTm;
+		SET OutRq.TSMUID						= InpRq.*:GeneralInfo.*:MsgFrom;
+		  
+		SET OutRq.PersonInfo.inds:PersonName.inds:LastName 		= InpRq.*:DealMemberRequestAttributes.*:LastName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:FirstName 	= InpRq.*:DealMemberRequestAttributes.*:FirstName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName 	= InpRq.*:DealMemberRequestAttributes.*:Patronymic;
+		SET OutRq.PersonInfo.inds:BirthDt 	= convertFromMicrobizDate(InpRq.*:DealMemberRequestAttributes.*:BirthDate);
+		SET OutRq.PersonInfo.PersonIdType 	= InpRq.*:DealMemberRequestAttributes.*:RequestType; -- Будет 4
+		SET OutRq.PersonInfo.PersonId 		= InpRq.*:DealMemberRequestAttributes.*:DealMemberID;
+		SET OutRq.StartDate 				= convertFromMicrobizDate(InpRq.*:DealMemberRequestAttributes.*:BeginingDate);
+		SET OutRq.EndDate 					= convertFromMicrobizDate(InpRq.*:DealMemberRequestAttributes.*:EndingDate);
+		SET OutRq.Type						= 'DD6';
+		
+		SET Environment.UserProperties.MsgFrom				= InpRq.*:GeneralInfo.*:MsgFrom;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Запрос в Реестр ЛСБОО */
+CREATE COMPUTE MODULE RequestForESB_Convert_LSBOORequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZLSBOORequest';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:LSBOORequest.*:LSBOOReq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZLSBOORequest;
+		
+		SET outRef.RqUID					        = Environment.UserProperties.RqUID;
+		SET outRef.RqTm						        = Environment.UserProperties.RqTm;
+		SET outRef.SPName						    = 'TSMMB';
+		SET Environment.UserProperties.MsgFrom      = inRef.*:GeneralInfo.*:MsgFrom;	
+
+		SET outRef.ApplicationDate	                = inRef.*:ApplicationDate;
+		
+        DECLARE varDealMemberRequestAttributes REFERENCE TO outRef;
+
+		FOR inAttributes AS inRef.*:DealMemberRequestAttributes[] DO			
+ 
+          CREATE LASTCHILD OF outRef AS varDealMemberRequestAttributes NAME 'PersonInfo'; 
+
+	      SET varDealMemberRequestAttributes.DealMemberID        = inAttributes.*:DealMemberID;       
+	      SET varDealMemberRequestAttributes.DealMemberType      = inAttributes.*:DealMemberType;       
+	      SET varDealMemberRequestAttributes.CompanyName         = inAttributes.*:CompanyName;       
+	      SET varDealMemberRequestAttributes.LastName            = inAttributes.*:LastName;       
+	      SET varDealMemberRequestAttributes.FirstName           = inAttributes.*:FirstName;       
+	      SET varDealMemberRequestAttributes.Patronymic          = inAttributes.*:Patronymic;       
+		END FOR;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Повторный запрос AML. 
+ */
+CREATE COMPUTE MODULE RequestForESB_Convert_AMLRequest_Retail
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZBlackListRq';		
+		
+		DECLARE varLastName CHARACTER;
+		DECLARE varFirstName CHARACTER;
+		DECLARE varPatronymic CHARACTER;
+		DECLARE varCompanyName CHARACTER;
+
+		DECLARE varCompany CHARACTER;
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		DECLARE msgType CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.*:*[<].*:*[<];
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZBlackListRq;
+		
+		SET OutRq.RqUID					        = Environment.UserProperties.RqUID;
+		SET OutRq.RqTm					        = Environment.UserProperties.RqTm;
+		
+		IF InpRq.*:DealMemberRequestAttributes.*:DealMemberType = '1' THEN -- ЮЛ
+		   SET varLastName    = COALESCE(InpRq.*:DealMemberRequestAttributes.*:LastName,'');
+		   SET varFirstName   = COALESCE(InpRq.*:DealMemberRequestAttributes.*:FirstName,'');
+		   SET varPatronymic  = COALESCE(InpRq.*:DealMemberRequestAttributes.*:DealMemberPatronymic,'');
+
+		   SET varCompanyName = COALESCE(InpRq.*:DealMemberRequestAttributes.*:CompanyName,'');
+			
+		   IF varLastName <> '' AND varFirstName <> '' AND varPatronymic <> '' THEN	
+		   		SET varCompany     = varLastName || ' ' || varFirstName || ' ' || varPatronymic || ' | ' || varCompanyName;
+		   ELSE
+		   		SET varCompany     = varCompanyName;
+		   END IF;					
+		   SET varLastName    = '';
+		   SET varFirstName   = '';
+		   SET varPatronymic  = '';
+		ELSE -- ФЛ(2)
+		   SET varLastName    = COALESCE(InpRq.*:DealMemberRequestAttributes.*:LastName,'');
+		   SET varFirstName   = COALESCE(InpRq.*:DealMemberRequestAttributes.*:FirstName,'');
+		   SET varPatronymic  = COALESCE(InpRq.*:DealMemberRequestAttributes.*:DealMemberPatronymic,'');
+
+		   SET varCompanyName = '';
+		END IF;		
+				
+		SET OutRq.PersonInfo.inds:PersonName.inds:LastName 		= varLastName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:FirstName 	= varFirstName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName 	= varPatronymic;
+		SET OutRq.PersonInfo.PersonIdType 						= InpRq.*:DealMemberRequestAttributes.*:DealMemberType;
+		SET OutRq.PersonInfo.PersonId 							= InpRq.*:DealMemberRequestAttributes.*:DealMemberID;
+		SET OutRq.CompanyName									= varCompany;		
+		
+		SET OutRq.SPName										= 'TransactMB';
+		
+		IF msgType = 'AMLRequest' THEN
+			SET OutRq.AMLOnly									= '1';
+			SET OutRq.ParentRqUID								= InpRq.*:ParentOperationID;
+		END IF;
+		
+		SET Environment.UserProperties.TransactOperation 		= msgType;
+		SET Environment.UserProperties.TSMUID					= InpRq.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Маршрутизация в PRAGMA или же в ПКБ Юр. лица
+ */
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_CreditHistoryCorp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_AMLRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке - EPKIndividualEnrichmentReq
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_EPKIndividualRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос "Обновление данных компании в ЕПК": UpdatePersonDataToEpkRq -> KZSendMDMPrivateClientDataRq
+ * EPKCompanyEnrichmentRequest
+ **/ 
+CREATE COMPUTE MODULE RequestForESB_Convert_EPKEnrichmentRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZOrgSetDataRich';	
+				
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:*[<].*:*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+		DECLARE varType  INTEGER 0;
+
+		DECLARE varObjectType  CHARACTER '';
+		DECLARE varObjectType2 CHARACTER '';
+
+		DECLARE varName       CHARACTER '';
+		DECLARE varNameLast   CHARACTER '';
+		DECLARE varNameFirst  CHARACTER '';
+		DECLARE varNameFather CHARACTER '';
+
+		SET outRef.RqUID					        = Environment.UserProperties.RqUID;
+		SET outRef.RqTm						        = Environment.UserProperties.RqTm;
+		SET outRef.SPName							= 'TSMMB';
+		SET outRef.BankInfo = NULL;
+			
+		CREATE FIELD OutputRoot.XMLNSC.*[<].OrgInfo AS outRef;
+			 
+		SET outRef.Filial 							= inRef.*:BankBranch;
+		SET outRef.Department						= inRef.*:BankUnit;
+		SET outRef.Manager 							= inRef.*:CILogin;
+		SET outRef.CifId 							= inRef.*:DealMemberRequestAttributes.*:DealMemberEPKID;
+		SET outRef.Organization.Country      		= inRef.*:DealMemberRequestAttributes.*:Country;	 
+		SET outRef.Organization.BIN 				= inRef.*:DealMemberRequestAttributes.*:DealMemberID;
+		SET outRef.Organization.NameShort 			= inRef.*:DealMemberRequestAttributes.*:CompanyName;
+		SET outRef.Organization.NameFull 			= inRef.*:DealMemberRequestAttributes.*:ShortCompanyName;
+		SET outRef.Organization.RNN 				= ' '; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:IdentityDocumentID;
+		SET outRef.Organization.NameLat 			= ' '; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:LastName;
+		SET outRef.Organization.NameChar 			= ' '; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:FirstName;
+		SET outRef.Organization.RegistrationDate 	= SUBSTRING(inRef.*:DealMemberRequestAttributes.*:CertificateDate FROM 1 FOR 10);
+		SET outRef.Organization.Form 				= inRef.*:DealMemberRequestAttributes.*:LegalForm;		
+		
+		SET outRef.Signs.Sign.Type						= 'Segment';		
+		SET outRef.Signs.Sign.Id						= ' ';		
+		SET outRef.Signs.Sign.Since						= ' ';
+		SET outRef.Signs.Sign.Until						= ' ';
+		SET outRef.Signs.Sign.Value						= inRef.*:DealMemberRequestAttributes.*:Segment;
+
+		DECLARE outSign REFERENCE TO outRef.Signs;
+
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+		SET outSign.Type						= 'NumEmployees';		
+		SET outSign.Id						    = ' ';		
+		SET outSign.Since						= ' ';
+		SET outSign.Until						= ' ';
+		SET outSign.Value						= inRef.*:DealMemberRequestAttributes.*:EmployeesNumder;
+
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+		SET outSign.Type						= 'RegistrationNumber';		
+		SET outSign.Id							= ' ';		
+		SET outSign.Since						= ' ';
+		SET outSign.Until						= ' ';
+		SET outSign.Value						= inRef.*:DealMemberRequestAttributes.*:CertificateID;
+
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+		SET outSign.Type						= 'RegistrationIssuer';		
+		SET outSign.Id							= ' ';		
+		SET outSign.Since						= ' ';
+		SET outSign.Until						= ' ';
+		SET outSign.Value						= inRef.*:DealMemberRequestAttributes.*:CertificateAuthority;
+
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+		SET outSign.Type						= 'OKPO';		
+		SET outSign.Id							= ' ';		
+		SET outSign.Since						= ' ';
+		SET outSign.Until						= ' ';
+		SET outSign.Value						= inRef.*:DealMemberRequestAttributes.*:OKPO;
+
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+		SET outSign.Type						= 'EconomicActivityCode';		
+		SET outSign.Id							= ' ';		
+		SET outSign.Since						= ' ';
+		SET outSign.Until						= ' ';
+		SET outSign.Value						= inRef.*:DealMemberRequestAttributes.*:OKED;
+		
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+		SET outSign.Type						= 'Region';		
+		SET outSign.Id							= ' ';		
+		SET outSign.Since						= ' ';
+		SET outSign.Until						= ' ';
+		SET outSign.Value						= inRef.*:DealMemberRequestAttributes.*:Region;
+
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+		SET outSign.Type						= 'EconomicActivity';		
+		SET outSign.Id							= ' ';		
+		SET outSign.Since						= ' ';
+		SET outSign.Until						= ' ';
+		SET outSign.Value						= inRef.*:DealMemberRequestAttributes.*:FieldID;
+
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+		SET outSign.Type						= 'Nationality';		
+		SET outSign.Id							= ' ';		
+		SET outSign.Since						= ' ';
+		SET outSign.Until						= ' ';
+		SET outSign.Value						= inRef.*:DealMemberRequestAttributes.*:Nationality;
+
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+		SET outSign.Type						= 'IsForeignPublicPerson';		
+		SET outSign.Id							= ' ';		
+		SET outSign.Since						= ' ';
+		SET outSign.Until						= ' ';
+		SET outSign.Value						= inRef.*:DealMemberRequestAttributes.*:IPDL;
+
+		CREATE LASTCHILD OF outRef.Signs AS outSign NAME 'Sign';		
+		SET outSign.Type						= 'ResidentFlag';		
+		SET outSign.Id							= ' ';		
+		SET outSign.Since						= ' ';
+		SET outSign.Until						= ' ';
+		SET outSign.Value						= inRef.*:DealMemberRequestAttributes.*:ResidentFlag;
+
+		IF inRef.*:DealMemberRequestAttributes.*:DealMemberType = 'Ю' THEN
+			SET varObjectType = 'ORGANIZATION'; 			
+		ELSE
+			SET varObjectType = 'PERSON'; 			
+		END IF;
+
+		IF inRef.*:DealMemberRequestAttributes.*:FounderAttributes.*:FounderType = 'Ю' THEN
+			SET varObjectType2 = 'ORGANIZATION'; 			
+		ELSE
+			SET varObjectType2 = 'PERSON'; 			
+		END IF;
+
+		SET outRef.Source.Surrogate					= inRef.*:DealMemberRequestAttributes.*:DealMemberID;
+		SET outRef.Source.ObjectType				= varObjectType;
+		SET outRef.Source.SourceSystemCode			= 'TSMMB';
+
+        ------------------------------------------------------------------------------------------------------------------------------------------------------
+
+		DECLARE outLink REFERENCE TO outRef;
+		
+		FOR inChiefAttributes AS inRef.*:DealMemberRequestAttributes.*:ChiefAttributes[] DO			
+
+			CREATE LASTCHILD OF outRef AS outLink NAME 'Link';		
+				
+			--SET varType								= inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:ConnectionType;
+			SET outLink.Type							= 'Руководитель'; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:ConnectionType;
+			SET outLink.Since							= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd');
+			SET outLink.Until							= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd');
+			SET outLink.LinkedId					    = inChiefAttributes.*:DealMemberEPKID;
+			SET outLink.CapitalShare					= inRef.*:DealMemberRequestAttributes.*:FounderAttributes.*:Share;
+	
+			SET outLink.Client.CifId					= inChiefAttributes.*:DealMemberEPKID;
+			SET outLink.Client.Status					= ' ';
+			SET outLink.Client.Filial					= inRef.*:BankBranch;
+			SET outLink.Client.Department				= inRef.*:BankUnit; --inRef.*:DealMemberRequestAttributes.*:CertificateAuthority;
+			SET outLink.Client.Manager					= inRef.*:CILogin;
+			SET outLink.Client.DateCreated				= ' ';
+			SET outLink.Client.UNK						= ' ';
+			SET outLink.Client.ObjectType				= varObjectType2;
+					
+			SET outLink.Source2.Surrogate				= inChiefAttributes.*:DealMemberID;
+			SET outLink.Source2.ObjectType				= varObjectType2;
+			SET outLink.Source2.SourceSystemCode		= 'TSMMB';
+					
+			SET outLink.Person.NameLast					= inChiefAttributes.*:LastName;
+			SET outLink.Person.NameFirst				= inChiefAttributes.*:FirstName;
+			SET outLink.Person.NameFather				= inChiefAttributes.*:Patronymic;
+			SET outLink.Person.RNN						= ' '; ---inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:IdentityDocumentID;
+			SET outLink.Person.IIN						= inChiefAttributes.*:DealMemberID;
+			SET outLink.Person.Gender					= ' ';
+			SET outLink.Person.BirthPlace				= inChiefAttributes.*:BirthPlace;
+			SET outLink.Person.Country					= inChiefAttributes.*:Country;
+			SET outLink.Person.NameLastLat				= ' ';
+			SET outLink.Person.NameFirstLat				= ' ';
+			SET outLink.Person.NameFatherLat			= ' ';
+			SET outLink.Person.BirthDate				= SUBSTRING(inChiefAttributes.*:BirthDate FROM 1 FOR 10);
+			SET outLink.Person.Comment					= ' ';
+					
+			SET outLink.Document.Type					= inChiefAttributes.*:IdentityDocument;
+			SET outLink.Document.Id						= inChiefAttributes.*:IdentityDocumentID;
+			SET outLink.Document.Number					= inChiefAttributes.*:IdentityDocumentID;
+			SET outLink.Document.Series					= ' ';
+			SET outLink.Document.DateIssued				= SUBSTRING(inChiefAttributes.*:IdentityDocumentDate FROM 1 FOR 10);
+			SET outLink.Document.DateValid				= SUBSTRING(inChiefAttributes.*:IdentityDocumentTerm FROM 1 FOR 10);
+			SET outLink.Document.Issuer					= inChiefAttributes.*:IdentityDocumentAuthority;
+			SET outLink.Document.IssuerCode				= ' ';
+			SET outLink.Document.Country				= inChiefAttributes.*:Country;
+					
+	        DECLARE varReach REFERENCE TO outLink;
+			FOR inContactAttributes AS inRef.*:DealMemberRequestAttributes.*:ContactAttributes[] DO			
+	          CREATE LASTCHILD OF outLink.Reaches AS varReach NAME 'Reach'; 
+	
+		      SET varReach.Type                  = inContactAttributes.*:ContactType;       
+		      SET varReach.Value                 = inContactAttributes.*:Value;       
+	
+			END FOR;
+					
+			SET outLink.Address.Type					= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[1].*:AddressType;
+			SET outLink.Address.Id						= inChiefAttributes.*:IdentityDocumentID;
+			SET outLink.Address.Unstructured			= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[1].*:Address;
+			SET outLink.Address.PostCode				= inRef.*:DealMemberRequestAttributes.*:Region;
+			SET outLink.Address.DateIn					= ' ';
+			SET outLink.Address.DateOut					= ' ';
+			SET outLink.Address.Country					= inRef.*:DealMemberRequestAttributes.*:Country;
+			SET outLink.Address.Region					= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[1].*:Region;
+			SET outLink.Address.City					= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[1].*:Place;
+			SET outLink.Address.District				= ' '; --inRef.*:DealMemberRequestAttributes.*:AddressAttributes.*:AddressMatchFlag;
+			SET outLink.Address.Street					= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[1].*:Street;
+			SET outLink.Address.House					= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[1].*:House;
+			SET outLink.Address.Building				= ' ';
+			SET outLink.Address.Apartment				= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[1].*:Apartment;		
+	
+			SET outLink.Signs.Sign.Type					= 'Position'; -- inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:Position;		
+			SET outLink.Signs.Sign.Id					= inChiefAttributes.*:Entitlement;		
+			SET outLink.Signs.Sign.Since				= SUBSTRING(inChiefAttributes.*:SignatureDate FROM 1 FOR 10);
+			SET outLink.Signs.Sign.Until				= SUBSTRING(inChiefAttributes.*:SignatureDate FROM 1 FOR 10);
+			SET outLink.Signs.Sign.Value				= 'Руководитель'; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:OpenEndSignatoryFlag;
+		END FOR;
+
+		------------------------------------------------------------------------------------------------------------------------
+
+		FOR inFounderAttributes AS inRef.*:DealMemberRequestAttributes.*:FounderAttributes[] DO			
+
+			CREATE LASTCHILD OF outRef AS outLink NAME 'Link';		
+					
+			--SET varType									= varType + 1;
+			SET outLink.Type						    = 'Учредитель'; --varType;
+			SET outLink.Since						    = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd'); --inRef.*:DealMemberRequestAttributes.*:EmployeesNumder;
+			SET outLink.Until						    = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd'); --inRef.*:DealMemberRequestAttributes.*:CertificateID;
+			SET outLink.LinkedId					    = inFounderAttributes.*:DealMemberEPKID;
+			SET outLink.CapitalShare					= inFounderAttributes.*:Share;
+	
+			SET outLink.Client.CifId					= inFounderAttributes.*:DealMemberEPKID;
+			SET outLink.Client.Status					= ' ';
+			SET outLink.Client.Filial					= inRef.*:BankBranch;
+			SET outLink.Client.Department				= inRef.*:BankUnit; --inRef.*:DealMemberRequestAttributes.*:CertificateAuthority;
+			SET outLink.Client.Manager					= inRef.*:CILogin;
+			SET outLink.Client.DateCreated				= ' ';
+			SET outLink.Client.UNK						= ' ';
+			SET outLink.Client.ObjectType				= varObjectType2;
+					
+			SET outLink.Source2.Surrogate				= inFounderAttributes.*:DealMemberID;
+			SET outLink.Source2.ObjectType				= varObjectType2;
+			SET outLink.Source2.SourceSystemCode		= 'TSMMB';
+					
+			SET varNameLast								= SUBSTRING(inFounderAttributes.*:FounderName BEFORE ' ');
+			SET varName									= SUBSTRING(inFounderAttributes.*:FounderName AFTER ' ');
+			SET varNameFirst							= SUBSTRING(varName BEFORE ' ');
+			SET varNameFather							= SUBSTRING(varName AFTER ' ');
+
+			SET outLink.Person.NameLast					= varNameLast;    
+			SET outLink.Person.NameFirst				= varNameFirst;   
+			SET outLink.Person.NameFather				= varNameFather;   
+			SET outLink.Person.RNN						= ' '; -- inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:IdentityDocumentID;
+			SET outLink.Person.IIN						= inFounderAttributes.*:DealMemberID;  
+			SET outLink.Person.Gender					= ' ';
+			SET outLink.Person.BirthPlace				= ' ' ; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:BirthPlace;
+			SET outLink.Person.Country					= inRef.*:DealMemberRequestAttributes.*:Country;  
+			SET outLink.Person.NameLastLat				= ' ';
+			SET outLink.Person.NameFirstLat				= ' ';
+			SET outLink.Person.NameFatherLat			= ' ';
+			SET outLink.Person.BirthDate				= ' '; -- SUBSTRING(inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:BirthDate FROM 1 FOR 10); 
+			SET outLink.Person.Comment					= ' ';
+					
+			SET outLink.Document.Type					= ' '; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:IdentityDocument;
+			SET outLink.Document.Id						= ' '; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:IdentityDocumentID;
+			SET outLink.Document.Number					= ' ';
+			SET outLink.Document.Series					= ' ';
+			SET outLink.Document.DateIssued				= ' '; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:IdentityDocumentDate;
+			SET outLink.Document.DateValid				= ' '; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:IdentityDocumentTerm;
+			SET outLink.Document.Issuer					= ' '; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:IdentityDocumentAuthority;
+			SET outLink.Document.IssuerCode				= ' ';
+			SET outLink.Document.Country				= ' '; --inRef.*:DealMemberRequestAttributes.*:Country;
+					
+	        DECLARE varReach REFERENCE TO outLink;
+			FOR inContactAttributes AS inRef.*:DealMemberRequestAttributes.*:ContactAttributes[] DO			
+	          CREATE LASTCHILD OF outLink.Reaches AS varReach NAME 'Reach'; 
+	
+		      SET varReach.Type                  = inContactAttributes.*:ContactType;       
+		      SET varReach.Value                 = inContactAttributes.*:Value;       
+	
+			END FOR;
+					
+			SET outLink.Address.Type					= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[2].*:AddressType;
+			SET outLink.Address.Id						= inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:IdentityDocumentID;
+			SET outLink.Address.Unstructured			= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[2].*:Address;
+			SET outLink.Address.PostCode				= inRef.*:DealMemberRequestAttributes.*:Region;
+			SET outLink.Address.DateIn					= ' ';
+			SET outLink.Address.DateOut					= ' ';
+			SET outLink.Address.Country					= inRef.*:DealMemberRequestAttributes.*:Country;
+			SET outLink.Address.Region					= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[2].*:Region;
+			SET outLink.Address.City					= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[2].*:Place;
+			SET outLink.Address.District				= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[2].*:AddressMatchFlag;
+			SET outLink.Address.Street					= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[2].*:Street;
+			SET outLink.Address.House					= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[2].*:House;
+			SET outLink.Address.Building				= ' ';
+			SET outLink.Address.Apartment				= inRef.*:DealMemberRequestAttributes.*:AddressAttributes[2].*:Apartment;		
+
+			SET outLink.Sign.Type				= 'ResidentFlag';
+			SET outLink.Sign.Id					= ' '; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:Entitlement;		
+			SET outLink.Sign.Since				= ' '; --CAST(inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:SignatureDate AS CHARACTER FORMAT 'yyyy-MM-dd');
+			SET outLink.Sign.Until				= ' '; --CAST(inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:SignatureDate AS CHARACTER FORMAT 'yyyy-MM-dd');
+			SET outLink.Sign.Value				= inFounderAttributes.*:ResidentFlag; --inRef.*:DealMemberRequestAttributes.*:ChiefAttributes.*:OpenEndSignatoryFlag;
+
+		END FOR;
+
+		------------------------------------------------------------------------------------------------------------------------
+		
+		SET outRef.EventCode = inRef.RequestData.ChangedOrganization.Event.EventCode;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_EPKEnrichmentRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;		
+	END;
+END MODULE;
+
+/*
+ *   GetBackOffice from MB to QPRAGMA   
+ */
+CREATE COMPUTE MODULE RequestForESB_Convert_QPragmaEnrichmentRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetBackOfficeRq';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:*[<].*:*[<];
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetBackOfficeRq;
+		
+		SET OutRq.RqUID					        	= Environment.UserProperties.RqUID;
+		SET OutRq.RqTm						        = Environment.UserProperties.RqTm;
+		SET OutRq.SPName						    = 'TSMMB';
+		
+		SET Environment.UserProperties.MsgFrom       = inRef.*:GeneralInfo.*:MsgFrom;
+		SET Environment.UserProperties.ApplicationID = inRef.*:CreditRequestAttributes.*:ApllicationID;	
+		
+		SET OutRq.(XMLNSC.NamespaceDecl)xmlns:banks 			= banks;
+		SET OutRq.(XMLNSC.NamespaceDecl)xmlns:cards 			= cards;
+		
+		SET OutRq.BankInfo.banks:RegionId						= SUBSTRING(inRef.*:BankBranch FROM 2);
+		SET OutRq.BankInfo.banks:AgencyId						= inRef.*:BankUnit;
+
+		SET OutRq.CardAcctId.cards:ProdType						= inRef.*:CreditRequestAttributes.*:ProductName;
+		SET OutRq.CardAcctId.cards:ProductType					= inRef.*:CreditRequestAttributes.*:ProductName;		
+		SET OutRq.CardAcctId.cards:CurCode						= inRef.*:CreditRequestAttributes.*:"Currency_numerical";		
+		SET OutRq.CardAcctId.CreditLimit						= inRef.*:CreditRequestAttributes.*:CreditSumm;
+		SET OutRq.DSKey											= inRef.*:CreditRequestAttributes.*:DigitalSignature;
+		SET OutRq.ManLogin										= inRef.*:CILogin;
+		SET OutRq.ManData										= inRef.*:CIName;
+		
+		DECLARE amtRec REFERENCE TO OutRq;
+		DECLARE loan REFERENCE TO OutRq;
+		CREATE FIELD OutRq.LoanInfo AS loan;
+		CREATE FIELD loan.ExtAmountInfo;
+		CREATE LASTCHILD OF loan.ExtAmountInfo AS amtRec NAME 'ExtAmountRec';
+		SET amtRec.AmtType										= 'COMFORREG';
+
+		CREATE LASTCHILD OF loan.ExtAmountInfo AS amtRec NAME 'ExtAmountRec';
+		SET amtRec.AmtType										= 'COMFORCASH';
+
+		CREATE LASTCHILD OF loan.ExtAmountInfo AS amtRec NAME 'ExtAmountRec';
+		SET amtRec.AmtType										= 'COMFORCRED';
+		
+		SET loan.TermLoan										= inRef.*:CreditRequestAttributes.*:CreditTerm;
+		SET loan.LoanRate										= inRef.*:CreditRequestAttributes.*:InterestRate;
+		
+		CASE inRef.*:CreditRequestAttributes.*:RepaymentType 
+			WHEN 'A' THEN  
+				SET loan.RepaymentType									= '1';
+			WHEN 'D' THEN
+				SET loan.RepaymentType									= '2';
+		END CASE;
+					
+		SET loan.DocNumber										= inRef.*:CreditRequestAttributes.*:ApplicationID;
+
+		SET loan.RejectionReason								= inRef.*:CreditRequestAttributes.*:DeclineReason;
+		SET loan.DecisionDocNumber								= inRef.*:CreditRequestAttributes.*:ApprovedDecisionID;
+		SET loan.DecisionDocDate								= inRef.*:CreditRequestAttributes.*:ApprovedDecisionDate;
+		SET loan.ApprovedDecisionTerm							        = inRef.*:CreditRequestAttributes.*:ApprovedDecisionTerm;-- u07357 17.08.2015
+		
+		CREATE LASTCHILD OF loan NAME 'Participants';
+		DECLARE participant REFERENCE TO OutRq;
+		DECLARE idExt REFERENCE TO OutRq;
+		FOR client AS inRef.*:DealMemberRequestAttributes[] DO
+			CREATE LASTCHILD OF loan.Participants AS participant NAME 'Participant';
+			SET participant.PartType							= client.*:DealMemberRole;
+			SET participant.PersonInfo.inds:NameAddrType		= 'Customer';
+			SET participant.PersonInfo.inds:PersonName.inds:LastName	= COALESCE(client.*:LastName,client.*:CompanyName);
+			SET participant.PersonInfo.inds:PersonName.inds:FirstName	= client.*:FirstName;
+			SET participant.PersonInfo.inds:PersonName.inds:MiddleName	= client.*:Patronymic;
+			
+			CREATE LASTCHILD OF participant.PersonInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key												= 'CIF';
+			SET idExt.Value												= client.*:DealMemberEPKID;
+			CREATE LASTCHILD OF participant.PersonInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key												= 'IIN';
+			SET idExt.Value												= client.*:DealMemberID;
+
+			SET participant.PersonInfo.ClientCategory					= inRef.*:CreditRequestAttributes.*:DealMemberType;	
+		END FOR;
+		
+		SET loan.LoanPurpose											= '0'||inRef.*:CreditRequestAttributes.*:CreditPurpose;
+		SET loan.Security												= inRef.*:CreditRequestAttributes.*:Collateral;
+		
+		CREATE LASTCHILD OF OutRq NAME 'Commissions';
+		DECLARE outComm REFERENCE TO OutRq;
+				
+		FOR feeAttr AS inRef.*:FeeRequestAttributes[] DO	
+			CREATE LASTCHILD OF OutRq.Commissions AS outComm NAME 'Commission';
+			
+			SET outComm.Code		= feeAttr.*:FeeID;
+			SET outComm.Name		= feeAttr.*:FeeName;	
+			SET outComm.Period		= feeAttr.*:Type;
+			SET outComm.Enrollment	= feeAttr.*:Method;		
+			SET outComm.Amount		= feeAttr.*:Value;
+		END FOR;
+			
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_QPragmaEnrichmentRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		                                                                                                                               
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);	       
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/* Запрос в СБДК и AML */
+CREATE COMPUTE MODULE RequestForESB_Convert_AML_SBDKRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		DECLARE varFIO CHARACTER;
+		DECLARE varLastName CHARACTER;
+		DECLARE varFirstName CHARACTER;
+		DECLARE varPatronymic CHARACTER;
+		DECLARE varCompanyName CHARACTER;
+
+		DECLARE varCompany CHARACTER;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSBDKQP';		
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.*:AML_SBDKRequest.*:AML_SBDKReq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZSBDKQP;
+
+		SET OutRq.RqUID					            			= Environment.UserProperties.RqUID;
+		SET OutRq.RqTm						        			= Environment.UserProperties.RqTm;
+		SET OutRq.SPName	     				                = 'TransactMB';
+		SET OutRq.TSMUID 	                    				= '000000000000000000000000';
+		
+		IF InpRq.*:DealMemberRequestAttributes.*:DealMemberType = '1' THEN -- ЮЛ
+		   SET varLastName    = COALESCE(InpRq.*:DealMemberRequestAttributes.*:LastName,'');
+		   SET varFirstName   = COALESCE(InpRq.*:DealMemberRequestAttributes.*:FirstName,'');
+		   SET varPatronymic  = COALESCE(InpRq.*:DealMemberRequestAttributes.*:Patronymic,'');
+
+		   SET varCompanyName = COALESCE(InpRq.*:DealMemberRequestAttributes.*:CompanyName,'');
+
+		   SET varFIO         = varLastName || ' ' || varFirstName || ' ' || varPatronymic;		
+
+		   IF varFIO <> '' THEN 
+		      SET varCompany     = varFIO || ' | ' || varCompanyName;		
+		   ELSE 	
+		      SET varCompany     = varCompanyName;		
+		   END IF; 
+		   			
+		   SET varLastName    = '';
+		   SET varFirstName   = '';
+		   SET varPatronymic  = '';
+		ELSE -- ФЛ(2)
+		   SET varLastName    = COALESCE(InpRq.*:DealMemberRequestAttributes.*:LastName,'');
+		   SET varFirstName   = COALESCE(InpRq.*:DealMemberRequestAttributes.*:FirstName,'');
+		   SET varPatronymic  = COALESCE(InpRq.*:DealMemberRequestAttributes.*:Patronymic,'');
+
+		   SET varCompanyName = '';
+		END IF; 
+			
+		SET OutRq.PersonInfo.inds:PersonName.inds:LastName 		= varLastName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:FirstName 	= varFirstName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName 	= varPatronymic;
+		SET OutRq.PersonInfo.PersonIdType 						= InpRq.*:DealMemberRequestAttributes.*:DealMemberType;
+		SET OutRq.PersonInfo.PersonId 							= InpRq.*:DealMemberRequestAttributes.*:DealMemberID;
+		SET OutRq.PersonInfo.CILogin 							= InpRq.*:CILogin;
+		SET OutRq.CompanyName									= varCompany;		
+		
+		SET OutRq.AMLOnly									    = '1';  /* если пусто, то запрос в QP и AML, иначе если 1, то только в AML */
+		SET OutRq.MBOnly										= '1'; /* запрос в QP - 1, без обращения в Old Pragma */
+		
+		SET OutRq.ParentRqUID									= Environment.UserProperties.RqUID;		
+		SET Environment.UserProperties.MsgFrom                  = InpRq.*:GeneralInfo.*:MsgFrom;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_Convert_2EPKIndividualRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		DECLARE vIndividualsNumberInRequest CHARACTER;
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZEPKIndividualRequest';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:EPKIndividualRequest.*:EPKIndividualReq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZEPKIndividualRequest;
+		
+		SET outRef.RqUID					        = Environment.UserProperties.RqUID;
+		SET outRef.RqTm						        = Environment.UserProperties.RqTm;
+		SET outRef.SPName						    = 'TSMMB';
+		SET Environment.UserProperties.MsgFrom      = inRef.*:GeneralInfo.*:MsgFrom;	
+
+		SET vIndividualsNumberInRequest	            = inRef.*:IndividualsNumberInRequest;
+		
+        DECLARE varIndividualRequestAttributes REFERENCE TO outRef;
+
+		FOR inAttributes AS inRef.*:IndividualRequestAttributes[] DO			
+          CREATE LASTCHILD OF outRef AS varIndividualRequestAttributes NAME 'PersonInfo'; 
+
+	      SET varIndividualRequestAttributes.DealMemberID                     = inAttributes.*:DealMemberID;       
+	      SET varIndividualRequestAttributes.IndividualsNumberInRequest       = vIndividualsNumberInRequest;       
+		END FOR;
+
+		RETURN TRUE;
+	END;
+END MODULE;

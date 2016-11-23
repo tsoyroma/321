@@ -1,0 +1,192 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.imap.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+/**
+ * Сохраняет оригинальный заголовок MQ-сообщения,
+ * в т.ч. и CorrelationId.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForIMAP_SaveOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.Source.MQMD 		= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 	= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 		= InputBody;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+/**
+ * Определяет операцию для дальнейшей обработки
+ * в потоке.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForIMAP_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZSendSMSRq' THEN
+			SET labelName = 'KZSendSMSRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Формирует XML сообщение в iMAP из
+ * сообщения МДО.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForIMAP_ConvertMDO2IMAP
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		DECLARE docRoot REFERENCE TO OutputRoot;
+		DECLARE InpRq REFERENCE TO InputBody.*[<];
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		CREATE FIELD OutputRoot.XMLNSC.IMAP AS docRoot; 
+		
+		SET docRoot.Message.(XMLNSC.Attribute)id = CreateMessageId();
+		SET docRoot.Message.SendInfo.version = InpRq.VersionId;
+		SET docRoot.Message.SendInfo.msisdn = cleanupPhoneNum(InpRq.PhoneNumber);
+		SET docRoot.Message.SendInfo.info = InpRq.SMSText;
+		
+		RETURN TRUE;
+	END;
+	
+	/**
+	 * Формирует идентификатор сообщения на основе
+	 * SPName, RqUID и OperUID.
+	 **/
+	CREATE FUNCTION CreateMessageId() RETURNS CHARACTER
+	BEGIN
+		DECLARE spName CHARACTER;
+		IF EXISTS(InputBody.*[<].SPName[]) AND InputBody.*[<].SPName <> '' THEN
+			SET spName = InputBody.*[<].SPName;
+		ELSE
+			SET spName = 'X'; -- система неизвестна
+		END IF; 
+		
+		DECLARE resultId CHARACTER;
+		SET resultId = 'sendinfo.' || spName || '.' || InputBody.*[<].RqUID;
+		IF EXISTS(InputBody.*[<].OperUID[]) AND InputBody.*[<].OperUID <> '' THEN
+			SET resultId = resultId || '.' || InputBody.*[<].OperUID;
+		END IF;
+		
+		RETURN resultId;
+	END;
+	
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Создание сообщения с ошибкой в случае проблем с ответом от iMAP.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForIMAP_CreateErrorResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE FIELD OutputRoot.XMLNSC.KZSendSMSRs;
+		CALL FillMDOStandartElementsRs(Environment.UserProperties.Source.Body, 
+				OutputRoot.XMLNSC);
+		
+		SET OutputRoot.XMLNSC.KZSendSMSRs.Status.ifxca:StatusCode = ERR_CODE;
+		SET OutputRoot.XMLNSC.KZSendSMSRs.Status.ifxca:StatusDesc = ERR_CODE_DESC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Преобразование полученного от iMAP сообщения
+ * об ошибке.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForIMAP_TransformErrorResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE FIELD OutputRoot.XMLNSC.KZSendSMSRs;
+		CALL FillMDOStandartElementsRs(Environment.UserProperties.Source.Body, 
+				OutputRoot.XMLNSC);
+		
+		DECLARE InpRs REFERENCE TO InputRoot.XMLNSC.IMAP;
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.KZSendSMSRs;
+		
+		DECLARE rqUID, operUID, spName CHARACTER;
+		CALL ParseMessageId(
+				InpRs.Message.(XMLNSC.Attribute)id,
+				rqUID, operUID, spName
+			);
+		
+		SET OutRs.RqUID	= rqUID;
+		SET OutRs.RqTm	= CURRENT_TIMESTAMP;
+		SET OutRs.OperUID = operUID;
+		SET OutRs.SPName = spName;
+		SET OutRs.Status.ifxca:StatusCode = InpRs.Message.Error.errorCode;
+		SET OutRs.Status.ifxca:Severity = 'Error';
+		SET OutRs.Status.ifxca:StatusDesc = InpRs.Message.Error.errorMessage 
+				|| ' ' || InpRs.Message.Error.errorDetail;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Восстанавливает оригинальный заголовок MQ-сообщения,
+ * в т.ч. и CorrelationId.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForIMAP_RestoreOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+	
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(Environment.UserProperties.Source, OutputLocalEnvironment);
+		
+		SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+

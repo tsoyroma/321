@@ -1,0 +1,153 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.transact.esql
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRq (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].SPName	= 'Transact';
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;
+	
+END;
+
+/**
+ * Заполнение стандартных полей Transact в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillTransactStandartElementsRs (IN inroot REFERENCE, IN outroot REFERENCE, IN env REFERENCE)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	IF FIELDVALUE(inroot.*:*[<].TSMUID) <> '' THEN
+		SET outroot.*:*[<].TSMUID	= FIELDVALUE(inroot.*:*[<].TSMUID);
+	ELSE
+		SET outroot.*:*[<].TSMUID	= COALESCE(env.UserProperties.TSMUID,'');
+	END IF;
+	
+	DECLARE statusCode CHARACTER COALESCE(inroot.*:*[<].Status.*:StatusCode, '');
+	IF statusCode='-100' THEN
+		SET statusCode = '-4';
+	END IF;
+	
+	SET outroot.*:*[<].Status.StatusCode VALUE	= statusCode;
+	SET outroot.*:*[<].Status.StatusDesc VALUE	= COALESCE(inroot.*:*[<].Status.*:StatusDesc, '');
+	
+END;
+
+/**
+ * Заполнение стандартных полей Transact в нотификациях от шины
+ **/
+CREATE PROCEDURE FillTransactStandartElementsNf (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	DECLARE regionId CHARACTER FIELDVALUE(inroot.*:*[<].BankInfo.*:RegionId);	
+	DECLARE agencyId CHARACTER FIELDVALUE(inroot.*:*[<].BankInfo.*:AgencyId);
+	
+	SET outroot.*:*[<].RqUID				= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm					= inroot.*:*[<].RqTm;
+	IF regionId <> '' THEN 
+		SET outroot.*:*[<].BankInfo.RegionId	= regionId;
+	END IF;
+	IF agencyId <> '' THEN 
+		SET outroot.*:*[<].BankInfo.AgencyId	= agencyId;
+	END IF;
+	SET outroot.*:*[<].TSMUID				= inroot.*:*[<].TSMUID;
+	
+END;
+
+/**
+ * Замена отсутствующих значений дефолтными 
+ **/
+CREATE FUNCTION replaceAbsentValue(IN incomingValue CHARACTER, IN defaultValue CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF incomingValue <> '' THEN
+		RETURN incomingValue;
+	ELSE		
+		RETURN defaultValue; 
+	END IF;
+END;
+
+CREATE FUNCTION recodeAddressTypeFromTransact(IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN '1' THEN 'Home'
+		WHEN '2' THEN 'RegAddress'
+		ELSE addressType
+	END;
+END;
+
+CREATE FUNCTION recodeGenderFromTransact(IN gender CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE gender
+		WHEN '1' THEN 'M'
+		WHEN '2' THEN 'F'
+		ELSE gender
+	END;
+END;
+
+CREATE FUNCTION recodeMaritalStatusFromTransact(IN status CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE status
+		WHEN '1' THEN 'Single'
+		WHEN '2' THEN 'Married'
+		WHEN '3' THEN 'Divorced'
+		WHEN '4' THEN 'Widow'
+		ELSE status
+	END;
+END;
+
+CREATE FUNCTION recodeIdTypeFromTransact(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN '1' THEN '3'
+		WHEN '2' THEN '1'
+		WHEN '3' THEN '2'
+		ELSE type
+	END;
+END;
+
+CREATE FUNCTION recodePhoneTypeFromTransact(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN '1' THEN 'DayPhone'
+		WHEN '2' THEN 'Home'
+		WHEN '3' THEN 'Work'
+		WHEN '4' THEN 'Mobile'
+		WHEN '5' THEN 'Mobile_add'
+		ELSE type
+	END;
+END;
+
+CREATE FUNCTION recodeForeignIndFromTransact(IN indicator CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE indicator
+		WHEN '1' THEN 'N'
+		WHEN '2' THEN 'Y'
+		ELSE indicator
+	END;
+END;
+
+
+CREATE FUNCTION isNegativeNumber(IN strValue CHARACTER) RETURNS BOOLEAN 
+BEGIN
+	DECLARE result BOOLEAN FALSE;
+	IF LEFT(strValue,1)='-' THEN
+		DECLARE intValue INTEGER;
+		SET intValue = CAST(strValue AS INTEGER DEFAULT 0);
+		IF (intValue < 0) THEN
+			SET result = TRUE;
+		END IF;	
+	END IF;	
+	RETURN result;
+END;
+
+CREATE FUNCTION recodeSegmentFromTransact(IN segment CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE segment
+		WHEN 'MMS' THEN 'MAS'
+		ELSE segment
+	END;
+END;
+

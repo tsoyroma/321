@@ -1,0 +1,766 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sbol.esql
+
+PATH ru.croc.sbkz.utils;
+
+/**
+ * Установка переменных окружения для логгирования
+ * и маршрутизации ответа.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_SetEnvironment
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- дальнейшее взаимодействие происходит по MQ, поэтому убираем заголовок HTTP
+		SET OutputRoot.HTTPInputHeader = null;
+		-- сохраним идентификатор запроса для дальнейшего ответа
+		SET Environment.UserProperties.HTTPRequestIdentifier = CAST(InputLocalEnvironment.Destination.HTTP.RequestIdentifier AS CHARACTER);
+		
+		DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.UFXMsg;
+		
+		--Сохраняем идентификатор запроса для логирования и необходимую информацию для случая - таймаута
+		SET Environment.UserProperties.RqUID		= COALESCE(outRoot.MsgId);
+		SET Environment.UserProperties.SPName		= FIELDVALUE(outRoot.Source.(XMLNSC.Attribute)app);
+		SET Environment.UserProperties.Operation	= COALESCE(ResolveSbolOperation(outRoot), 'UNKNOWN');
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Маршрутизирует поток в соответствие с
+ * обрабатываемой операцией.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.UserProperties.Operation;
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZGetPrivateClientAccountList' THEN
+			SET labelName = 'KZGetPrivateClientAccountList';
+		WHEN 'KZGetPrivateClientCreditPeriods' THEN
+			SET labelName = 'KZGetPrivateClientCreditPeriods';
+		WHEN 'KZPrivateMoneyTransfer' THEN
+			SET labelName = 'KZPrivateMoneyTransfer';
+		WHEN 'KZPrivateFreeReqPayment' THEN
+			SET labelName = 'KZPrivateFreeReqPayment';
+		WHEN 'KZPrivateFreeReqPaymentCan' THEN
+			SET labelName = 'KZPrivateFreeReqPaymentCan';
+		WHEN 'KZGetTransactionsInfo' THEN
+			SET labelName = 'KZGetTransactionsInfo';
+		WHEN 'KZGetCrossCurrRate' THEN
+			SET labelName = 'KZGetCrossCurrRate';
+		WHEN 'KZPrivateMoneyTransferCan' THEN
+			SET labelName = 'KZPrivateMoneyTransferCan';
+		WHEN 'KZGetPrivateClientPaySchedule' THEN
+			SET labelName = 'KZGetPrivateClientPaySchedule';
+		WHEN 'KZMngSMSInfoService' THEN
+			SET labelName = 'KZMngSMSInfoService';
+		ELSE
+			-- Неизвестный тип сообщения 	
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Преобразует сообщение в формате UFX в формат МДО
+ * для операции KZGetPrivateClientAccountList.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_AccountList
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		DECLARE curElm REFERENCE TO outRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientAccountListRq';
+		
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		-- TODO: check SPName assignment!
+		SET outRoot.SPName = FIELDVALUE(inRoot.Source.(XMLNSC.Attribute)app);
+		SET outRoot.RegNumber = inRoot.MsgData.Information.RegNumber;
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'IIN';
+		SET curElm.Value = SUBSTRING(inRoot.MsgData.Information.ObjectFor.ClientIDT.CustomIDT BEFORE '-');
+		CREATE LASTCHILD OF outRoot.PersonInfo AS curElm NAME 'PersonIdExt';
+		SET curElm.Key = 'CUSTCODE';
+		SET curElm.Value = inRoot.MsgData.Information.ObjectFor.ClientIDT.CustomCode;
+		
+		SET outRoot.ServiceAttr.AttrId = 'VERS';
+		SET outRoot.ServiceAttr.AttrValue = FIELDVALUE(inRoot.(XMLNSC.Attribute)version);
+		
+		FOR parm AS inRoot.MsgData.Information.ResultDtls.Filter.ParmsInfo.Parm[] DO
+			IF parm.ParmCode = 'ACC_TYPE' THEN
+				DECLARE paramValue CHARACTER FIELDVALUE(parm.Value); 
+				WHILE CONTAINS(paramValue,',') DO
+					DECLARE oneParam CHARACTER SUBSTRING(paramValue BEFORE ',');
+					SET paramValue = SUBSTRING(paramValue AFTER ',');
+					CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE oneParam;	
+				END WHILE;
+				CREATE LASTCHILD OF outRoot AS curElm NAME 'AccountKind' VALUE paramValue;				
+			END IF;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Преобразует сообщение в формате UFX в формат МДО
+ * для операции KZGetPrivateClientCreditPeriods
+ * (взаимодействие «Получение списка отчётных периодов кредита»).
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientCreditPeriodsRq';
+		
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'VERS';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.(XMLNSC.Attribute)version;
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'TAPP';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.Target.(XMLNSC.Attribute)app;
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'TROLE';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.Target.(XMLNSC.Attribute)role;
+		SET outRoot.AcctReq.AcctId = inRoot.MsgData.CustomerProfile.Requestor.ContractNumber;
+		SET outRoot.AcctSource.AcctId = inRoot.MsgData.CustomerProfile.Source.ContractNumber;
+		SET outRoot.ContractInfo.ContractNumber 
+				= THE(SELECT ITEM p.Value FROM inRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[] AS p WHERE p.ParamCode = 'CREDIT');
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Преобразует сообщение в формате UFX в формат МДО
+ * для операции KZPrivateMoneyTransfer
+ * (взаимодействие «Перевод средств между счетами»).
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_Transfer
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.UserProperties.Source.Body 		= 
+								CAST(ASBITSTREAM(InputRoot.XMLNSC CCSID 1208)
+									 AS CHARACTER CCSID 1208 
+								);
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZPrivateMoneyTransferRq';
+		
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+		SET outRoot.TransactionType = inRoot.MsgData.Doc.TransType.TransCode.MsgCode;
+		
+		DECLARE attr REFERENCE TO outRoot;
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+		SET attr.AttrId 		= 'VERS';
+		SET attr.AttrValue 		= inRoot.(XMLNSC.Attribute)version;
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+		SET attr.AttrId 		= 'TAPP';
+		SET attr.AttrValue		= inRoot.Target.(XMLNSC.Attribute)app;
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+		SET attr.AttrId 		= 'TROLE';
+		SET attr.AttrValue 		= inRoot.Target.(XMLNSC.Attribute)role;
+		FOR parm AS inRoot.MsgData.Doc.DocRefSet.Parm[] DO
+			IF parm.ParmCode IN ('RRN', 'SRN', 'STAN', 'CPID') THEN
+				CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+				SET attr.AttrId			= parm.ParmCode;
+				SET attr.AttrValue 		= parm.Value;
+			END IF;
+		END FOR;
+		
+		DECLARE xInfo REFERENCE TO outRoot;
+		CREATE LASTCHILD OF outRoot AS xInfo NAME 'XferInfo';
+		DECLARE acct REFERENCE TO outRoot;
+		CREATE LASTCHILD OF xInfo AS acct NAME 'AcctFrom';
+		SET acct.AcctId = inRoot.MsgData.Doc.Originator.ContractNumber;
+		
+		DECLARE extId REFERENCE TO outRoot;
+		CREATE LASTCHILD OF acct AS extId NAME 'ExtAcctId';
+		SET extId.Key 					= 'RBSN';
+		SET extId.Value 				= inRoot.MsgData.Doc.Originator.RBSNumber;		
+		CREATE LASTCHILD OF acct AS extId NAME 'ExtAcctId';
+		SET extId.Key 					= 'MID';
+		SET extId.Value 				= inRoot.MsgData.Doc.Originator.MemberId;		
+		
+		SET acct.ClientInfo.PersonInfo.inds:PersonName.inds:LastName		= inRoot.MsgData.Doc.Originator.Client.ClientInfo.LastName;
+		SET acct.ClientInfo.PersonInfo.PersonIdExt.Key 						= 'TAXID';
+		SET acct.ClientInfo.PersonInfo.PersonIdExt.Value 					= inRoot.MsgData.Doc.Originator.Client.ClientInfo.TaxpayerIdentifier;		
+		
+		CREATE LASTCHILD OF xInfo AS acct NAME 'AcctTo';		
+		SET acct.AcctId 													= inRoot.MsgData.Doc.Destination.ContractNumber;
+		SET acct.ClientInfo.PersonInfo.inds:PersonName.inds:LastName		= inRoot.MsgData.Doc.Destination.Client.ClientInfo.LastName;
+		SET acct.ClientInfo.PersonInfo.PersonIdExt.Key 						= 'TAXID';
+		SET acct.ClientInfo.PersonInfo.PersonIdExt.Value 					= inRoot.MsgData.Doc.Destination.Client.ClientInfo.TaxpayerIdentifier;		
+		CREATE LASTCHILD OF acct AS extId NAME 'ExtAcctId';
+		SET extId.Key 					= 'RBSN';
+		SET extId.Value 				= inRoot.MsgData.Doc.Destination.RBSNumber;		
+		CREATE LASTCHILD OF acct AS extId NAME 'ExtAcctId';
+		SET extId.Key 					= 'MID';
+		SET extId.Value 				= inRoot.MsgData.Doc.Destination.MemberId;
+		
+		SET xInfo.TransPurpose			= inRoot.MsgData.Doc.Description;
+		SET xInfo.TransDt				= inRoot.MsgData.Doc.Transaction.PhaseDate;
+		SET xInfo.Amount				= inRoot.MsgData.Doc.Transaction.Amount;
+		SET xInfo.AmtCur				= inRoot.MsgData.Doc.Transaction.Currency;
+		
+		DECLARE amt REFERENCE TO outRoot;
+		CREATE LASTCHILD OF xInfo AS amt NAME 'TransAddAmt';
+		SET amt.AmtType					= inRoot.MsgData.Doc.Transaction.Extra.Type;
+		SET amt.Amount					= inRoot.MsgData.Doc.Transaction.Extra.Amount;
+		SET amt.AmtCurr					= inRoot.MsgData.Doc.Transaction.Extra.Currency;
+		SET amt.AddInfo					= inRoot.MsgData.Doc.Transaction.Extra.Details;
+		
+		DECLARE bInfo REFERENCE TO outRoot;
+		CREATE LASTCHILD OF xInfo AS bInfo NAME 'BillingInfo';
+		SET bInfo.TransDt				= inRoot.MsgData.Doc.Billing.PhaseDate;
+		SET bInfo.Amount				= inRoot.MsgData.Doc.Billing.Amount;
+		SET bInfo.AmtCurr				= inRoot.MsgData.Doc.Billing.Currency;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Преобразует сообщение в формате UFX в формат МДО
+ * для операции KZPrivateMoneyTransferFree
+ * (взаимодействие «Перевод средств между счетами»).
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDOTransferFree
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZPrivateMoneyTransferFreeRq';
+		
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		SET outRoot.TransactionType = inRoot.MsgData.Doc.TransType.TransCode.MsgCode;
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'VERS';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.(XMLNSC.Attribute)version;
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'TAPP';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.Target.(XMLNSC.Attribute)app;
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'TROLE';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.Target.(XMLNSC.Attribute)role;
+		FOR parm AS inRoot.MsgData.Doc.DocRefSet.Parm[] DO
+			IF parm.ParmCode IN ('RRN', 'SRN', 'STAN') THEN
+				CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+				SET outRoot.ServiceAttr[<].AttrId = parm.ParmCode;
+				SET outRoot.ServiceAttr[<].AttrValue = parm.Value;
+			END IF;
+		END FOR;
+		
+		SET outRoot.XferInfo.AcctFrom.AcctId = inRoot.MsgData.Doc.Originator.ContractNumber;
+		SET outRoot.XferInfo.AcctFrom.BankInfo.BankId 	= inRoot.MsgData.Doc.Originator.MemberId;
+		SET outRoot.XferInfo.AcctFrom.ClientInfo.PersonInfo.PersonName.LastName = inRoot.MsgData.Doc.Originator.Client.ClientInfo.LastName;
+		SET outRoot.XferInfo.AcctFrom.ClientInfo.PersonInfo.TINInfo.TaxId = inRoot.MsgData.Doc.Originator.Client.ClientInfo.TaxPayerIdentifier;
+		SET outRoot.XferInfo.AcctFrom.ClientInfo.PersonInfo.TaxPosition = inRoot.MsgData.Doc.Originator.Client.ClientInfo. TaxPosition;
+		
+		SET outRoot.XferInfo.AcctTo.AcctId = inRoot.MsgData.Doc.Destination.ContractNumber;
+		SET outRoot.XferInfo.AcctTo.BankInfo.BankId = inRoot.MsgData.Doc.Destination.MemberId;
+		SET outRoot.XferInfo.AcctTo.ClientInfo.OrgRec.OrgInfo.Name = inRoot.MsgData.Doc.Destination.Client.ClientInfo.ShortName;
+		SET outRoot.XferInfo.AcctTo.ClientInfo.OrgRec.OrgInfo.TINInfo.TaxId = inRoot.MsgData.Doc.Destination.Client.ClientInfo.TaxpayerIdentifier;
+		SET outRoot.XferInfo.AcctTo.ClientInfo.OrgRec.OrgInfo.KPPInfo.TaxId = inRoot.MsgData.Doc.Destination.Client.ClientInfo.TaxPosition;
+		
+		SET outRoot.XferInfo.TransPurpose = inRoot.MsgData.Doc.Description;
+		SET outRoot.XferInfo.TransDt 	= inRoot.MsgData.Doc.LocalDt;
+		SET outRoot.XferInfo.Amount 	= inRoot.MsgData.Doc.Transaction.Amount;
+		SET outRoot.XferInfo.AmtCurr 	= inRoot.MsgData.Doc.Transaction.Currency;
+		FOR transAddAmt AS inRoot.MsgData.Doc.Transaction.Extra[] DO
+			CREATE LASTCHILD OF outRoot.XferInfo NAME 'TransAddAmt';
+			SET outRoot.XferInfo.TransAddAmt[<].AmtType = inRoot.MsgData.Doc.Transaction.Extra.Type;
+			SET outRoot.XferInfo.TransAddAmt[<].AddInfo = inRoot.MsgData.Doc.Transaction.Extra.Details;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Преобразует сообщение в формате UFX в формат МДО
+ * для операции KZPrivateMoneyTransferFreeCan
+ * (взаимодействие «Перевод средств между счетами»).
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDOTransferFreeCan
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZPrivateMoneyTransferFreeCanRq';
+		
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		SET outRoot.TransactionType = inRoot.MsgData.Doc.TransType.TransCode.MsgCode;
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'VERS';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.(XMLNSC.Attribute)version;
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'TAPP';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.Target.(XMLNSC.Attribute)app;
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'TROLE';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.Target.(XMLNSC.Attribute)role;
+		FOR parm AS inRoot.MsgData.Doc.DocRefSet.Parm[] DO
+			IF parm.ParmCode IN ('RRN', 'SRN', 'STAN') THEN
+				CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+				SET outRoot.ServiceAttr[<].AttrId = parm.ParmCode;
+				SET outRoot.ServiceAttr[<].AttrValue = parm.Value;
+			END IF;
+		END FOR;
+		
+		SET outRoot.XferInfo.AcctFrom.AcctId = inRoot.MsgData.Doc.Originator.ContractNumber;
+		SET outRoot.XferInfo.AcctFrom.BankInfo.BankId 	= inRoot.MsgData.Doc.Originator.MemberId;
+		SET outRoot.XferInfo.AcctFrom.ClientInfo.PersonInfo.PersonName.LastName = inRoot.MsgData.Doc.Originator.Client.ClientInfo.LastName;
+		SET outRoot.XferInfo.AcctFrom.ClientInfo.PersonInfo.TINInfo.TaxId = inRoot.MsgData.Doc.Originator.Client.ClientInfo.TaxPayerIdentifier;
+		SET outRoot.XferInfo.AcctFrom.ClientInfo.PersonInfo.TaxPosition = inRoot.MsgData.Doc.Originator.Client.ClientInfo. TaxPosition;
+		
+		SET outRoot.XferInfo.AcctTo.AcctId = inRoot.MsgData.Doc.Destination.ContractNumber;
+		SET outRoot.XferInfo.AcctTo.BankInfo.BankId = inRoot.MsgData.Doc.Destination.MemberId;
+		SET outRoot.XferInfo.AcctTo.ClientInfo.OrgRec.OrgInfo.Name = inRoot.MsgData.Doc.Destination.Client.ClientInfo.ShortName;
+		SET outRoot.XferInfo.AcctTo.ClientInfo.OrgRec.OrgInfo.TINInfo.TaxId = inRoot.MsgData.Doc.Destination.Client.ClientInfo.TaxpayerIdentifier;
+		SET outRoot.XferInfo.AcctTo.ClientInfo.OrgRec.OrgInfo.KPPInfo.TaxId = inRoot.MsgData.Doc.Destination.Client.ClientInfo.TaxPosition;
+		
+		SET outRoot.XferInfo.TransPurpose = inRoot.MsgData.Doc.Description;
+		SET outRoot.XferInfo.TransDt 	= inRoot.MsgData.Doc.LocalDt;
+		SET outRoot.XferInfo.Amount 	= inRoot.MsgData.Doc.Transaction.Amount;
+		SET outRoot.XferInfo.AmtCurr 	= inRoot.MsgData.Doc.Transaction.Currency;
+		FOR transAddAmt AS inRoot.MsgData.Doc.Transaction.Extra[] DO
+			CREATE LASTCHILD OF outRoot.XferInfo NAME 'TransAddAmt';
+			SET outRoot.XferInfo.TransAddAmt[<].AmtType = inRoot.MsgData.Doc.Transaction.Extra.Type;
+			SET outRoot.XferInfo.TransAddAmt[<].AddInfo = inRoot.MsgData.Doc.Transaction.Extra.Details;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Преобразует сообщение в формате UFX в формат МДО
+ * для операции KZGetCrossCurrRateRq (получение кросс-курса валюты).
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_CrossCurrRate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.UserProperties.Source.Body 		= 
+								CAST(ASBITSTREAM(InputRoot.XMLNSC CCSID 1208)
+									 AS CHARACTER CCSID 1208 
+								);
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetCrossCurrRateRq';
+		
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+		
+		SET outRoot.RegNumber			 = inRoot.MsgData.CustomerProfile.RegNumber;
+
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'VERS';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.(XMLNSC.Attribute)version;
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'TAPP';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.Target.(XMLNSC.Attribute)app;
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'TROLE';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.Target.(XMLNSC.Attribute)role;
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'RCN';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.MsgData.CustomerProfile.Requestor.ContractNumber;
+		CREATE LASTCHILD OF outRoot NAME 'ServiceAttr';
+		SET outRoot.ServiceAttr[<].AttrId = 'SCN';
+		SET outRoot.ServiceAttr[<].AttrValue = inRoot.MsgData.CustomerProfile.Source.ContractNumber;
+		SET outRoot.SourceCurr 
+				= THE(SELECT ITEM p.Value FROM inRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[] AS p WHERE p.ParmCode = 'SOURCE_CURR');
+		SET outRoot.TargetCurr 
+				= THE(SELECT ITEM p.Value FROM inRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[] AS p WHERE p.ParmCode = 'TARGET_CURR');
+		SET outRoot.ConvDate 
+				= THE(SELECT ITEM p.Value FROM inRoot.MsgData.CustomerProfile.ResultDtls.Filter.ParmsInfo.Parm[] AS p WHERE p.ParmCode = 'FX_DATE');
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Преобразует сообщение в формате UFX в формат МДО
+ * для операции KZGetTransactionsInfo
+ * взаимодействие «Получение выписки по счёту».
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO5
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetTransactionsInfoRq';
+		
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+
+		DECLARE dateFrom CHARACTER NULL;
+		DECLARE dateTo CHARACTER NULL;
+		FOR inParm AS inRoot.MsgData.Doc.ResultDtls.Parm[] DO
+			IF inParm.ParmCode = 'DateFrom' THEN
+				SET dateFrom = inParm.Value;
+			END IF;
+			IF inParm.ParmCode = 'DateTo' THEN
+				SET dateTo = inParm.Value;
+			END IF;
+		END FOR;
+
+		SET outRoot.AcctInfo.AcctId				= inRoot.MsgData.Doc.Requestor.ContractNumber;
+		SET outRoot.StartDate					= dateFrom;
+		SET outRoot.EndDate						= dateTo;
+		SET outRoot.IsExtStatement				= 'Y';
+		
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.MsgData = inRoot.MsgData;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Преобразует сообщение в формате UFX в формат МДО
+ * для операции KZGetPrivateClientPaySchedule
+ * (взаимодействие «Получение графика платежей по кредиту»).
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO6
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZGetPrivateClientPayScheduleRq';
+		
+		CALL SetCommonMDOElementsFromUFX(inRoot, outRoot);
+
+		SET outRoot.AcctInfo.AcctId					= inRoot.MsgData.Doc.Requestor.ContractNumber;
+		SET outRoot.AcctInfo.BankInfo.banks:BankId	= inRoot.MsgData.Doc.Requestor.MemberId;
+
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.MsgData = inRoot.MsgData;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/** 
+ * Отмена выполнения перевода
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_TransferCancel
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.UserProperties.Source.Body 		= 
+								CAST(ASBITSTREAM(InputRoot.XMLNSC CCSID 1208)
+									 AS CHARACTER CCSID 1208 
+								);
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'KZPrivateMoneyTransferCanRq';
+		
+		CALL SetCommonMDOElementsFromUFX(inRef, outRef);
+		
+		DECLARE rrn CHARACTER '';
+		DECLARE srn CHARACTER '';
+		DECLARE stan CHARACTER '';
+		
+		FOR parm AS inRef.MsgData.Doc.DocRefSet.Parm[] DO
+			IF parm.ParmCode='RRN' THEN
+				SET rrn = parm.Value;
+			ELSEIF parm.ParmCode='SRN' THEN 
+				SET srn = parm.Value;
+			ELSEIF parm.ParmCode='STAN' THEN
+				SET stan = parm.Value;
+			END IF;
+		END FOR;
+		
+		DECLARE attr REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS attr NAME 'ServiceAttr';
+		SET attr.AttrId					= 'RRN';
+		SET attr.AttrValue					= rrn;
+		CREATE LASTCHILD OF outRef AS attr NAME 'ServiceAttr';
+		SET attr.AttrId					= 'SRN';
+		SET attr.AttrValue				= srn;
+		CREATE LASTCHILD OF outRef AS attr NAME 'ServiceAttr';
+		SET attr.AttrId					= 'STAN';
+		SET attr.AttrValue				= stan;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Подключение к SMS информированию по продуктам АБС (UFXMsg -> KZMngSMSInfoServiceRq)
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_SMS
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.UserProperties.Source.Body 		= 
+								CAST(ASBITSTREAM(InputRoot.XMLNSC CCSID 1208)
+									 AS CHARACTER CCSID 1208 
+								);
+								
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.UFXMsg;
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'KZMngSMSInfoServiceRq';
+		
+		CALL SetCommonMDOElementsFromUFX(inRef, outRef);		
+		DECLARE doc REFERENCE TO inRef.MsgData.Doc;
+		DECLARE phoneNum CHARACTER '';
+		DECLARE phoneL INTEGER 5;
+		DECLARE I INTEGER 1;
+		DECLARE phoneA CHARACTER '';
+		DECLARE phoneR CHARACTER '';
+		
+		FOR extra AS doc.Transaction.Extra[] DO 
+			IF extra.Type = 'AddInfo' THEN
+				DECLARE paramStr CHARACTER FIELDVALUE(extra.Details);
+				DECLARE pair CHARACTER;
+				WHILE paramStr <> '' DO
+					SET pair 		= SUBSTRING(paramStr BEFORE ';');
+					SET paramStr 	= SUBSTRING(paramStr AFTER ';');
+					IF SUBSTRING(pair BEFORE '=') = 'MOBILE_N' THEN
+						SET phoneNum = SUBSTRING(pair AFTER '=');
+						
+						WHILE I <= phoneL DO
+							
+							CASE I 
+							WHEN 1 THEN
+								
+								SET phoneA = SUBSTRING(phoneNum FROM 1 FOR 1);
+								SET phoneR = '+' || phoneA;
+							
+							WHEN 2 THEN
+							
+							
+								SET phoneA = SUBSTRING(phoneNum FROM 2 FOR 3);
+								SET phoneR =  phoneR||'-'||phoneA;
+							
+							WHEN 3 THEN
+								
+								SET phoneA = SUBSTRING(phoneNum FROM 5 FOR 3);
+								SET phoneR =  phoneR||'-'||phoneA;
+							
+							WHEN 4 THEN
+								
+								SET phoneA = SUBSTRING(phoneNum FROM 8 FOR 2);
+								SET phoneR =  phoneR||'-'||phoneA;
+							
+							WHEN 5 THEN
+								
+								SET phoneA = SUBSTRING(phoneNum FROM 10 FOR 2);
+								SET phoneR =  phoneR||'-'||phoneA;
+								
+							END CASE;
+									
+							SET I = I + 1;
+							
+						END WHILE;	 
+						
+					END IF;
+				END WHILE;
+			END IF;
+		END FOR; 
+		
+		SET outRef.AcctInfo.AcctId						= doc.Requestor.ContractNumber;
+		SET outRef.AcctInfo.BankInfo.BankId				= doc.Requestor.MemberId;
+		SET outRef.ActionType							= doc.TransType.TransCode.ServiceCode;
+		SET outRef.PersonInfo.inds:NameAddrType			= 'Customer';
+		SET outRef.PersonInfo.inds:FullName				= '';
+		SET outRef.PersonInfo.Phones.Phone.PhoneNum		= phoneR;
+		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+
+/**
+ * Заполнение полей заголовка MQRFH2 для
+ * дальнейшей маршрутизации.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Сформировать сообщение об ошибке.
+ **/
+CREATE COMPUTE MODULE HTTPRequestForESB_ComposeErrorMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'UFXMsg';
+		
+		CALL FillStandardUFXFieldsResp2(InputRoot.XMLNSC, OutputRoot.XMLNSC, Environment.UserProperties, 'Error', 'WAY4Appl');
+		
+		SET outRoot.MsgData.Information.Status.RespClass = 'Error';
+		SET outRoot.MsgData.Information.Status.RespCode = CASE  
+				WHEN Environment.UserProperties.Error.Code IS NOT NULL THEN  Environment.UserProperties.Error.Code
+				ELSE CommonSBOLErrorCode
+				END;
+		SET outRoot.MsgData.Information.Status.RespText = CASE  
+				WHEN Environment.UserProperties.Error.Desc IS NOT NULL THEN  Environment.UserProperties.Error.Desc
+				ELSE CommonSBOLErrorDesc
+				END;
+		
+		SET outRoot.(XMLNSC.Attribute)resp_code 		= outRoot.MsgData.Information.Status.RespCode;
+		SET outRoot.(XMLNSC.Attribute)resp_text 		= outRoot.MsgData.Information.Status.RespText;
+		
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Отображение набора параметров из сообщения
+ * в формате UFX в название операции на шине.
+ **/
+CREATE FUNCTION ResolveSbolOperation(
+		IN inRoot REFERENCE
+	) RETURNS CHARACTER BEGIN
+	
+	DECLARE stmtTypeEx CHARACTER NULL;
+	FOR inParm AS inRoot.MsgData.Doc.ResultDtls.Parm[] DO
+		IF inParm.ParmCode = 'StmtTypeEx' THEN
+			SET stmtTypeEx = inParm.Value;
+		END IF;
+	END FOR;
+	
+	IF inRoot.(XMLNSC.Attribute)msg_type = 'Information'
+			AND inRoot.MsgData.Information.ObjectType = 'Contract' 
+			AND inRoot.MsgData.Information.ActionType = 'Inquiry' 
+			AND inRoot.MsgData.Information.ResultDtls.Filter.Type = 'Contract' 
+			AND inRoot.MsgData.Information.ResultDtls.Filter.Code = 'CONTRACT_LIST' THEN
+		RETURN 'KZGetPrivateClientAccountList';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' 
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode = '01000S'
+			AND COALESCE(stmtTypeEx, '') NOT IN ('Normal', 'Credit') THEN
+		RETURN 'KZGetPrivateClientAccountStatement';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'CustomerProfile'
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Profile'
+			AND inRoot.MsgData.CustomerProfile.ObjectType = 'HandBook'
+			AND inRoot.MsgData.CustomerProfile.ActionType = 'Inquiry'
+			AND inRoot.MsgData.CustomerProfile.ResultDtls.Filter.Type = 'HandBook'
+			AND inRoot.MsgData.CustomerProfile.ResultDtls.Filter.Code = 'PERIOD_FOR_CREDIT'
+			AND inRoot.MsgData.CustomerProfile.ObjectFor.HandBookIDT.Code = 'PERIOD_FOR_ACCOUNT' THEN
+		RETURN 'KZGetPrivateClientCreditPeriods';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'CustomerProfile'
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Profile'
+			AND inRoot.MsgData.CustomerProfile.ObjectType = 'HandBook'
+			AND inRoot.MsgData.CustomerProfile.ActionType = 'Inquiry'
+			AND inRoot.MsgData.CustomerProfile.ResultDtls.Filter.Type = 'HandBook'
+			AND inRoot.MsgData.CustomerProfile.ResultDtls.Filter.Code = 'FILTER_BY_CURR' THEN
+		RETURN 'KZGetCrossCurrRate';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' 
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.(XMLNSC.Attribute)direction = 'Rq'
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode IN ('01000P_AUTH', '01000F_AUTH')  THEN
+		RETURN 'KZPrivateMoneyTransfer';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' 
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.(XMLNSC.Attribute)direction = 'Rq'
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode IN ('04200P_AUTH', '04200F_AUTH')  THEN
+		RETURN 'KZPrivateMoneyTransferCan';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' /* TODO: fix these conditions */
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.(XMLNSC.Attribute)direction = 'Rq'
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode IN ('01000P_AUTH', '01000F_AUTH')  THEN
+		RETURN 'KZPrivateFreeReqPayment';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' 
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.(XMLNSC.Attribute)direction = 'Rq'
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode = '04200*_AUTH'  THEN
+		RETURN 'KZPrivateFreeReqPaymentCan';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc'
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc'
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode = '01000S'
+			AND stmtTypeEx = 'Normal' THEN
+		RETURN 'KZGetTransactionsInfo';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' 
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode = '01000S'
+			AND stmtTypeEx = 'Credit' THEN
+		RETURN 'KZGetPrivateClientPaySchedule';
+	ELSEIF inRoot.(XMLNSC.Attribute)msg_type = 'Doc' 
+			AND inRoot.(XMLNSC.Attribute)scheme = 'WAY4Doc' 
+			AND inRoot.(XMLNSC.Attribute)direction = 'Rq'
+			AND inRoot.MsgData.Doc.TransType.TransCode.MsgCode = 'AddServReq'  THEN
+		RETURN 'KZMngSMSInfoService';
+	ELSE
+		RETURN NULL;
+	END IF;
+	
+END;
+

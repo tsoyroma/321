@@ -1,0 +1,641 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.microbiz.esql
+
+PATH ru.croc.sbkz.utils;
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос)
+ **/
+
+DECLARE MICROBIZ_DATE_FORMAT CONSTANT CHARACTER 'yyyy-MM-dd+hh:mm';
+DECLARE ESB_DATE_FORMAT CONSTANT CHARACTER 'yyyy-MM-dd';
+
+DECLARE MICROBIZ_DATE_GCVP_FORMAT CONSTANT CHARACTER 'dd.MM.yyyy';
+DECLARE ESB_DATE_GCVP_FORMAT CONSTANT CHARACTER 'yyyy-MM-dd';
+
+DECLARE MICROBIZ_DATE_GCVP_FORMAT777 CONSTANT CHARACTER 'yyyy-MM-dd';
+DECLARE ESB_DATE_GCVP_FORMAT777 CONSTANT CHARACTER 'dd.MM.yyyy';
+
+
+CREATE FUNCTION convertFromMicrobizDate (IN inDate CHARACTER) RETURNS CHARACTER
+BEGIN	
+	DECLARE asd CHARACTER;
+	DECLARE asd1 CHARACTER;
+	
+	SET asd  = LENGTH(inDate);
+	SET asd1 = LENGTH(MICROBIZ_DATE_FORMAT);
+	
+	IF LENGTH(inDate) = LENGTH(MICROBIZ_DATE_FORMAT) THEN
+		RETURN CAST(CAST(inDate AS DATE FORMAT MICROBIZ_DATE_FORMAT) AS CHARACTER FORMAT ESB_DATE_FORMAT);
+	ELSE
+		RETURN inDate;
+	END IF;
+END;
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRq (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].SPName	= 'Transact';
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;	
+END;
+
+CREATE FUNCTION DefineAccountType(In status_code CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE status_code
+		WHEN 'ABS_ACCOUNT' THEN '1'
+		WHEN 'ABS_DEPOSIT' THEN '2'
+	ELSE '0' -- неопределён
+	END;		
+END;
+
+/**
+ * Заполнение стандартных полей Transact в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillTransactStandartElementsRs (IN inroot REFERENCE, IN outroot REFERENCE, IN env REFERENCE)
+BEGIN	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	
+	IF FIELDVALUE(inroot.*:*[<].TSMUID) <> '' THEN
+		SET outroot.*:*[<].TSMUID	= FIELDVALUE(inroot.*:*[<].TSMUID);
+	ELSE
+		SET outroot.*:*[<].TSMUID	= COALESCE(env.UserProperties.TSMUID,'');
+	END IF;
+	
+	DECLARE statusCode CHARACTER COALESCE(inroot.*:*[<].Status.*:StatusCode, '');
+	IF statusCode='-100' THEN
+		SET statusCode = '-4';
+	END IF;
+	
+	SET outroot.*:*[<].Status.StatusCode VALUE	= statusCode;
+	SET outroot.*:*[<].Status.StatusDesc VALUE	= COALESCE(inroot.*:*[<].Status.*:StatusDesc, '');	
+END;
+
+/**
+ * Заполнение стандартных полей Transact в нотификациях от шины
+ **/
+CREATE PROCEDURE FillTransactStandartElementsNf (IN inroot REFERENCE, IN outroot REFERENCE)
+BEGIN
+	DECLARE regionId CHARACTER FIELDVALUE(inroot.*:*[<].BankInfo.*:RegionId);	
+	DECLARE agencyId CHARACTER FIELDVALUE(inroot.*:*[<].BankInfo.*:AgencyId);
+	
+	SET outroot.*:*[<].RqUID				= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm					= inroot.*:*[<].RqTm;
+	IF regionId <> '' THEN 
+		SET outroot.*:*[<].BankInfo.RegionId	= regionId;
+	END IF;
+	IF agencyId <> '' THEN 
+		SET outroot.*:*[<].BankInfo.AgencyId	= agencyId;
+	END IF;
+	SET outroot.*:*[<].TSMUID				= inroot.*:*[<].TSMUID;	
+END;
+
+/**
+ * Замена отсутствующих значений дефолтными 
+ **/
+CREATE FUNCTION replaceAbsentValue(IN incomingValue CHARACTER, IN defaultValue CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF incomingValue <> '' THEN
+		RETURN incomingValue;
+	ELSE		
+		RETURN defaultValue; 
+	END IF;
+END;
+
+CREATE FUNCTION recodeAddressTypeFromTransact(IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN '1' THEN 'Home'
+		WHEN '2' THEN 'RegAddress'
+		ELSE addressType
+	END;
+END;
+
+CREATE FUNCTION getTypeOfGuarantee(IN type CHARACTER, IN value CHARACTER) RETURNS CHARACTER
+BEGIN	
+	DECLARE typeInt CHARACTER; 
+	
+	IF typeInt = 'Вид обеспечения' THEN 
+		SET typeInt = '1';
+	ELSE
+		SET typeInt = '2';
+	END IF;	 
+	
+	RETURN CASE value
+		WHEN 'Бланковые' THEN typeInt
+		WHEN 'Залог недвижимости жилой/коммерческой' THEN typeInt
+		WHEN 'Залог транспортных средств' THEN typeInt
+		WHEN 'Залог оборудования и специальной техники' THEN typeInt
+		WHEN 'Залог имущественных прав' THEN typeInt
+		WHEN 'Залог ценных бумаг и драгоценных металлов' THEN typeInt
+		WHEN 'Залог товаров в обороте' THEN typeInt
+		WHEN 'Залог имущества, поступающего в собственность в будущем' THEN typeInt
+		WHEN 'Залог объектов незавершенного строительства' THEN typeInt
+		WHEN 'Залог денег, размещенных на сбер.счете/заклад денег' THEN typeInt
+		WHEN 'Залог иного имущества, не изъятого из гражданского оборота' THEN typeInt
+		WHEN 'Гарантия/поручительство физического лица' THEN typeInt
+		WHEN 'Гарантия/поручительство юридического лица' THEN typeInt
+		WHEN 'Другие способы обеспечения' THEN typeInt
+		ELSE 'Такого типа не существует'									
+	END;
+END;
+
+
+CREATE FUNCTION defineTypeOfFounding(IN type CHARACTER) RETURNS CHARACTER
+BEGIN	
+	RETURN CASE type
+		WHEN '1' THEN '1'
+		WHEN '2' THEN '2'
+		WHEN '8' THEN '2'
+		WHEN '121' THEN '2'
+		WHEN '122' THEN '2'
+		WHEN '123' THEN '2'
+		WHEN '124' THEN '2'
+		WHEN '125' THEN '2'
+		WHEN '1251' THEN '2'
+		WHEN '131' THEN '2'
+		WHEN '132' THEN '2'
+		WHEN '141' THEN '2'
+		WHEN '1410' THEN '2'
+		WHEN '1411' THEN '2'
+		WHEN '142' THEN '2'
+		WHEN '1422' THEN '2'
+		WHEN '143' THEN '2'
+		WHEN '150' THEN '2'
+		WHEN '160' THEN '2'
+		WHEN '161' THEN '2'
+		WHEN '17' THEN '2'
+		WHEN '9' THEN '3'
+		WHEN '20' THEN '5'																		
+		ELSE '4'									
+	END;
+END;
+
+CREATE PROCEDURE removeChar(IN name CHARACTER, OUT output CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.removeString";
+
+CREATE FUNCTION recodeGenderFromTransact(IN gender CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE gender
+		WHEN '1' THEN 'M'
+		WHEN '2' THEN 'F'
+		ELSE gender
+	END;
+END;
+
+CREATE FUNCTION recodeMaritalStatusFromTransact(IN status CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE status
+		WHEN '1' THEN 'Single'
+		WHEN '2' THEN 'Married'
+		WHEN '3' THEN 'Divorced'
+		WHEN '4' THEN 'Widow'
+		ELSE status
+	END;
+END;
+
+CREATE FUNCTION recodeIdTypeFromTransact(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN '1' THEN '3'
+		WHEN '2' THEN '1'
+		WHEN '3' THEN '2'
+		ELSE type
+	END;
+END;
+
+CREATE FUNCTION recodePhoneTypeFromTransact(IN type CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE type
+		WHEN '1' THEN 'Home'
+		WHEN '2' THEN 'DayPhone'
+		WHEN '3' THEN 'Work'
+		WHEN '4' THEN 'Mobile'
+		WHEN '5' THEN 'Mobile_add'
+		ELSE type
+	END;
+END;
+
+CREATE FUNCTION recodeForeignIndFromTransact(IN indicator CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE indicator
+		WHEN '1' THEN 'N'
+		WHEN '2' THEN 'Y'
+		ELSE indicator
+	END;
+END;
+
+
+CREATE FUNCTION isNegativeNumber(IN strValue CHARACTER) RETURNS BOOLEAN 
+BEGIN
+	DECLARE result BOOLEAN FALSE;
+	IF LEFT(strValue,1)='-' THEN
+		DECLARE intValue INTEGER;
+		SET intValue = CAST(strValue AS INTEGER DEFAULT 0);
+		IF (intValue < 0) THEN
+			SET result = TRUE;
+		END IF;	
+	END IF;	
+	RETURN result;
+END;
+
+CREATE FUNCTION recodeSegmentFromTransact(IN segment CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE segment
+		WHEN 'MMS' THEN 'MAS'
+		ELSE segment
+	END;
+END;
+
+
+-- integrationSystem - код системы, идентификатор в которой передается в Organization.IntegrationID
+CREATE PROCEDURE transformOrgDataFromTransactMBToESB(IN inRef REFERENCE, IN outRef REFERENCE)
+BEGIN
+	DECLARE economicSector CHARACTER NULL;
+	FOR inSign AS inRef.Signs.Sign[] DO
+		IF inSign.Type = 'EconomicSector' THEN
+			SET economicSector = inSign.Value;
+		END IF;
+	END FOR;
+	
+	FOR dealMember AS inRef.*:DealMemberRequestAttributes[] DO
+	
+	SET outRef.orgs:Name				= inRef.*:CompanyName;
+	SET outRef.orgs:LegalName			= inRef.*:ShortCompanyName;
+	SET outRef.orgs:LegalNameEn			= inRef.*:LegalForm;
+	
+	SET outRef.ABS				= inRef.CILogin;
+	SET outRef.EmployerCode 	= dealMember.LegalForm;  
+	
+	IF EXISTS(inRef.*:AddressAttributes[]) THEN
+		CREATE FIELD outRef.orgs:CompositeContactInfo;
+		SET outRef.orgs:CompositeContactInfo.ifxca:ContactInfoType	= 'LegalAddress';
+		CREATE FIELD outRef.orgs:CompositeContactInfo.ifxca:ContactInfo;
+	END IF;
+	
+	DECLARE outPostAddr REFERENCE TO outRef;
+	FOR inAddress AS dealMember.*:AddressAttributes[] DO  
+		CREATE LASTCHILD OF outRef.orgs:CompositeContactInfo.ifxca:ContactInfo AS outPostAddr NAMESPACE ifxca NAME 'PostAddr';
+		SET outPostAddr.ifxca:Addr1			= inAddress.*:Address;
+		SET outPostAddr.ifxca:City			= inAddress.*:Place;
+		SET outPostAddr.ifxca:StateProv		= inAddress.*:Region;		
+		SET outPostAddr.ifxca:Country		= dealMember.*:Country;
+		SET outPostAddr.ifxca:AddrType		= recodeAddressTypeFromNewPragma(inAddress.*:AddressType);
+		SET outPostAddr.ifxca:Street		= inAddress.*:Street;
+		SET outPostAddr.ifxca:House			= inAddress.*:House;		
+		SET outPostAddr.ifxca:Flat			= inAddress.*:Apartment;
+	END FOR;
+	
+	SET outRef.orgs:EstablishDt			= convertFromMicrobizDate(dealMember.*:CertificateDate);
+	SET outRef.orgs:NumEmployees		= dealMember.*:EmployeesNumber;
+	
+	DECLARE orgId REFERENCE TO outRef;
+	
+	IF dealMember.*:DealMembeEPKID <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'CIF';
+		SET orgId.Value = dealMember.*:DealMemberEPKID;	
+	END IF;
+	IF dealMember.*:DealMemberID <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'BIN';
+		SET orgId.Value = dealMember.*:DealMemberID;
+	END IF;
+
+	IF inRef.UNK <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'UNK';
+		SET orgId.Value = inRef.UNK;
+	END IF;
+	IF dealMember.*:OKPO <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'OKPO';
+		SET orgId.Value = dealMember.*:OKPO;
+	END IF;
+	IF dealMember.*:FieldID <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'TRANSACT';
+		SET orgId.Value = dealMember.*:FieldID;
+	END IF;
+	
+	IF dealMember.*:Segment <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'Segment';
+		SET orgId.Value = dealMember.*:Segment;
+	END IF;
+	
+	CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+	SET orgId.Key		= 'TSMMB';
+	SET orgId.Value		= dealMember.*:DealMemberID;
+
+	SET outRef.OrgAttr.KeyPerson[1].PositionKey						= 'CHIEF';
+	SET outRef.OrgAttr.KeyPerson[1].PersonInfo.inds:NameAddrType	= 'Customer';
+	SET outRef.OrgAttr.KeyPerson[1].PersonInfo.inds:FullName		= dealMember.*:ChiefAttributes.*:LastName || ' ' || dealMember.*:ChiefAttributes.*:FirstName || ' ' || dealMember.*:ChiefAttributes.*:Patronymic;
+	SET outRef.OrgAttr.KeyPerson[1].PersonInfo.ClientJobTitle		= dealMember.*:ChiefAttributes.*:Position;
+	SET outRef.OrgAttr.KeyPerson[2].PositionKey						= 'ACC';
+	SET outRef.OrgAttr.KeyPerson[2].PersonInfo.inds:NameAddrType	= 'Customer';
+	SET outRef.OrgAttr.KeyPerson[2].PersonInfo.inds:FullName		= dealMember.*:ChiefAttributes.*:LastName || ' ' || dealMember.*:ChiefAttributes.*:FirstName || ' ' || dealMember.*:ChiefAttributes.*:Patronymic;
+	SET outRef.OrgAttr.KeyPerson[2].PersonInfo.ClientJobTitle		= dealMember.*:ChiefAttributes.*:Position;
+	SET outRef.OrgAttr.EcSector										= economicSector;
+	SET outRef.OrgAttr.Country 							= dealMember.*:Country;
+	SET outRef.OrgAttr.NameRegulation 					= dealMember.*:CompanyName;
+	SET outRef.OrgAttr.Form 							= dealMember.*:LegalForm;
+	SET outRef.OrgAttr.ShortName 						= dealMember.*:ShortCompanyName;
+	SET outRef.OrgAttr.Region 							= dealMember.*:Region;
+	SET outRef.OrgAttr.DocRegNum						= dealMember.*:CertificateID;
+	SET outRef.OrgAttr.DocRegPlace						= dealMember.*:ChiefAttributes.*:IdentityDocumentAuthority;
+	SET outRef.OrgAttr.GeoCode 							= inRef.OrganizationInformation.GeoCode;
+	SET outRef.OrgAttr.Trademark						= inRef.OrganizationInformation.Trademark;
+	SET outRef.OrgAttr.Holding 							= inRef.OrganizationInformation.Holding;
+	SET outRef.OrgAttr.RevenueInfo.Amount 				= inRef.OrganizationInformation.Revenue;
+	SET outRef.OrgAttr.RevenueInfo.AmtCurr 				= inRef.OrganizationInformation.RevenueCurrency;
+	SET outRef.OrgAttr.Segment	 						= dealMember.*:Segment; -- 26.11.2014 u06068
+	SET outRef.OrgAttr.EcActivity 						= dealMember.*:OKED;
+	SET outRef.OrgAttr.Category 						= dealMember.*:ClientCategory; -- 26.11.2014 u06068
+	SET outRef.OrgAttr.Group	 						= inRef.OrganizationAdditionalInformation.Group;
+	SET outRef.OrgAttr.Rating	 						= inRef.OrganizationAdditionalInformation.Rating;
+	SET outRef.OrgAttr.EcActivityCode					= dealMember.*:OKED; -- 26.11.2014 u06068
+	SET outRef.OrgAttr.HoldingMembership				= inRef.OrganizationAdditionalInformation.Holding;
+	SET outRef.OrgAttr.FullName							= dealMember.*:CompanyName; -- 26.11.2014 u06068
+	SET outRef.OrgAttr.CustomerStatus					= inRef.CustStatus;
+	SET outRef.OrgAttr.Comment							= inRef.OrganizationAdditionalInformation.Comment;
+	SET outRef.FirstContactBankInfo.banks:BranchId		= inRef.BankUnit;
+	SET outRef.FirstContactBankInfo.banks:BranchName	= inRef.BranchName;
+	IF NOT EXISTS(outRef.FirstContactBankInfo.*:*[]) THEN
+		SET outRef.FirstContactBankInfo = NULL;
+	END IF;
+	SET outRef.ABSManager 								= inRef.CILogin;
+	IF NOT EXISTS(outRef.OrgAttr.*[]) THEN
+		SET outRef.OrgAttr = NULL;
+	END IF;
+	
+	SET outRef.ObjectType = inRef.ObjectType;
+	
+	DECLARE branchRef REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef NAME 'Branches';
+	IF inRef.BankBranch <> '' THEN
+		CREATE LASTCHILD OF outRef.Branches AS branchRef NAME 'Branch';
+		SET branchRef.BankInfo.banks:BranchId = inRef.BankBranch;
+		SET branchRef.IsResp 				  = 'T';
+	END IF;
+	
+	FOR inSign AS inRef.Signs.Sign[] DO
+		IF inSign.Type = 'BranchList' AND inSign.Value <> COALESCE(inRef.Filial, '') THEN
+			CREATE LASTCHILD OF outRef.Branches AS branchRef NAME 'Branch';
+			SET branchRef.BankInfo.banks:BranchId = inSign.Value;
+			SET branchRef.IsResp 				  = 'F';
+		END IF;
+	END FOR;
+	IF NOT EXISTS(outRef.Branches.*[]) THEN
+		SET outRef.Branches = NULL;
+	END IF;
+
+	SET outRef.DateOpen 				  = inRef.OrganizationAdditionalInformation.Created;
+	SET outRef.DTModify 				  = inRef.OrganizationAdditionalInformation.Modified;
+
+	FOR contact AS inRef.Contacts.Contact[] DO
+		IF contact.Type = 'e-mail' THEN
+			IF NOT EXISTS(outRef.EMails[]) THEN
+				CREATE LASTCHILD OF outRef NAME 'EMails';
+			END IF;
+			DECLARE outEMail REFERENCE TO outRef.EMails;
+			CREATE LASTCHILD OF outRef.EMails AS outEMail NAME 'EMail';
+			SET outEMail.EMailAddr		= contact.Contact;
+			SET outEMail.Active			= contact.IsActive;
+			SET outEMail.Allowed		= contact.IsAllowed;
+		END IF;
+	END FOR;
+
+	SET outRef.IsEnt 				  = inRef.IsEntrepreneur;
+	SET outRef.IsBank 				  = inRef.IsBank;
+	
+	IF EXISTS(inRef.Procuracies.Procuracy[]) THEN
+		CREATE FIELD outRef.AuthorityList;
+	END IF;
+	DECLARE outAuthority REFERENCE TO outRef;
+	FOR inProcuracy AS inRef.Procuracies.Procuracy[] DO
+		CREATE LASTCHILD OF outRef.AuthorityList AS outAuthority NAME 'Authority';
+		SET outAuthority.IsActive		= '';
+		SET outAuthority.WarrantNumber	= inProcuracy.Number;
+		SET outAuthority.RegDate		= inProcuracy.RegistrationDate;
+		SET outAuthority.IssueDate		= inProcuracy.StartDate;
+		SET outAuthority.ExpDate		= inProcuracy.FinishDate;
+		
+		SET outAuthority.NotaryInfo.NotaryName			= inProcuracy.NotaryName;
+		SET outAuthority.NotaryInfo.NotaryAddress		= inProcuracy.NotaryAddress;
+		SET outAuthority.NotaryInfo.NotaryLicense		= inProcuracy.NotaryLicenseNumber;
+		SET outAuthority.NotaryInfo.NotaryLicenseDate	= inProcuracy.NotaryDate;
+		SET outAuthority.NotaryInfo.NotaryPhone			= inProcuracy.NotaryPhone;
+		IF NOT EXISTS(outAuthority.NotaryInfo.*[]) THEN
+			SET outAuthority.NotaryInfo = NULL;
+		END IF;
+
+		SET outAuthority.NotaryDate	= inProcuracy.NotaryDate;
+		SET outAuthority.ObjectType	= 'PERSON';
+	END FOR;
+	
+	END FOR;
+END;
+
+CREATE FUNCTION recodeAddressTypeFromNewPragma(IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN 'Р' THEN 'Primary'
+		WHEN 'Ф' THEN 'Home'
+		WHEN 'П' THEN 'Secondary'
+		WHEN 'О' THEN 'Work'
+		ELSE addressType
+	END;
+END;
+
+CREATE PROCEDURE transformOrgSetDataRichFromMBToESB(IN inRef REFERENCE, IN outRef REFERENCE)
+BEGIN
+	DECLARE economicSector CHARACTER NULL;
+	FOR inSign AS inRef.Signs.Sign[] DO
+		IF inSign.Type = 'EconomicSector' THEN
+			SET economicSector = inSign.Value;
+		END IF;
+	END FOR;
+	
+	FOR dealMember AS inRef.*:DealMemberRequestAttributes[] DO
+	
+	SET outRef.orgs:Name				= inRef.*:CompanyName;
+	SET outRef.orgs:LegalName			= inRef.*:ShortCompanyName;
+	SET outRef.orgs:LegalNameEn			= inRef.*:LegalForm;
+	
+	SET outRef.ABS				= inRef.CILogin;
+	SET outRef.EmployerCode 	= dealMember.LegalForm;  
+	
+	IF EXISTS(inRef.*:AddressAttributes[]) THEN
+		CREATE FIELD outRef.orgs:CompositeContactInfo;
+		SET outRef.orgs:CompositeContactInfo.ifxca:ContactInfoType	= 'LegalAddress';
+		CREATE FIELD outRef.orgs:CompositeContactInfo.ifxca:ContactInfo;
+	END IF;
+	
+	DECLARE outPostAddr REFERENCE TO outRef;
+	FOR inAddress AS dealMember.*:AddressAttributes[] DO  
+		CREATE LASTCHILD OF outRef.orgs:CompositeContactInfo.ifxca:ContactInfo AS outPostAddr NAMESPACE ifxca NAME 'PostAddr';
+		SET outPostAddr.ifxca:Addr1			= inAddress.*:Address;
+		SET outPostAddr.ifxca:City			= inAddress.*:Place;
+		SET outPostAddr.ifxca:StateProv		= inAddress.*:Region;
+		SET outPostAddr.ifxca:Country		= dealMember.*:Country;
+		SET outPostAddr.ifxca:AddrType		= recodeAddressTypeFromNewPragma(inAddress.*:AddressType);
+		SET outPostAddr.ifxca:Street		= inAddress.*:Street;
+		SET outPostAddr.ifxca:House			= inAddress.*:House;
+		SET outPostAddr.ifxca:Flat			= inAddress.*:Apartment;
+	END FOR;
+	
+	SET outRef.orgs:EstablishDt			= convertFromMicrobizDate(dealMember.*:CertificateDate);
+	SET outRef.orgs:NumEmployees		= dealMember.*:EmployeesNumber;
+	
+	DECLARE orgId REFERENCE TO outRef;
+	
+	IF dealMember.*:DealMembeEPKID <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'CIF';
+		SET orgId.Value = dealMember.*:DealMemberEPKID;	
+	END IF;
+	IF dealMember.*:DealMemberID <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'BIN';
+		SET orgId.Value = dealMember.*:DealMemberID;
+	END IF;
+	IF inRef.UNK <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'UNK';
+		SET orgId.Value = inRef.UNK;
+	END IF;
+	IF dealMember.*:OKPO <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'OKPO';
+		SET orgId.Value = dealMember.*:OKPO;
+	END IF;
+	IF dealMember.*:FieldID <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'TRANSACT';
+		SET orgId.Value = dealMember.*:FieldID;
+	END IF;
+	
+	IF dealMember.*:Segment <> '' THEN
+		CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 	= 'Segment';
+		SET orgId.Value = dealMember.*:Segment;
+	END IF;
+	
+	CREATE LASTCHILD OF outRef AS orgId NAME 'OrgIdExt';
+	SET orgId.Key		= 'TSMMB';
+	SET orgId.Value		= dealMember.*:DealMemberID;
+	
+
+	SET outRef.OrgAttr.KeyPerson[1].PositionKey						= 'CHIEF';
+	SET outRef.OrgAttr.KeyPerson[1].PersonInfo.inds:NameAddrType	= 'Customer';
+	SET outRef.OrgAttr.KeyPerson[1].PersonInfo.inds:FullName		= dealMember.*:ChiefAttributes.*:LastName || ' ' || dealMember.*:ChiefAttributes.*:FirstName || ' ' || dealMember.*:ChiefAttributes.*:Patronymic;
+	SET outRef.OrgAttr.KeyPerson[1].PersonInfo.ClientJobTitle		= dealMember.*:ChiefAttributes.*:Position;
+	SET outRef.OrgAttr.KeyPerson[2].PositionKey						= 'ACC';
+	SET outRef.OrgAttr.KeyPerson[2].PersonInfo.inds:NameAddrType	= 'Customer';
+	SET outRef.OrgAttr.KeyPerson[2].PersonInfo.inds:FullName		= dealMember.*:ChiefAttributes.*:LastName || ' ' || dealMember.*:ChiefAttributes.*:FirstName || ' ' || dealMember.*:ChiefAttributes.*:Patronymic;
+	SET outRef.OrgAttr.KeyPerson[2].PersonInfo.ClientJobTitle		= dealMember.*:ChiefAttributes.*:Position;
+	SET outRef.OrgAttr.EcSector										= economicSector;
+	SET outRef.OrgAttr.Country 							= dealMember.*:Country;
+	SET outRef.OrgAttr.NameRegulation 					= dealMember.*:CompanyName;
+	SET outRef.OrgAttr.Form 							= dealMember.*:LegalForm;
+	SET outRef.OrgAttr.ShortName 						= dealMember.*:ShortCompanyName;
+	SET outRef.OrgAttr.Region 							= dealMember.*:Region;
+	SET outRef.OrgAttr.DocRegNum						= dealMember.*:CertificateID;
+	SET outRef.OrgAttr.DocRegPlace						= dealMember.*:ChiefAttributes.*:IdentityDocumentAuthority;
+	SET outRef.OrgAttr.GeoCode 							= inRef.OrganizationInformation.GeoCode;
+	SET outRef.OrgAttr.Trademark						= inRef.OrganizationInformation.Trademark;
+	SET outRef.OrgAttr.Holding 							= inRef.OrganizationInformation.Holding;
+	SET outRef.OrgAttr.RevenueInfo.Amount 				= inRef.OrganizationInformation.Revenue;
+	SET outRef.OrgAttr.RevenueInfo.AmtCurr 				= inRef.OrganizationInformation.RevenueCurrency;
+	SET outRef.OrgAttr.Segment	 						= dealMember.*:Segment; -- 26.11.2014 u06068
+	SET outRef.OrgAttr.EcActivity 						= dealMember.*:OKED;
+	SET outRef.OrgAttr.Category 						= dealMember.*:ClientCategory; -- 26.11.2014 u06068
+	SET outRef.OrgAttr.Group	 						= inRef.OrganizationAdditionalInformation.Group;
+	SET outRef.OrgAttr.Rating	 						= inRef.OrganizationAdditionalInformation.Rating;
+	SET outRef.OrgAttr.EcActivityCode					= dealMember.*:OKED; -- 26.11.2014 u06068
+	SET outRef.OrgAttr.HoldingMembership				= inRef.OrganizationAdditionalInformation.Holding;
+	SET outRef.OrgAttr.FullName							= dealMember.*:CompanyName; -- 26.11.2014 u06068
+	SET outRef.OrgAttr.CustomerStatus					= inRef.CustStatus;
+	SET outRef.OrgAttr.Comment							= inRef.OrganizationAdditionalInformation.Comment;
+	SET outRef.FirstContactBankInfo.banks:BranchId		= inRef.BankUnit;
+	SET outRef.FirstContactBankInfo.banks:BranchName	= inRef.BranchName;
+	IF NOT EXISTS(outRef.FirstContactBankInfo.*:*[]) THEN
+		SET outRef.FirstContactBankInfo = NULL;
+	END IF;
+	SET outRef.ABSManager 								= inRef.CILogin;
+	IF NOT EXISTS(outRef.OrgAttr.*[]) THEN
+		SET outRef.OrgAttr = NULL;
+	END IF;
+	
+	SET outRef.ObjectType = inRef.ObjectType;
+	
+	DECLARE branchRef REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef NAME 'Branches';
+	IF inRef.BankBranch <> '' THEN
+		CREATE LASTCHILD OF outRef.Branches AS branchRef NAME 'Branch';
+		SET branchRef.BankInfo.banks:BranchId = inRef.BankBranch;
+		SET branchRef.IsResp 				  = 'T';
+	END IF;
+	
+	FOR inSign AS inRef.Signs.Sign[] DO
+		IF inSign.Type = 'BranchList' AND inSign.Value <> COALESCE(inRef.Filial, '') THEN
+			CREATE LASTCHILD OF outRef.Branches AS branchRef NAME 'Branch';
+			SET branchRef.BankInfo.banks:BranchId = inSign.Value;
+			SET branchRef.IsResp 				  = 'F';
+		END IF;
+	END FOR;
+	IF NOT EXISTS(outRef.Branches.*[]) THEN
+		SET outRef.Branches = NULL;
+	END IF;
+
+	SET outRef.DateOpen 				  = inRef.OrganizationAdditionalInformation.Created;
+	SET outRef.DTModify 				  = inRef.OrganizationAdditionalInformation.Modified;
+
+	FOR contact AS inRef.Contacts.Contact[] DO
+		IF contact.Type = 'e-mail' THEN
+			IF NOT EXISTS(outRef.EMails[]) THEN
+				CREATE LASTCHILD OF outRef NAME 'EMails';
+			END IF;
+			DECLARE outEMail REFERENCE TO outRef.EMails;
+			CREATE LASTCHILD OF outRef.EMails AS outEMail NAME 'EMail';
+			SET outEMail.EMailAddr		= contact.Contact;
+			SET outEMail.Active			= contact.IsActive;
+			SET outEMail.Allowed		= contact.IsAllowed;
+		END IF;
+	END FOR;
+
+	SET outRef.IsEnt 				  = inRef.IsEntrepreneur;
+	SET outRef.IsBank 				  = inRef.IsBank;
+	
+	IF EXISTS(inRef.Procuracies.Procuracy[]) THEN
+		CREATE FIELD outRef.AuthorityList;
+	END IF;
+	DECLARE outAuthority REFERENCE TO outRef;
+	FOR inProcuracy AS inRef.Procuracies.Procuracy[] DO
+		CREATE LASTCHILD OF outRef.AuthorityList AS outAuthority NAME 'Authority';
+		SET outAuthority.IsActive		= '';
+		SET outAuthority.WarrantNumber	= inProcuracy.Number;
+		SET outAuthority.RegDate		= inProcuracy.RegistrationDate;
+		SET outAuthority.IssueDate		= inProcuracy.StartDate;
+		SET outAuthority.ExpDate		= inProcuracy.FinishDate;
+		
+		SET outAuthority.NotaryInfo.NotaryName			= inProcuracy.NotaryName;
+		SET outAuthority.NotaryInfo.NotaryAddress		= inProcuracy.NotaryAddress;
+		SET outAuthority.NotaryInfo.NotaryLicense		= inProcuracy.NotaryLicenseNumber;
+		SET outAuthority.NotaryInfo.NotaryLicenseDate	= inProcuracy.NotaryDate;
+		SET outAuthority.NotaryInfo.NotaryPhone			= inProcuracy.NotaryPhone;
+		IF NOT EXISTS(outAuthority.NotaryInfo.*[]) THEN
+			SET outAuthority.NotaryInfo = NULL;
+		END IF;
+
+		SET outAuthority.NotaryDate	= inProcuracy.NotaryDate;
+		SET outAuthority.ObjectType	= 'PERSON';
+	END FOR;
+	
+	END FOR;
+END;

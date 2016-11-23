@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:soapenv="http://www.w3.org/2003/05/soap-envelope"
+	xmlns:xs="http://www.w3.org/2001/XMLSchema"
+	elementFormDefault="qualified"
+	targetNamespace="http://www.w3.org/2003/05/soap-envelope">
+	<!-- Envelope, header and body -->
+	<xs:import namespace="http://www.w3.org/XML/1998/namespace"
+		schemaLocation="http://www.w3.org/2001/xml.xsd" />
+	<xs:element name="Envelope" type="soapenv:Envelope">
+		<xs:annotation>
+			<xs:appinfo source="WMQI_APPINFO">
+				<MRMessage
+					messageDefinition="/0/Envelope;XSDElementDeclaration$MRObject" />
+			</xs:appinfo>
+		</xs:annotation>
+	</xs:element>
+	<xs:complexType name="Envelope">
+		<xs:sequence>
+			<xs:element minOccurs="0" ref="soapenv:Header" />
+			<xs:element minOccurs="1" ref="soapenv:Body" />
+		</xs:sequence>
+		<xs:attribute ref="soapenv:encodingStyle" />
+		<xs:anyAttribute namespace="##any" processContents="lax" />
+	</xs:complexType>
+	<xs:element name="Header" type="soapenv:Header" />
+	
+	<xs:complexType name="Header">
+		<xs:annotation>
+			<xs:documentation>
+				Elements replacing the wildcard MUST be namespace
+				qualified, but can be in the targetNamespace
+			</xs:documentation>
+
+		</xs:annotation>
+
+			<xs:sequence maxOccurs="unbounded">
+				<xs:choice>
+					<xs:annotation>
+						<xs:appinfo source="WMQI_APPINFO">
+							<MRLocalGroup composition="message" content="open"/>
+						</xs:appinfo>
+					</xs:annotation>
+                    <xs:element ref="soapenv:Upgrade"/>
+                    <xs:element ref="soapenv:NotUnderstood"/>
+				</xs:choice>
+			</xs:sequence>
+		   <xs:anyAttribute namespace="##any" processContents="lax" />	 
+	</xs:complexType>
+	
+	<xs:element name="Body" type="soapenv:Body" />
+	<xs:complexType name="Body">
+
+			<xs:sequence maxOccurs="unbounded">
+				<xs:choice>
+					<xs:annotation>
+						<xs:appinfo source="WMQI_APPINFO">
+							<MRLocalGroup composition="message" content="openDefined" />
+						</xs:appinfo>
+					</xs:annotation>
+                    <xs:element ref="soapenv:Fault"/>
+				</xs:choice>
+			</xs:sequence>
+		    <xs:anyAttribute namespace="##any" processContents="lax" />
+		    	
+	</xs:complexType>
+
+	<!-- Global Attributes.  The following attributes are intended to be usable via qualified attribute names on any complex type referencing them.  -->
+	<xs:attribute default="0" name="mustUnderstand" type="xs:boolean" />
+	<xs:attribute default="0" name="relay" type="xs:boolean" />
+	<xs:attribute name="role" type="xs:anyURI" />
+	<!-- 'encodingStyle' indicates any canonicalization conventions followed in the contents of the containing element.  For example, the value 'http://www.w3.org/2003/05/soap-encoding' indicates the pattern described in the last call working draft of SOAP Version 1.2 Part 2: Adjuncts -->
+	<xs:attribute name="encodingStyle" type="xs:anyURI" />
+	<xs:element name="Fault" type="soapenv:Fault">
+		<xs:annotation>
+			<xs:appinfo source="WMQI_APPINFO">
+				<MRMessage
+					messageDefinition="/0/Fault;XSDElementDeclaration$MRObject" />
+			</xs:appinfo>
+		</xs:annotation>
+	</xs:element>
+	<xs:complexType final="extension" name="Fault">
+		<xs:annotation>
+			<xs:documentation>
+				Fault reporting structure
+			</xs:documentation>
+		</xs:annotation>
+		<xs:sequence>
+			<xs:element name="Code" type="soapenv:faultcode" />
+			<xs:element name="Reason" type="soapenv:faultreason" />
+			<xs:element minOccurs="0" name="Node" type="xs:anyURI" />
+			<xs:element minOccurs="0" name="Role" type="xs:anyURI" />
+			<xs:element minOccurs="0" name="Detail"
+				type="soapenv:detail" />
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="faultreason">
+		<xs:sequence>
+			<xs:element maxOccurs="unbounded" minOccurs="1" name="Text"
+				type="soapenv:reasontext" />
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="reasontext">
+		<xs:simpleContent>
+			<xs:extension base="xs:string">
+				<xs:attribute ref="xml:lang" use="required" />
+			</xs:extension>
+		</xs:simpleContent>
+	</xs:complexType>
+	<xs:complexType name="faultcode">
+		<xs:sequence>
+			<xs:element name="Value" type="soapenv:faultcodeEnum" />
+			<xs:element minOccurs="0" name="Subcode"
+				type="soapenv:subcode" />
+		</xs:sequence>
+	</xs:complexType>
+	<xs:simpleType name="faultcodeEnum">
+		<xs:restriction base="xs:QName">
+			<xs:enumeration value="soapenv:DataEncodingUnknown" />
+			<xs:enumeration value="soapenv:MustUnderstand" />
+			<xs:enumeration value="soapenv:Receiver" />
+			<xs:enumeration value="soapenv:Sender" />
+			<xs:enumeration value="soapenv:VersionMismatch" />
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:complexType name="subcode">
+		<xs:sequence>
+			<xs:element name="Value" type="xs:QName" />
+			<xs:element minOccurs="0" name="Subcode"
+				type="soapenv:subcode" />
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="detail">
+		<xs:sequence minOccurs="0">
+			<xs:choice>
+				<xs:annotation>
+					<xs:appinfo source="WMQI_APPINFO">
+						<MRLocalGroup composition="message"
+							content="open" />
+					</xs:appinfo>
+				</xs:annotation>
+			</xs:choice>
+		</xs:sequence>		
+		<xs:anyAttribute namespace="##any" processContents="lax" />	
+	</xs:complexType>
+	
+	<!-- Global element declaration and complex type definition for header entry returned due to a mustUnderstand fault -->
+	<xs:element name="NotUnderstood" type="soapenv:NotUnderstoodType" >
+    <xs:annotation>
+      <xs:appinfo source="WMQI_APPINFO">
+        <MRMessage messageDefinition="/0/NotUnderstood;XSDElementDeclaration=4$MRObject"/>
+      </xs:appinfo>
+    </xs:annotation>
+	</xs:element>
+	<xs:complexType name="NotUnderstoodType">
+		<xs:attribute name="qname" type="xs:QName" use="required" />
+	</xs:complexType>
+	<!-- Global element and associated types for managing version transition as described in Appendix A of the SOAP Version 1.2 Part 1 Last Call Working Draft -->
+	<xs:complexType name="SupportedEnvType">
+		<xs:attribute name="qname" type="xs:QName" use="required" />
+	</xs:complexType>
+	<xs:element name="Upgrade" type="soapenv:UpgradeType" >
+    <xs:annotation>
+      <xs:appinfo source="WMQI_APPINFO">
+        <MRMessage messageDefinition="/0/Upgrade;XSDElementDeclaration=5$MRObject"/>
+      </xs:appinfo>
+    </xs:annotation>
+	</xs:element>
+	<xs:complexType name="UpgradeType">
+		<xs:sequence>
+			<xs:element maxOccurs="unbounded" minOccurs="1"
+				name="SupportedEnvelope" type="soapenv:SupportedEnvType" />
+		</xs:sequence>
+	</xs:complexType>
+</xs:schema>

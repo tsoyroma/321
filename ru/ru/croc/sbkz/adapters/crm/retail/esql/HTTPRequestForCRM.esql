@@ -1,0 +1,194 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crm.retail.esql
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE HTTPRequestForCRM_DetectOperation 
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZSRUpsertRequest' THEN
+			SET labelName = 'SRUpsertRequest';	
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in CRMr', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForCRM_SaveOrigMessage 
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.Source.MQMD 			= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 		= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties	= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 			= InputBody;		
+		RETURN TRUE;
+	END;
+	 
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForCRM_Convert
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		DECLARE envPart REFERENCE TO OutputRoot;
+		DECLARE cus NAMESPACE 'http://siebel.com/CustomUI';
+		DECLARE sbk NAMESPACE 'http://www.siebel.com/xml/SBKUniversalIO';
+		DECLARE web NAMESPACE 'http://siebel.com/webservices';
+		DECLARE soapenv NAMESPACE 'http://schemas.xmlsoap.org/soap/envelope/';
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+
+		-- заполнение полей в кастомном хедере
+		CREATE FIELD OutputRoot.XMLNSC.soapenv:Envelope.soapenv:Header AS envPart;
+		SET envPart.web:PasswordText 		= 'Sberbank#2015';
+		SET envPart.web:UsernameToken		= 'SIEBEL_KIOSK';
+		SET OutputRoot.XMLNSC.soapenv:Envelope.(XMLNSC.NamespaceDecl)xmlns:soapenv = soapenv;
+		SET OutputRoot.XMLNSC.soapenv:Envelope.(XMLNSC.NamespaceDecl)xmlns:web = web;
+		SET OutputRoot.XMLNSC.soapenv:Envelope.(XMLNSC.NamespaceDecl)xmlns:cus = cus;
+		SET OutputRoot.XMLNSC.soapenv:Envelope.(XMLNSC.NamespaceDecl)xmlns:sbk = sbk;
+		
+		CREATE FIELD OutputRoot.XMLNSC.soapenv:Envelope.soapenv:Body AS envPart;
+		DECLARE outIn REFERENCE TO envPart;
+		CREATE LASTCHILD OF envPart AS outIn NAMESPACE cus NAME 'SRUpsert_Input';
+		DECLARE outlist REFERENCE TO outIn; 
+		CREATE LASTCHILD OF outIn AS outlist NAMESPACE sbk NAME 'ListOfSBKUniversalIO';
+		DECLARE outPar REFERENCE TO outlist;
+		CREATE LASTCHILD OF outlist AS outPar NAMESPACE sbk NAME 'ParentComponent';
+		SET outPar = InputRoot.XMLNSC.*[<].*:SRUpsert_Input.*:ListOfSBKUniversalIO.*:ParentComponent;
+		SET outPar.sbk:RqUID = InputRoot.XMLNSC.*[<].RqUID;
+		SET outPar.sbk:RqTm = InputRoot.XMLNSC.*[<].RqTm;
+
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		 SET OutputLocalEnvironment.Destination.SOAP.Request.Operation = 'SRUpsert'; 
+		 SET OutputRoot.HTTPRequestHeader.SOAPAction = 'document/http://siebel.com/CustomUI:SRUpsert'; 
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForCRMr_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN		
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+	
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		CALL SetMQReplyDestination(Environment.UserProperties.Source, OutputLocalEnvironment);
+		
+		SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+
+CREATE COMPUTE MODULE RequestForCRMr_DetectResponseOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		DECLARE labelName CHARACTER;
+			CASE Operation 
+			WHEN 'SRUpsert_Output' THEN
+				SET labelName = 'SRUpsert_Output';
+				ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in SOAPRequestForCRMr', Operation);
+		END CASE;	
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForCRM_Convert_response
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		-- CALL CopyMessageHeaders();
+		-- CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForCRM_Convert_Fault
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN		 
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+	
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		CALL SetMQReplyDestination(Environment.UserProperties.Source, OutputLocalEnvironment);
+		
+		--SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		--CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'SRUpsert_Output';			
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.SRUpsert_Output;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:*[<];
+		SET outRef.RqUID			= Environment.UserProperties.RqUID;
+		SET outRef.RqTm				= Environment.UserProperties.RqTm;
+		SET outRef.ErrorCode		= inRef.*:faultcode;
+		SET outRef.ErrorMsg			= inRef.*:faultstring;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

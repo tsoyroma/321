@@ -1,0 +1,4 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.aml.esql
+
+-- Код системы AML
+DECLARE ISSUE_DBID CONSTANT CHARACTER '5';

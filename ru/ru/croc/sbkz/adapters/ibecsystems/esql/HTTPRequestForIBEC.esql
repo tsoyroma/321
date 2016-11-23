@@ -1,0 +1,976 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.ibecsystems.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE HTTPRequestForIBEC_SaveOrigMessage
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.Source.MQMD 			= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 		= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties	= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 			= InputBody;		
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot; 
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForIBEC_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZExpCurrencyRateRq' THEN
+			SET labelName = 'KZExpCurrencyRateRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in HTTPRequestForIBEC', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForIBEC_Convert_ERRORS
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		-- Получение описания ошибки
+		DECLARE sErrDescr CHARACTER;
+		DECLARE sErrNumber CHARACTER;
+		CALL ru.croc.sbrf.mdm.common.GetExcDescription(InputExceptionList, sErrDescr, sErrNumber);
+
+		-- Формирование структуры сообщения-ответа
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.ErrorStatus AS outRef;	
+					
+		SET outRef.MsgId		=	Environment.UserProperties.RqUID;
+		SET outRef.ErrorCode	=	sErrNumber;
+		SET outRef.ErrorDescr	=	sErrDescr;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForIBEC_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+	
+		CALL SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		--CALL SetMQReplyDestination(Environment.UserProperties, OutputLocalEnvironment);
+		
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName        = Environment.UserProperties.ReplyToQ;
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueManagerName =	Environment.UserProperties.ReplyToQMgr;
+		
+		SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForIBEC_KZExpCurrencyRateRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRq REFERENCE TO InputRoot.XMLNSC.KZExpCurrencyRateRq.CurrRateData;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE OutRq REFERENCE TO OutputRoot;		
+		
+		CALL CreateXmlHeader(OutputRoot, 'UTF-8', FALSE);
+		
+		DECLARE courses 	 REFERENCE TO OutRq;
+		DECLARE items  		 REFERENCE TO OutRq;
+		DECLARE itemm  		 REFERENCE TO OutRq;
+		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS OutRq NAME 'document';
+		
+		CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+		SET courses.(XMLNSC.Attribute)name 			= 'nb_rk';
+		FOR curRate AS InRq.CurrRate[] DO
+			IF curRate.CurrCode = 'USD' AND curRate.RateType = 'discount' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)dynamic 		= curRate.RateSell;
+			END IF;  
+			IF curRate.CurrCode = 'RUB' AND curRate.RateType = 'discount' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)dynamic 		= curRate.RateSell;
+			END IF;  
+			IF curRate.CurrCode = 'EUR' AND curRate.RateType = 'discount' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)dynamic 		= curRate.RateSell;
+			END IF;  
+			IF curRate.CurrCode = 'CHF' AND curRate.RateType = 'discount' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)dynamic 		= curRate.RateSell;
+			END IF;  
+			IF curRate.CurrCode = 'CNY' AND curRate.RateType = 'discount' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)dynamic 		= curRate.RateSell;
+			END IF;  
+			IF curRate.CurrCode = 'GBP' AND curRate.RateType = 'discount' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)dynamic 		= curRate.RateSell;
+			END IF;
+			IF curRate.CurrCode = 'JPY' AND curRate.RateType = 'discount' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)dynamic 		= curRate.RateSell;
+			END IF;  
+			IF curRate.CurrCode = 'TRY' AND curRate.RateType = 'discount' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)dynamic 		= curRate.RateSell;
+			END IF;  
+		END FOR;
+		
+		FOR curRate AS InRq.CurrRate[] DO
+		/* Наличные курсы валют */
+		IF EXISTS(curRate.Graduation[]) AND EXISTS(curRate.Branch[]) THEN
+			IF curRate.CurrCode = 'USD' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'cash' THEN
+			  IF curRate.Branch = '9999-' THEN 	-- ДЛЯ ВСЕГО БАНКА
+				IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'all_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'USD';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'all_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'USD';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'all_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'USD';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;
+			  ELSEIF curRate.Branch = '1-' THEN -- ДЛЯ Филиала Алматы
+			  	IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'almaty_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'USD';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'almaty_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'USD';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'almaty_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'USD';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;
+			  ELSEIF curRate.Branch = '2-' THEN -- ДЛЯ Астанинского филиала
+				IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'astana_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'USD';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'astana_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'USD';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'astana_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'USD';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;
+			  ELSEIF curRate.Branch = '3-' THEN -- Для филиала Иань. (Так называется этот филиал)
+			  	IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'cny_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'USD';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'cny_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'USD';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'cny_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'USD';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;	
+			  END IF;	
+			  
+			ELSEIF curRate.CurrCode = 'RUB' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'cash' THEN
+			  IF curRate.Branch = '9999-' THEN 	-- ДЛЯ ВСЕГО БАНКА
+				IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'all_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'RUB';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'all_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'RUB';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'all_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'RUB';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;
+			  ELSEIF curRate.Branch = '1-' THEN -- ДЛЯ Филиала Алматы
+			  	IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'almaty_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'RUB';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'almaty_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'RUB';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'almaty_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'RUB';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;
+			  ELSEIF curRate.Branch = '2-' THEN -- ДЛЯ Астанинского филиала
+				IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'astana_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'RUB';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'astana_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'RUB';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'astana_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'RUB';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;
+			  ELSEIF curRate.Branch = '3-' THEN -- Для филиала Иань. (Так называется этот филиал)
+			  	IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'cny_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'RUB';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'cny_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'RUB';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'cny_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'RUB';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;	
+			  END IF;
+			  			  
+			  ELSEIF curRate.CurrCode = 'EUR' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'cash' THEN
+			  IF curRate.Branch = '9999-' THEN 	-- ДЛЯ ВСЕГО БАНКА
+				IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'all_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'EUR';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'all_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'EUR';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'all_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'EUR';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;
+			  ELSEIF curRate.Branch = '1-' THEN -- ДЛЯ Филиала Алматы
+			  	IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'almaty_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'EUR';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'almaty_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'EUR';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'almaty_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'EUR';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;
+			  ELSEIF curRate.Branch = '2-' THEN -- ДЛЯ Астанинского филиала
+				IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'astana_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'EUR';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'astana_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'EUR';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'astana_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'EUR';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;
+			  ELSEIF curRate.Branch = '3-' THEN -- Для филиала Иань. (Так называется этот филиал)
+			  	IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'cny_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'EUR';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'cny_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'EUR';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'cny_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'EUR';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;	
+			  END IF;
+			  
+			  ELSEIF curRate.CurrCode = 'CNY' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'cash' THEN
+			  IF curRate.Branch = '9999-' THEN 	-- ДЛЯ ВСЕГО БАНКА
+				IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'all_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'CNY';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'all_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'CNY';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'all_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'CNY';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;
+			  ELSEIF curRate.Branch = '1-' THEN -- ДЛЯ Филиала Алматы
+			  	IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'almaty_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'CNY';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'almaty_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'CNY';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'almaty_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'CNY';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;
+			  ELSEIF curRate.Branch = '2-' THEN -- ДЛЯ Астанинского филиала
+				IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'astana_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'CNY';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'astana_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'CNY';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'astana_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'CNY';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;
+			  ELSEIF curRate.Branch = '3-' THEN -- Для филиала Юань. (Так называется этот филиал)
+			  	IF curRate.Graduation = '1' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'cny_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'CNY';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'до 50 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '2' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'cny_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'CNY';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 50 000 - до 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;	
+				ELSEIF curRate.Graduation = '3' THEN
+					CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+					SET courses.(XMLNSC.Attribute)name 			= 'cny_bank';
+					CREATE LASTCHILD OF courses AS items NAME 'items';			
+					SET items.(XMLNSC.Attribute)name 			= 'CNY';	
+					CREATE LASTCHILD OF items AS itemm NAME 'item';			
+					SET itemm.graduation 			= curRate.Graduation;--'от 100 000';	
+					SET itemm.buy 					= curRate.RateBuy;	
+					SET itemm.sale 					= curRate.RateSell;			
+				END IF;	
+			  END IF;
+			  
+			  
+			END IF;
+		END IF;
+		
+		END FOR;
+				
+		CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+		SET courses.(XMLNSC.Attribute)name 			= 'cashless';
+		FOR curRate AS InRq.CurrRate[] DO
+			IF curRate.CurrCode = 'USD' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'non-cash' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;
+			END IF;  
+			IF curRate.CurrCode = 'RUB' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'non-cash' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;
+			END IF;  
+			IF curRate.CurrCode = 'EUR' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'non-cash' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;
+			END IF; 
+			IF curRate.CurrCode = 'CHF' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'non-cash' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;
+			END IF; 
+			IF curRate.CurrCode = 'CNY' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'non-cash' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;
+			END IF;  
+			IF curRate.CurrCode = 'GBP' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'non-cash' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;
+			END IF;
+			IF curRate.CurrCode = 'JPY' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'non-cash' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;
+			END IF; 
+			IF curRate.CurrCode = 'TRY' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'non-cash' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode;	
+				SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;
+			END IF;      
+		END FOR;
+
+		CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+		SET courses.(XMLNSC.Attribute)name 			= 'metal';
+		FOR curRate AS InRq.CurrRate[] DO
+			IF curRate.CurrCode = 'XAU' AND curRate.RateType = 'non-cash' THEN -- Золото 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= 'Au';	
+				SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;
+			END IF;  
+			IF curRate.CurrCode = 'XAG' AND curRate.RateType = 'non-cash' THEN -- Серебро  
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= 'Ag';	
+				SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+			END IF;  
+			IF curRate.CurrCode = 'XPT' AND curRate.RateType = 'non-cash' THEN -- Платина  
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= 'Pl';	
+				SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+			END IF; 
+			IF curRate.CurrCode = 'XPD' AND curRate.RateType = 'non-cash' THEN -- Палладий
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= 'Pd';	
+				SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+			END IF;   
+		END FOR;
+
+		CREATE LASTCHILD OF OutRq AS courses NAME 'courses';		
+		SET courses.(XMLNSC.Attribute)name 			= 'cross';
+		FOR curRate AS InRq.CurrRate[] DO
+			IF curRate.CurrCode = 'USD' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'deposit' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.BaseCurrCode || '-' || curRate.CurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateSell;
+				
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode || '-' || curRate.BaseCurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateBuy;	
+					
+			END IF;  
+			IF curRate.CurrCode = 'RUB' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'deposit' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.BaseCurrCode || '-' || curRate.CurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateSell;
+				
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode || '-' || curRate.BaseCurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateBuy;	
+				--SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+					
+			END IF;  
+			IF curRate.CurrCode = 'EUR' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'deposit' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.BaseCurrCode || '-' || curRate.CurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateSell;
+				
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode || '-' || curRate.BaseCurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				SET items.(XMLNSC.Attribute)value			= curRate.RateBuy;	
+				--SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+					
+			END IF;
+			/*IF curRate.CurrCode = 'CNY' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'deposit' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.BaseCurrCode || '-' || curRate.CurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateSell;
+				
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode || '-' || curRate.BaseCurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				SET items.(XMLNSC.Attribute)value			= curRate.RateBuy;	
+				--SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+					
+			END IF;*/
+			/*IF curRate.CurrCode = 'JPY' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'deposit' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.BaseCurrCode || '-' || curRate.CurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateSell;
+				
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode || '-' || curRate.BaseCurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				SET items.(XMLNSC.Attribute)value			= curRate.RateBuy;	
+				--SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+					
+			END IF;*/
+			/*IF curRate.CurrCode = 'CHF' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'deposit' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.BaseCurrCode || '-' || curRate.CurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateSell;
+				
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode || '-' || curRate.BaseCurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				SET items.(XMLNSC.Attribute)value			= curRate.RateBuy;	
+				--SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+					
+			END IF; */
+			/*IF curRate.CurrCode = 'GBP' AND curRate.BaseCurrCode = 'KZT' AND  curRate.RateType = 'deposit' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.BaseCurrCode || '-' || curRate.CurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateSell;
+				
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode || '-' || curRate.BaseCurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				SET items.(XMLNSC.Attribute)value			= curRate.RateBuy;	
+				--SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+					
+			END IF; */
+			/*IF curRate.CurrCode = 'TRY' AND curRate.BaseCurrCode = 'KZT' AND curRate.RateType = 'deposit' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.BaseCurrCode || '-' || curRate.CurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateSell;
+				
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode || '-' || curRate.BaseCurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				SET items.(XMLNSC.Attribute)value			= curRate.RateBuy;	
+				--SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+					
+			END IF; */
+			
+			/*IF curRate.CurrCode = 'CNY' AND curRate.BaseCurrCode = 'USD' AND curRate.RateType = 'deposit' THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.BaseCurrCode || '-' || curRate.CurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateSell;
+				
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode || '-' || curRate.BaseCurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				SET items.(XMLNSC.Attribute)value			= curRate.RateBuy;	
+				--SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+					
+			END IF;  */
+			
+			IF (curRate.CurrCode = 'RUB' AND curRate.BaseCurrCode = 'USD' AND curRate.RateType = 'deposit') OR (curRate.CurrCode = 'USD' AND curRate.BaseCurrCode = 'RUB' AND curRate.RateType = 'deposit') THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.BaseCurrCode || '-' || curRate.CurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateSell;
+				
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode || '-' || curRate.BaseCurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				SET items.(XMLNSC.Attribute)value			= curRate.RateBuy;	
+				--SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+					
+			END IF; 			
+			
+			IF (curRate.CurrCode = 'RUB' AND curRate.BaseCurrCode = 'EUR' AND curRate.RateType = 'deposit') OR (curRate.CurrCode = 'EUR' AND curRate.BaseCurrCode = 'RUB' AND curRate.RateType = 'deposit') THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.BaseCurrCode || '-' || curRate.CurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateSell;
+				
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode || '-' || curRate.BaseCurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				SET items.(XMLNSC.Attribute)value			= curRate.RateBuy;	
+				--SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+					
+			END IF; 		
+			 
+			IF (curRate.CurrCode = 'EUR' AND curRate.BaseCurrCode = 'USD' AND curRate.RateType = 'deposit') OR (curRate.CurrCode = 'USD' AND curRate.BaseCurrCode = 'EUR' AND curRate.RateType = 'deposit') THEN 
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.BaseCurrCode || '-' || curRate.CurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				--SET items.(XMLNSC.Attribute)buy 			= curRate.RateBuy;	
+				SET items.(XMLNSC.Attribute)value 			= curRate.RateSell;
+				
+				CREATE LASTCHILD OF courses AS items NAME 'items';			
+				SET items.(XMLNSC.Attribute)currency 		= curRate.CurrCode || '-' || curRate.BaseCurrCode;	
+				--SET items.(XMLNSC.Attribute)value 			= curRate.RateValue;
+				SET items.(XMLNSC.Attribute)value			= curRate.RateBuy;	
+				--SET items.(XMLNSC.Attribute)sale 			= curRate.RateSell;	
+					
+			END IF;		  
+			            
+		END FOR; 
+		
+		--SET OutputLocalEnvironment.Destination.HTTP.RequestLine.Method = 'courses';
+		--SET OutputLocalEnvironment.Destination.HTTP.QueryString.key    = 'document'; 	
+		--SET OutputLocalEnvironment.Destination.HTTP.RequestLine.Method = 'POST';
+		--SET OutputLocalEnvironment.Destination.HTTP.QueryString.key = 'courses';  
+		--SET OutputRoot.Properties.ContentType = 'application/x-www-form-urlencoded'; 
+		--SET OutputLocalEnvironment.Destination.HTTP.ContentType = 'application/x-www-form-urlencoded';
+		--SET Environment.UserProperties.Source.Properties.ContentType = 'application/x-www-form-urlencoded'; 
+		SET OutputLocalEnvironment.Destination.HTTP.QueryString.courses = CAST(ASBITSTREAM(OutputRoot.XMLNSC CCSID 1208)AS CHARACTER CCSID 1208);
+		SET OutputLocalEnvironment.Destination.HTTP.SSLProtocol         = 'TLS';
+					
+ 		--SET OutputRoot.XMLNSC = null;
+ 		--SET OutputRoot.XMLNSC.courses = CAST(ASBITSTREAM(OutputRoot.XMLNSC CCSID 1208)AS CHARACTER CCSID 1208);
+		--SET OutputLocalEnvironment.Destination.HTTP.RequestURL = 'http://sbersite.ibecsystems.kz/ru/course/upload';  
+		-- !!! Good
+		--SET OutputLocalEnvironment.Destination.HTTP.ProxyURL = '192.168.2.4:3128'; 
+		--SET OutputLocalEnvironment.Destination.HTTP.RequestLine.Method = 'POST';
+		--SET OutputLocalEnvironment.Destination.HTTP.RequestLine.HTTPVersion = 'HTTP/1.1';
+		--SET OutputLocalEnvironment.Destination.HTTP.RequestLine.Method = 'courses'; -- !!! Bad / Good
+
+		---SET OutputLocalEnvironment.Destination.HTTP.QueryString.courses = 'document'; -- Bad
+		--SET OutputLocalEnvironment.Destination.HTTP.QueryString.param1 = 'courses'; -- Bad 
+
+		--SET OutputLocalEnvironment.Destination.HTTP.QueryString.key   	 = 'courses'; -- Bad 	
+		--SET OutputLocalEnvironment.Destination.HTTP.QueryString.value    = 'document';  -- Bad	 
+
+		--SET OutRq = InRq;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForIBEC_ConvertToBLOB
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		DECLARE tcpHeader CHAR;
+		DECLARE tcpMsgLen INTEGER;
+		DECLARE tcpData BLOB ASBITSTREAM(InputRoot.XMLNSC CCSID 1208);
+		
+		SET tcpMsgLen = LENGTH(CAST(tcpData AS CHAR CCSID 1208)); 
+		SET tcpHeader = LEFT(CAST(tcpMsgLen AS CHAR) || '', 4);
+		SET OutputRoot.Properties.MessageFormat = 'BLOB';
+		--SET OutputRoot.BLOB.BLOB	=	CAST(tcpHeader AS BLOB CCSID 1208) || tcpData;
+		SET OutputRoot.BLOB.BLOB	=	tcpData;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

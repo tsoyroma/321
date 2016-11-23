@@ -1,0 +1,282 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pragmanew.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+/*
+  Копирование данных в сообщения типа KZGetCurrencyRateRs и KZExpCurrencyRateRq (MDO) 
+*/
+CREATE PROCEDURE CopyCurrRatesToMDO(	IN inRef REFERENCE, 
+										IN outRef REFERENCE) 
+BEGIN
+	
+	CREATE LASTCHILD OF outRef NAME 'CurrRateData';
+	DECLARE outCurrRate REFERENCE TO outRef;
+	FOR rate AS inRef.CURRENCYRATES.RATE[] DO
+		CREATE LASTCHILD OF outRef.CurrRateData AS outCurrRate NAME 'CurrRate';
+			
+		SET outCurrRate.BaseCurrCode = rate.BASECURRCODE;
+		SET outCurrRate.CurrCode = IsoToCodCurSafe(rate.CURRCODE);
+		SET outCurrRate.StartDt = rate.DATETIMERATEBEG;			
+		SET outCurrRate.EndDt = rate.DATETIMERATEEND;
+		SET outCurrRate.RateValue = rate.RATEVALUE;
+		SET outCurrRate.RateBuy = rate.RATEBUY;
+		SET outCurrRate.RateSell = rate.RATESELL;			
+		SET outCurrRate.RateType = rate.RATETYPE;
+		SET outCurrRate.Scale = rate.SCALE;
+		SET outCurrRate.CurrencyName = rate.CURRENCYNAME;
+		SET outCurrRate.CurrDigitCode = rate.CURRDIGITCODE;
+		SET outCurrRate.Branch = rate.BRANCH;
+		SET outCurrRate.Graduation = rate.GRADUATION;	
+			
+	END FOR;
+	
+END;
+
+/*
+  Копирование документов в формат MDO 
+*/
+CREATE PROCEDURE CopyDocumentsToMDO(	IN inRef REFERENCE, 
+										IN outRef REFERENCE)
+BEGIN
+	DECLARE outDoc REFERENCE TO outRef;
+	FOR doc AS inRef.Documents.Document[] DO
+		CREATE LASTCHILD OF outRef AS outDoc NAME 'PayDocStatusInfo';			
+		SET outDoc.Doc.PayDocInfo.Note			= doc.BankMessage;
+		SET outDoc.Doc.PayDocInfo.DocRef		= doc.SenderReference;
+		SET outDoc.Doc.PayDocInfo.DocCreator	= doc.DocCreatorName;			
+		SET outDoc.DocStatus					= doc.Status;
+		
+		DECLARE senderBalance CHARACTER FIELDVALUE(doc.AcctBalance.SendAcctBalance);
+		DECLARE receiverBalance CHARACTER FIELDVALUE(doc.AcctBalance.RecvAcctBalance);
+		DECLARE acctInfo REFERENCE TO outRef;
+		DECLARE bRec REFERENCE TO outRef;
+		
+		IF senderBalance IS NOT NULL AND senderBalance <> '' THEN
+			CREATE LASTCHILD OF outDoc as acctInfo NAME 'AcctInfo';
+			SET acctInfo.AcctId							= THE(SELECT ITEM participant.Account 
+															  FROM doc.DocumentParticipants.DocumentParticipant[] AS participant 
+												  			  WHERE participant.Role='Плательщик');
+			CREATE LASTCHILD OF acctInfo.AcctBalInfo as bRec NAME 'BalanceRec';
+			SET bRec.BalType 							= 'CURRENT';
+			SET bRec.Amount 							= senderBalance;
+			CREATE LASTCHILD OF acctInfo.AcctBalInfo as bRec NAME 'BalanceRec';
+			SET bRec.BalType 							= 'ARREST';
+			SET bRec.Amount 							= FIELDVALUE(doc.AcctBalance.SendArrestedSum);
+			CREATE LASTCHILD OF acctInfo.AcctBalInfo as bRec NAME 'BalanceRec';
+			SET bRec.BalType 							= 'BLOCKED';
+			SET bRec.Amount 							= FIELDVALUE(doc.AcctBalance.SendBlockedSum);
+		END IF;
+		
+		IF receiverBalance IS NOT NULL AND receiverBalance <> '' THEN
+			CREATE LASTCHILD OF outDoc as acctInfo NAME 'AcctInfo';
+			SET acctInfo.AcctId							= THE(SELECT ITEM participant.Account 
+															  FROM doc.DocumentParticipants.DocumentParticipant[] AS participant 
+												  			  WHERE participant.Role='Получатель');
+			CREATE LASTCHILD OF acctInfo.AcctBalInfo as bRec NAME 'BalanceRec';
+			SET bRec.BalType 							= 'CURRENT';
+			SET bRec.Amount 							= receiverBalance;
+			CREATE LASTCHILD OF acctInfo.AcctBalInfo as bRec NAME 'BalanceRec';
+			SET bRec.BalType 							= 'ARREST';
+			SET bRec.Amount 							= FIELDVALUE(doc.AcctBalance.RecvArrestedSum);
+			CREATE LASTCHILD OF acctInfo.AcctBalInfo as bRec NAME 'BalanceRec';
+			SET bRec.BalType 							= 'BLOCKED';
+			SET bRec.Amount 							= FIELDVALUE(doc.AcctBalance.RecvBlockedSum);
+		END IF;
+		
+	END FOR;	
+	
+	FOR convReq AS inRef.CurrencyConversionRequests.CurrencyConversionRequest[] DO
+		CREATE LASTCHILD OF outRef AS outDoc NAME 'PayDocStatusInfo';
+		SET outDoc.Doc.PayDocInfo.Note			= convReq.ConvMessage;
+		SET outDoc.Doc.PayDocInfo.DocRef		= convReq.SenderReference;
+		SET outDoc.Doc.PayDocInfo.DocCreator	= convReq.DocCreatorName;
+		SET outDoc.DocStatus					= convReq.ConvStatus;
+	END FOR;
+END;
+
+
+/*
+  Копирование выписки по счету ЮЛ в формат MDO 
+*/
+CREATE PROCEDURE CopyLegalStatementToMDO(	IN inRef REFERENCE, 
+											IN outRef REFERENCE)
+BEGIN
+	DECLARE stInfo REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef AS stInfo NAME 'StatementInfo';
+	SET stInfo.StatementRef 					= inRef.Reference;
+	
+	DECLARE acctInfo REFERENCE TO outRef;
+	CREATE LASTCHILD OF stInfo AS acctInfo NAME 'AcctInfo';
+	SET acctInfo.AcctId							= inRef.Number;
+	SET acctInfo.AcctCur						= IsoToCodCurSafe(inRef.Currency);
+	SET acctInfo.BankInfo.banks:BankId			= inRef.BIC;
+	CREATE LASTCHILD OF acctInfo NAME 'AcctBalInfo';
+	DECLARE balRec REFERENCE TO outRef;
+	CREATE LASTCHILD OF acctInfo.AcctBalInfo AS balRec NAME 'BalanceRec';
+	SET balRec.BalType							= 'INBAL';
+	SET balRec.Amount							= inRef.BalanceBroughtForward;
+	CREATE LASTCHILD OF acctInfo.AcctBalInfo AS balRec NAME 'BalanceRec';
+	SET balRec.BalType							= 'OUTBAL';
+	SET balRec.Amount							= inRef.BalanceCarriedForward;
+	CREATE LASTCHILD OF acctInfo.AcctBalInfo AS balRec NAME 'BalanceRec';
+	SET balRec.BalType							= 'DEBT';
+	SET balRec.Amount							= inRef.TurnoverDB;
+	CREATE LASTCHILD OF acctInfo.AcctBalInfo AS balRec NAME 'BalanceRec';
+	SET balRec.BalType							= 'CREDT';
+	SET balRec.Amount							= inRef.TurnoverCR;
+	CREATE LASTCHILD OF acctInfo.AcctBalInfo AS balRec NAME 'BalanceRec';
+	SET balRec.BalType							= 'DEBTN';
+	SET balRec.Amount							= inRef."TurnoverDB-NC";
+	CREATE LASTCHILD OF acctInfo.AcctBalInfo AS balRec NAME 'BalanceRec';
+	SET balRec.BalType							= 'CREDTN';
+	SET balRec.Amount							= inRef."TurnoverCR-NC";
+	CREATE LASTCHILD OF acctInfo.AcctBalInfo AS balRec NAME 'BalanceRec';
+	SET balRec.BalType							= 'INBALN';
+	SET balRec.Amount							= inRef."BalanceBroughtForward-NC";
+	CREATE LASTCHILD OF acctInfo.AcctBalInfo AS balRec NAME 'BalanceRec';
+	SET balRec.BalType							= 'OUTBALN';
+	SET balRec.Amount							= inRef."BalanceCarriedForward-NC";
+	CREATE LASTCHILD OF acctInfo.AcctBalInfo AS balRec NAME 'BalanceRec';
+	SET balRec.BalType							= 'BLOCKED';
+	SET balRec.Amount							= inRef.BlockedSum;
+	CREATE LASTCHILD OF acctInfo.AcctBalInfo AS balRec NAME 'BalanceRec';
+	SET balRec.BalType							= 'ARRESTED';
+	SET balRec.Amount							= inRef.ArrestedSum;
+		
+	SET stInfo.DateStart						= inRef.StartDate;
+	SET stInfo.DateEnd							= inRef.EndDate;
+	SET stInfo.StatementType					= inRef.StatementType;
+		
+	DECLARE doc REFERENCE TO outRef;
+		
+	FOR inDoc AS inRef.AccountDocuments.AccountDocument[] DO 			
+		CREATE LASTCHILD OF stInfo AS doc NAME 'Document'; 
+		SET doc.DocNum								= inDoc.Number;
+		SET doc.DocDate								= inDoc.Date;
+		SET doc.OperType							= inDoc.OperationType;
+		SET doc.PayerInfo.AcctInfo.AcctId			= inDoc.PayerAccount;
+		SET doc.PayerInfo.OrgInfo.orgs:Name			= inDoc.PayerName;
+		DECLARE orgInfo REFERENCE TO doc.PayerInfo.OrgInfo;
+		DECLARE orgId REFERENCE TO orgInfo;
+		CREATE LASTCHILD OF orgInfo AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 								= 'RNN';
+		SET orgId.Value 							= inDoc.PayerRNN;
+		CREATE LASTCHILD OF orgInfo AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 								= 'BIC';
+		SET orgId.Value 							= inDoc.PayerBankBIC;
+		DECLARE orgAttr REFERENCE TO orgInfo;
+		DECLARE person REFERENCE TO orgInfo;
+		CREATE LASTCHILD OF orgInfo AS orgAttr NAME 'OrgAttr';
+		CREATE LASTCHILD OF orgAttr AS person NAME 'KeyPerson';
+		SET person.PositionKey 						= 'CHIEF';
+		SET person.PersonInfo.inds:FullName			= inDoc.PayerChief;
+		CREATE LASTCHILD OF orgAttr AS person NAME 'KeyPerson';
+		SET person.PositionKey 						= 'ACC';
+		SET person.PersonInfo.inds:FullName			= inDoc.PayerChiefBK;		
+		SET orgAttr.Resident 						= SUBSTRING(inDoc.PayerCode FROM 1 FOR 1);
+		SET orgAttr.EcSector 						= SUBSTRING(inDoc.PayerCode FROM 2 FOR 1);		
+		
+		SET doc.PayerInfo.BankInfo.banks:Name 		= inDoc.PayerBankName;
+		
+		SET doc.ReceiverInfo.AcctInfo.AcctId 		= inDoc.PayeeAccount;
+		SET doc.ReceiverInfo.OrgInfo.orgs:Name 		= inDoc.PayeeName;
+		
+		CREATE LASTCHILD OF doc.ReceiverInfo.OrgInfo AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 								= 'RNN';
+		SET orgId.Value 							= inDoc.PayeeRNN;
+		CREATE LASTCHILD OF doc.ReceiverInfo.OrgInfo AS orgId NAME 'OrgIdExt';
+		SET orgId.Key 								= 'BIC';
+		SET orgId.Value 							= inDoc.PayeeBankBIC;
+		CREATE LASTCHILD OF doc.ReceiverInfo.OrgInfo AS orgAttr NAME 'OrgAttr';
+		SET orgAttr.Resident 						= SUBSTRING(inDoc.PayeeCode FROM 1 FOR 1);
+		SET orgAttr.EcSector 						= SUBSTRING(inDoc.PayeeCode FROM 2 FOR 1);
+		
+		SET doc.ReceiverInfo.BankInfo.banks:Name 	= inDoc.PayeeBankName;
+		
+		SET doc.Amount 								= inDoc.Amount;
+		SET doc.AmountNC 							= inDoc."Amount-NC";
+		
+		SET doc.Assign 								= inDoc.Details;
+		SET doc.AssignCode 							= inDoc.CNP;
+		SET doc.OperCode 							= inDoc.OpCode;
+		SET doc.CBC 								= inDoc.CBC;
+		SET doc.PayOrder 							= inDoc.Order;
+		SET doc.SendMethod 							= inDoc.SendMethod;
+		SET doc.DocRef 								= inDoc.Reference;
+		SET doc.AnsRef 								= inDoc.ReferenceAnswer;
+		SET doc.OperDate 							= inDoc.OperDate;
+		SET doc.OperTime 							= inDoc.OperTime;
+		SET doc.Priority 							= inDoc.Priority;
+		SET doc.ValDate 							= inDoc.ValueDate;
+		SET doc.CreatorFIO 							= inDoc.UserName;
+		SET doc.ControlFIO 							= inDoc.UserInspectorName;
+		SET doc.BankOperId 							= inDoc."Op-Kind";
+	END FOR;	
+END;
+
+
+/*
+  Копирование НСИ из формата MDO в формат МАБПК 
+*/
+CREATE PROCEDURE CopyClassifiersFromMDO(	IN inRef REFERENCE, 
+											IN outRef REFERENCE)
+BEGIN
+		DECLARE classifier REFERENCE TO outRef;
+		DECLARE record REFERENCE TO outRef;
+		DECLARE attribute REFERENCE TO outRef;
+
+		FOR cInfo AS inRef.ClassifierInfo[] DO
+			CREATE LASTCHILD OF outRef AS classifier NAME 'Classifier';
+			SET classifier.Code					= cInfo.Code;
+			SET classifier.ParentCode			= cInfo.ParentCode;
+			CREATE FIELD classifier.Records;
+			FOR dataRecord AS cInfo.DataRecord[] DO 
+				CREATE LASTCHILD OF classifier.Records AS record NAME 'Record';
+				SET record.Code					= dataRecord.Code;
+				SET record.ParentCode			= dataRecord.ParentCode;
+				SET record.Name					= dataRecord.Name;
+				SET record.Value				= dataRecord.Value;				
+				SET record.OpenDate				= dataRecord.OpenDate;
+				SET record.IsClosed				= recodeBooleanForNewPragma(dataRecord.IsClosed);
+				SET record.Note					= dataRecord.Note;
+				
+				CREATE FIELD record.Attributes;
+				FOR attr AS dataRecord.Attr[] DO 
+					CREATE LASTCHILD OF record.Attributes AS attribute NAME 'Attribute';
+					SET attribute.Code					= attr.Code;
+					SET attribute.Value					= attr.Value;
+					SET attribute.OpenDate				= attr.OpenDate;
+					SET attribute.IsClosed				= recodeBooleanForNewPragma(attr.IsClosed);
+					SET attribute.Note					= attr.Note;
+					SET attribute.DiffCode				= attr.DiffCode;
+				END FOR;
+				
+				SET record.DiffCode				= dataRecord.DiffCode;				
+				SET record.Timestamp			= dataRecord.Timestamp;
+			END FOR;
+		END FOR;
+		
+		SET outRef.Conditions.targetDate		= inRef.Date;
+		SET outRef.Conditions.includeClosed		= recodeBooleanForNewPragma(inRef.Closed);
+		
+END;
+
+/*
+  Копирование стандартных аттрибутов платежа ИПТ
+*/
+CREATE PROCEDURE copyAttributesForIPT(	IN inRef REFERENCE, 
+										IN outRef REFERENCE)
+BEGIN
+		DECLARE extAttr REFERENCE TO outRef;
+		IF inRef.IPTPayType <> '' THEN
+			CREATE LASTCHILD OF outRef AS extAttr NAME 'PaymentExtAttr';
+			SET extAttr.Key				= 'TYPEPAY';
+			SET extAttr.Value			= inRef.IPTPayType;
+		END IF;
+		IF inRef.CardNumber <> '' THEN
+			CREATE LASTCHILD OF outRef AS extAttr NAME 'PaymentExtAttr';
+			SET extAttr.Key				= 'CARDNUM';
+			SET extAttr.Value			= inRef.CardNumber;
+		END IF;
+END;
+

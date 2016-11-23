@@ -1,0 +1,4854 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.pragmanew.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE RequestForNewPragma_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZBlackListRq' THEN
+			SET labelName = 'KZBlackListRq';
+		WHEN 'KZSBDKQP' THEN
+			SET labelName = 'KZSBDKQP';
+		WHEN 'KZGetPersonInfoByAttrRq' THEN
+			SET labelName = 'KZGetPersonInfoByAttrRq';
+		WHEN 'KZGetInstantLoanDeptRq' THEN
+			SET labelName = 'KZGetInstantLoanDeptRq';
+		WHEN 'KZGetAverageDailyBalanceRq' THEN
+			SET labelName = 'KZGetAverageDailyBalanceRq';
+		WHEN 'KZGetInterestIncomeRq' THEN
+			SET labelName = 'KZGetInterestIncomeRq';
+		WHEN 'KZGetNonInterestIncomeRq' THEN
+			SET labelName = 'KZGetNonInterestIncomeRq';
+		WHEN 'KZGetFinAccountTurnoverRq' THEN
+			SET labelName = 'KZGetFinAccountTurnoverRq';
+		WHEN 'KZGetFinAccountNetTurnoverRq' THEN
+			SET labelName = 'KZGetFinAccountNetTurnoverRq';
+		WHEN 'KZGetTransactionsInfoRq' THEN
+			SET labelName = 'KZGetTransactionsInfoRq';
+		WHEN 'KZGetPersonInfoByIDRq' THEN
+			SET labelName = 'KZGetPersonInfoByIDRq';
+		WHEN 'KZSendPrivateClientDataRq' THEN
+			SET labelName = 'KZSendPrivateClientDataRq';
+		WHEN 'KZGetPrivateClientAccountListRq' THEN
+			SET labelName = 'KZGetPrivateClientAccountListRq';
+		WHEN 'KZGetCurrencyRateRq' THEN
+			SET labelName = 'KZGetCurrencyRateRq';
+		WHEN 'KZLegalPayDocRq' THEN
+			SET labelName = 'KZLegalPayDocRq';
+		WHEN 'KZLegalGetPayDocStatusRq' THEN
+			SET labelName = 'KZLegalGetPayDocStatusRq';
+		WHEN 'KZLegalGetAccountStatementRq' THEN
+			SET labelName = 'KZLegalGetAccountStatementRq';
+		WHEN 'KZLegalCanPayDocRq' THEN
+			SET labelName = 'KZLegalCanPayDocRq';
+		WHEN 'KZLegalCurrOperRq' THEN
+			SET labelName = 'KZLegalCurrOperRq';
+		WHEN 'KZPrivateMoneyTransferRq' THEN
+			SET labelName = 'KZPrivateMoneyTransferRq';
+			
+	
+		WHEN 'KZTechnicalRequestProviderRq' THEN
+			DECLARE xtype CHARACTER;
+			DECLARE typer CHARACTER;
+			FOR inServiceAttr AS InputRoot.XMLNSC.*[<].ServiceAttr[] DO
+				IF inServiceAttr.Key = 'XTYPE' THEN
+					SET xtype = inServiceAttr.Value;
+				END IF;
+			END FOR;
+			FOR extAttr AS InputRoot.XMLNSC.*[<].PayDocInfo.PaymentExtAttr[] DO
+				IF extAttr.Key = 'TYPER' THEN
+					SET typer = extAttr.Value;
+				END IF;
+			END FOR;
+
+			-- Сохраним значение кода сервиса - оно нам понадобится при разборе ответа
+			SET Environment.UserProperties.XTYPE = xtype;
+			SET Environment.UserProperties.TYPER = typer;
+			
+			IF		xtype = 'XTX001' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX001';
+			ELSEIF	xtype = 'XTX003' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX003';
+			ELSEIF	xtype = 'XTX008' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX008';
+			ELSEIF	xtype = 'XTX011' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX011';
+			ELSEIF	xtype = 'XTX013' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX013';
+			ELSEIF	xtype = 'XTX016' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX016';
+			ELSEIF	xtype = 'XTX018' AND typer = '1' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX018_1';
+			ELSEIF	xtype = 'XTX018' AND typer = '2' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX018_2';
+			ELSEIF	xtype = 'XTX023' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX023';
+			ELSEIF	xtype = 'XTX025' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX025';
+			ELSEIF	xtype = 'XTX027' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX027';
+			ELSEIF  xtype = 'XTX060' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX027';	
+			ELSEIF	xtype = 'XTX029' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX029';
+			ELSEIF	xtype = 'XTX042' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX042';	
+			ELSEIF	xtype = 'XTX044' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX044';
+			ELSEIF  xtype = 'XTX046' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX046';
+			ELSEIF  xtype = 'XTX048' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX048';	
+			ELSEIF  xtype = 'XTX050' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX050';	
+			ELSEIF  xtype = 'XTX052' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX052';
+			ELSEIF  xtype = 'XTX054' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX054';	
+			ELSEIF  xtype = 'XTX056' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX056';
+			ELSEIF  xtype = 'XTX060' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX060';	
+			ELSEIF  xtype = 'XTX062' THEN
+				SET labelName = 'KZTechnicalRequestProviderRq_XTX062';			
+			ELSE
+				-- Неизвестный тип сообщения
+				THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForNewPragma', Operation);
+			END IF;
+		WHEN 'KZPaymentProviderRq' THEN
+			DECLARE xtype CHARACTER;
+			FOR inServiceAttr AS InputRoot.XMLNSC.*[<].ServiceAttr[] DO
+				IF inServiceAttr.Key = 'XTYPE' THEN
+					SET xtype = inServiceAttr.Value;
+				END IF;
+			END FOR;
+
+			-- Сохраним значение кода сервиса - оно нам понадобится при разборе ответа
+			SET Environment.UserProperties.XTYPE = xtype;
+
+			IF		xtype = 'XTX002' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX002';
+			ELSEIF	xtype = 'XTX004' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX004';
+			ELSEIF	xtype = 'XTX009' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX009';
+			ELSEIF	xtype = 'XTX010' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX010';
+			ELSEIF	xtype = 'XTX012' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX012';
+			ELSEIF	xtype = 'XTX014' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX014';
+			ELSEIF	xtype = 'XTX017' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX017';
+			ELSEIF	xtype = 'XTX019' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX019';
+			ELSEIF	xtype = 'XTX024' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX024';
+			ELSEIF	xtype = 'XTX026' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX026';
+			ELSEIF	xtype = 'XTX028' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX028';
+			ELSEIF  xtype = 'XTX061' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX028';	
+			ELSEIF	xtype = 'XTX030' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX030';
+			ELSEIF	xtype = 'XTX043' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX043';	
+			ELSEIF	xtype = 'XTX045' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX045';	
+			ELSEIF	xtype = 'XTX047' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX047';
+			ELSEIF	xtype = 'XTX049' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX049';	
+			ELSEIF  xtype = 'XTX051' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX051';	
+			ELSEIF  xtype = 'XTX053' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX053';
+			ELSEIF  xtype = 'XTX055' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX055';	
+			ELSEIF  xtype = 'XTX057' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX057';
+			ELSEIF  xtype = 'XTX061' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX061';	
+			ELSEIF xtype = 'XTX063' THEN
+				SET labelName = 'KZPaymentProviderRq_XTX063';		
+			ELSE
+				-- Неизвестный тип сообщения
+				THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForNewPragma', Operation);
+			END IF;
+		WHEN 'KZGetCalcLoanDeptRq' THEN
+			SET labelName = 'KZGetCalcLoanDeptRq';
+		WHEN 'KZExpMDMPrivateClientDataRq' THEN
+			SET labelName = 'KZExpMDMPrivateClientDataRq';
+		WHEN 'KZExpMDMLegalClientDataRq' THEN
+			SET labelName = 'KZExpMDMLegalClientDataRq';
+		WHEN 'KZGetCardInfoRq' THEN
+			SET labelName = 'KZGetCardInfoRq';
+		WHEN 'KZGetScheduleEffRateRq' THEN
+			SET labelName = 'KZGetScheduleEffRateRq';
+		WHEN 'KZGetCrossCurrRateRq' THEN
+			SET labelName = 'KZGetCrossCurrRateRq';
+		WHEN 'KZPrivateMoneyTransferCanRq' THEN
+			SET labelName = 'KZPrivateMoneyTransferCanRq';
+		WHEN 'KZGetPrivateClientPayScheduleRq' THEN
+			SET labelName = 'KZGetPrivateClientPayScheduleRq';
+		WHEN 'KZGetDepInfoRq' THEN
+			SET labelName = 'KZGetDepInfoRq';
+		WHEN 'KZCheckPersonIdRq' THEN
+			SET labelName = 'KZCheckPersonIdRq';
+		WHEN 'KZGetBackOfficeDateRq' THEN
+			SET labelName = 'KZGetBackOfficeDateRq';
+		WHEN 'KZGetSalaryTurnoverRq' THEN
+			SET labelName = 'KZGetSalaryTurnoverRq';
+		WHEN 'KZGetCreditHistoryRq' THEN
+			SET labelName = 'KZGetCreditHistoryRq';
+		WHEN 'KZExpClassifierRq' THEN
+			SET labelName = 'KZExpClassifierRq';
+		WHEN 'KZGetLegalInfoByAttrRq' THEN
+			SET labelName = 'KZGetLegalInfoByAttrRq';
+		WHEN 'KZSendDealInfoRq' THEN
+			SET labelName = 'KZSendDealInfoRq';
+		WHEN 'KZMngSMSInfoServiceRq' THEN
+			SET labelName = 'KZMngSMSInfoServiceRq';
+		WHEN 'KZComplexPayDocRq' THEN
+			SET labelName = 'KZComplexPayDocRq';
+		WHEN 'KZSAPSaldoRq' THEN
+			SET labelName = 'KZSAPSaldoRq';
+		WHEN 'KZGetLegalProfitabilityRq' THEN
+			SET labelName = 'KZGetLegalProfitabilityRq';
+		WHEN 'KZExpPayDocStatusRq' THEN
+			SET labelName = 'KZExpPayDocStatusRq';
+		WHEN 'KZGetPersonInfoTest' THEN
+			SET labelName = 'KZGetPersonInfoTest';	
+		WHEN 'KZADMTechRequest' THEN
+			SET labelName = 'KZADMTechRequest';	
+		WHEN 'KZADMFinRequest' THEN
+			SET labelName = 'KZADMFinRequest';	
+		WHEN 'KZRequestGESV' THEN
+			SET labelName = 'KZRequestGESV';	
+		WHEN 'KZGSLRequest' THEN
+			SET labelName = 'KZGSLRequest';	
+		WHEN 'KZBankAccountRequest' THEN
+			SET labelName = 'KZBankAccountRequest';
+		WHEN 'KZGetCurrencyRq' THEN
+			SET labelName = 'KZGetCurrencyRq';
+		WHEN 'KZGetBackOfficeRq' THEN
+			SET labelName = 'KZGetBackOfficeRq';
+		WHEN 'KZGetCreditHistoryCorpRq' THEN
+			SET labelName = 'KZGetCreditHistoryCorpRq';
+		WHEN 'KZGetClientInfoRq' THEN
+			SET labelName = 'KZGetClientInfoRq';
+		WHEN 'KZGetContractListRq' THEN
+			SET labelName = 'KZGetContractListRq';
+		WHEN 'KZPersonGetPensionInfoRq' THEN
+			SET labelName = 'KZPersonGetPensionInfoRq';
+		WHEN 'KZDepChkAddRq' THEN
+			SET labelName = 'KZDepChkAddRq';
+		WHEN 'KZNewDepAddFillRq' THEN
+			SET labelName = 'KZNewDepAddFillRq';						
+		WHEN 'KZDepositSyncRq' THEN
+			SET labelName = 'KZDepositSyncRq';	
+		WHEN 'KZDepositStatusRq' THEN
+			SET labelName = 'KZDepositStatusRq';
+		WHEN 'OpenAccount' THEN
+			SET labelName = 'OpenAccountRq';
+		WHEN 'OpenAccountDetailsRequest' THEN
+			SET labelName = 'OpenAccountDetailsRequest';		
+			
+		/* CRM Corp Requests */
+		WHEN 'PragmaEnvelope' THEN
+			DECLARE ServiceCode CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode);
+			CASE ServiceCode
+				-- OrganisationGetClient_Request		
+				WHEN 'OrganizationGetClient' THEN
+					SET labelName = 'OrganizationGetClient';
+				-- OrganisationGetClient_Request		
+				WHEN 'OrgSync_CRM' THEN
+					SET labelName = 'OrgSync_CRM';
+				WHEN 'Report-Rent' THEN
+					SET labelName = 'Report-Rent';	
+					
+				-- QIWI
+				WHEN 'AcctGetStatement' THEN
+					SET labelName = 'QIWI_AcctGetStatement';
+			ELSE
+				-- Непонятный тэг
+				THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForNewPragma(req from CRMCorp)', ServiceCode);
+			END CASE;		
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForNewPragma', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в МАБПК Прагма "Проверка наличия клиента в чёрном списке": KZBlackListRq -> PragmaEnvelope:CheckStopList
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'CheckStopList');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonIDs.PersonID;
+		DECLARE personId REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.PersonIDs.PersonID;
+		DECLARE inPersonInfo REFERENCE TO InputRoot.XMLNSC.*[<].PersonInfo;
+		
+		SET personId.TypeID 	= inPersonInfo.PersonIdType;
+		SET personId.ID 		= inPersonInfo.PersonId;
+		SET personId.LastName 	VALUE = inPersonInfo.inds:PersonName.inds:LastName;
+		SET personId.FirstName 	VALUE = inPersonInfo.inds:PersonName.inds:FirstName;
+		SET personId.MiddleName VALUE = inPersonInfo.inds:PersonName.inds:MiddleName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в МАБПК Прагма "Получение списка ФЛ по атрибутам": KZGetPersonInfoByAttrRq -> PragmaEnvelope:PersonGetData
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'PersonGetData');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonFilters;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.PersonFilters;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+
+		SET outRef.PersonFilter.Branch			= inRef.PersonInfo.RegionCode;
+		SET outRef.PersonFilter.LastName		= inRef.PersonInfo.*:PersonName.*:LastName;
+		SET outRef.PersonFilter.FirstNames		= combineFirstNames(inRef.PersonInfo.*:PersonName.*:FirstName,
+			inRef.PersonInfo.*:PersonName.*:MiddleName);
+		SET outRef.PersonFilter.BirthDate		= SUBSTRING(inRef.PersonInfo.*:BirthDt FROM 1 FOR 10);
+		SET outRef.PersonFilter.BirthPlace		= inRef.PersonInfo.*:BirthPlace;
+		SET outRef.PersonFilter.Country			= inRef.PersonInfo.Country;
+		SET outRef.PersonFilter.Number			= inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum;
+		SET outRef.PersonFilter.DocumentType	= recodeDocumentTypeToNewPragma(inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType);
+
+		DECLARE id CHARACTER NULL;
+		DECLARE integrationID CHARACTER NULL;
+		DECLARE rnn CHARACTER NULL;
+		DECLARE iin CHARACTER NULL;
+
+		FOR inPersonIdExt AS inRef.PersonInfo.PersonIdExt[] DO
+			CASE inPersonIdExt.Key
+			WHEN 'MABPK' THEN
+				SET id = inPersonIdExt.Value;
+			WHEN 'CRMROZN' THEN
+				SET integrationID = inPersonIdExt.Value;
+			WHEN 'RNN' THEN
+				SET rnn = inPersonIdExt.Value;
+			WHEN 'IIN' THEN
+				SET iin = inPersonIdExt.Value;
+			END CASE;
+		END FOR;
+
+		SET outRef.PossibleKeys.Id				= id;
+		SET outRef.PossibleKeys.IntegrationID	= integrationID;
+		SET outRef.PossibleKeys.RNN				= rnn;
+		SET outRef.PossibleKeys.IIN				= iin;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в АБПК Прагма "Получение значения моментной ссудной задолженности компании за период": KZGetInstantLoanDeptRq -> PragmaEnvelope:ClassGetData
+
+ * Запрос в АБПК Прагма "Получение СДО компании за период": KZGetAverageDailyBalanceRq -> PragmaEnvelope:ClassGetData
+
+ * Запрос в АБПК Прагма "Получение суммы процентных доходов от компании за период": KZGetInterestIncomeRq -> PragmaEnvelope:ClassGetData
+
+ * Запрос в АБПК Прагма "Получение суммы непроцентных доходов от компании за период": KZGetNonInterestIncomeRq -> PragmaEnvelope:ClassGetData
+
+ * Запрос в АБПК Прагма "Получение оборотов по счетам компании за период": KZGetFinAccountTurnoverRq -> PragmaEnvelope:ClassGetData
+
+ * Запрос в АБПК Прагма "Получение чистых оборотов по счетам компании за период": KZGetFinAccountNetTurnoverRq -> PragmaEnvelope:ClassGetData
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'ClassGetData');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DataClassRequests.DataClassRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DataClassRequests.DataClassRequest;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.Branch			= '9999';
+		SET outRef."DataClass-Id"	= CASE FIELDNAME(inRef)
+			WHEN 'KZGetInstantLoanDeptRq'		THEN 'CRMK-LOAN'
+			WHEN 'KZGetAverageDailyBalanceRq'	THEN 'CRMK_SDO'
+			WHEN 'KZGetInterestIncomeRq'		THEN 'CRMK-PPRC'
+			WHEN 'KZGetNonInterestIncomeRq'		THEN 'CRMK_NINT'
+			WHEN 'KZGetFinAccountTurnoverRq'	THEN 'CRMK-TURNS'
+			WHEN 'KZGetFinAccountNetTurnoverRq'	THEN 'CRMK-CTURN'
+			ELSE NULL
+		END;
+		SET outRef.StartDate		= inRef.StartDate;
+		SET outRef.EndDate			= inRef.EndDate;
+		
+		DECLARE sym1 CHARACTER NULL;
+		DECLARE sym2 CHARACTER NULL;
+		FOR orgId AS inRef.OrgId[] DO
+			IF orgId.*:OrgType = ORG_TYPE_KZRNN THEN
+				SET sym1 = orgId.*:OrgNum;
+			END IF;
+			IF orgId.*:OrgType = ORG_TYPE_KZBIN THEN
+				SET sym2 = orgId.*:OrgNum;
+			END IF;
+		END FOR;
+		
+		SET outRef.AdditionalCondition.Sym1	= sym1;
+		SET outRef.AdditionalCondition.Sym2	= sym2;
+		IF NOT EXISTS(outRef.AdditionalCondition.*[]) THEN
+			SET outRef.AdditionalCondition = NULL;
+		END IF;
+		
+		-- Сохраним значение кода валюты - оно нам понадобится при разборе ответа
+		SET Environment.UserProperties.CurrCode = inRef.CurrCode;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос списка счетов в МАБПК Прагма: KZGetPrivateClientAccountListRq -> AcctGetList, LoanAcctGetList, DepositAcctGetList
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma7
+	CREATE FUNCTION Main() RETURNS BOOLEAN	
+	BEGIN
+		DECLARE sendAcctGet BOOLEAN FALSE;
+		DECLARE sendDepositAcctGet BOOLEAN FALSE;
+		DECLARE sendLoanAcctGet BOOLEAN FALSE;
+		DECLARE accTypesList CHARACTER '';
+				
+		IF NOT EXISTS(InputRoot.XMLNSC.KZGetPrivateClientAccountListRq.AccountKind[]) THEN
+			SET sendAcctGet = TRUE;
+			SET sendDepositAcctGet = TRUE;
+			SET sendLoanAcctGet = TRUE;
+		ELSE 
+			FOR acct AS InputRoot.XMLNSC.KZGetPrivateClientAccountListRq.AccountKind[] DO
+				IF FIELDVALUE(acct) = 'ABS_ACCOUNT' THEN -- лицевые, кредитные и депозитные счета
+					SET sendAcctGet = TRUE;
+					SET sendDepositAcctGet = TRUE;
+					SET sendLoanAcctGet = TRUE;
+				ELSE 
+					IF FIELDVALUE(acct) = 'ABS_CREDIT' THEN -- кредитные счета
+						SET sendLoanAcctGet = TRUE;
+					ELSE 
+						IF FIELDVALUE(acct) = 'ABS_DEPOSIT' THEN -- депозитные счета
+							SET sendDepositAcctGet = TRUE;
+						ELSE 
+							IF FIELDVALUE(acct) = 'ABS_ACCOUNT_ONLY' THEN -- лицевые счета
+								SET sendAcctGet = TRUE;
+							ELSE 
+							    THROW USER EXCEPTION VALUES ('Unknown operation type', FIELDVALUE(acct));
+						    END IF;
+						END IF;
+					END IF;
+				END IF;
+				IF accTypesList = '' THEN
+					SET accTypesList = FIELDVALUE(acct);
+				ELSE 
+					SET accTypesList = accTypesList || ',' || FIELDVALUE(acct);
+				END IF;
+			END FOR;
+		END IF;
+		
+		IF sendAcctGet THEN 
+			SET OutputRoot = NULL;
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+			CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'AcctGetList');	
+			CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.AccountListRequests.AccountListRequest;
+			DECLARE request REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.AccountListRequests.AccountListRequest;
+			DECLARE personInfo REFERENCE TO InputRoot.XMLNSC.*[<].PersonInfo;
+			
+			IF InputRoot.XMLNSC.*[<].SPName = 'TSMMB' THEN 
+			   SET request.Branch = ' ';
+			END IF; 			 
+						
+			FOR idExt AS personInfo.PersonIdExt[] DO
+				IF idExt.Key = 'MABPK' THEN
+					CREATE LASTCHILD OF request NAME 'PersonKey';
+					CREATE LASTCHILD OF request.PersonKey NAME 'ManagerIntID' VALUE idExt.Value;
+				END IF;
+				IF idExt.Key = 'IIN' THEN
+					CREATE LASTCHILD OF request NAME 'PersonKey';
+					CREATE LASTCHILD OF request.PersonKey NAME 'IIN' VALUE idExt.Value;
+				END IF;
+				IF idExt.Key = 'RNN' THEN
+					CREATE LASTCHILD OF request NAME 'PersonKey';
+					CREATE LASTCHILD OF request.PersonKey NAME 'RNN' VALUE idExt.Value;
+				END IF;
+				IF idExt.Key = 'BIN' THEN
+					CREATE LASTCHILD OF request NAME 'PersonKey';
+					CREATE LASTCHILD OF request.PersonKey NAME 'BIN' VALUE idExt.Value;
+				END IF;
+			END FOR;
+			
+			IF InputRoot.XMLNSC.*[<].SPName = 'TSMMB' THEN 
+		       CREATE LASTCHILD OF request NAME 'LoanKey';
+			   CREATE LASTCHILD OF request.LoanKey NAME 'Type' VALUE 'AccountTypeForTransact';
+			   
+			   CREATE LASTCHILD OF request NAME 'AdditionalParams';
+			   CREATE LASTCHILD OF request.AdditionalParams NAME 'BalanceEnabled' VALUE 'Y';
+			ELSE
+			   CREATE LASTCHILD OF request NAME 'AdditionalParams';
+			   CREATE LASTCHILD OF request.AdditionalParams NAME 'ClosedAccountsEnabled' VALUE 'Y';
+			   CREATE LASTCHILD OF request.AdditionalParams NAME 'BalanceEnabled' VALUE 'Y';
+			   CREATE LASTCHILD OF request.AdditionalParams NAME 'Contract_List' VALUE accTypesList;
+			END IF; 			 
+			
+			PROPAGATE;
+		END IF;
+		
+		IF sendLoanAcctGet THEN 
+			SET OutputRoot = NULL;
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+			CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'LoanAcctGetList');	
+			CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.ContractAcctListRequests.ContractAcctListRequest;
+			DECLARE request REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.ContractAcctListRequests.ContractAcctListRequest;
+			DECLARE personInfo REFERENCE TO InputRoot.XMLNSC.*[<].PersonInfo;		
+			FOR idExt AS personInfo.PersonIdExt[] DO
+				IF idExt.Key = 'MABPK' THEN
+					CREATE LASTCHILD OF request NAME 'Person_Id' VALUE idExt.Value;
+				END IF;
+				IF idExt.Key = 'IIN' THEN
+					CREATE LASTCHILD OF request NAME 'IIN' VALUE idExt.Value;
+				END IF;
+				IF idExt.Key = 'BIN' THEN
+					CREATE LASTCHILD OF request NAME 'BIN' VALUE idExt.Value;
+				END IF;
+			END FOR;
+			PROPAGATE;
+		END IF;
+		
+		IF sendDepositAcctGet THEN 
+			SET OutputRoot = NULL;
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+			CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DepositAcctGetList');	
+			CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.ContractAcctListRequests.ContractAcctListRequest;
+			DECLARE request REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.ContractAcctListRequests.ContractAcctListRequest;
+			DECLARE personInfo REFERENCE TO InputRoot.XMLNSC.*[<].PersonInfo;		
+			FOR idExt AS personInfo.PersonIdExt[] DO
+				IF idExt.Key = 'MABPK' THEN
+					CREATE LASTCHILD OF request NAME 'Person_Id' VALUE idExt.Value;
+				END IF;
+				IF idExt.Key = 'IIN' THEN
+					CREATE LASTCHILD OF request NAME 'IIN' VALUE idExt.Value;
+				END IF;
+				IF idExt.Key = 'BIN' THEN
+					CREATE LASTCHILD OF request NAME 'BIN' VALUE idExt.Value;
+				END IF;
+			END FOR;
+			PROPAGATE;
+		END IF;
+		
+		RETURN FALSE;
+	END;	
+END MODULE;
+
+
+
+/**
+ * Запрос в МАБПК Прагма "Получение информации о транзакциях по счёту ФЛ": KZGetTransactionsInfoRq -> PragmaEnvelope:AcctGetStatement
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'AcctGetStatement');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.AccountStatementRequests.AccountStatementRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.AccountStatementRequests.AccountStatementRequest;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.Branch		= '';
+		SET outRef.Number		= inRef.AcctInfo.AcctId;
+		SET outRef.StartDate	= inRef.StartDate;
+		SET outRef.EndDate		= inRef.EndDate;
+		SET outRef.Extended		= CASE 
+			WHEN inRef.IsExtStatement <> '' THEN inRef.IsExtStatement
+			ELSE NULL 
+		END;
+		SET outRef.Turnovers	= '';
+		
+		DECLARE integrationId CHARACTER NULL;
+		
+		FOR inPersonIdExt AS inRef.PersonInfo.PersonIdExt[] DO
+			IF inPersonIdExt.Key = 'MABPK' THEN
+				SET integrationId = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		
+		-- сохраним идентификатор в переменные среды, чтобы иметь к нему доступ при маппинге ответа
+		SET Environment.UserProperties.integrationId = integrationId;
+		SET Environment.UserProperties.IsExtStatement = COALESCE(outRef.Extended, 'N');
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Получение информации о транзакциях по счёту ФЛ": KZGetPersonInfoByIDRq -> PragmaEnvelope:PersonGetClient
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma5
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'PersonGetClient');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonKeys.PersonKey;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.PersonKeys.PersonKey;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE type CHARACTER inRef.PersonInfo.PersonIdExt[<].Key;
+		DECLARE val CHARACTER inRef.PersonInfo.PersonIdExt[<].Value;
+		
+		CASE type
+		WHEN 'MABPK' THEN
+			SET outRef.Id = val;
+		WHEN 'INTID' THEN
+			SET outRef.IntegrationID = val;
+		WHEN 'RNN' THEN
+			SET outRef.RNN = val;
+		WHEN 'IIN' THEN
+			SET outRef.IIN = val;
+		END CASE;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Создание или обновление физ. лица внешней системой": KZSendPrivateClientDataRq -> PragmaEnvelope:PersonSync
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma6
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'PersonSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonSyncData.PersonKey;
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonSyncData.Person;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<].PersonInfo;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.PersonSyncData.PersonKey;
+
+		DECLARE id CHARACTER;
+		DECLARE integrationID CHARACTER;
+		DECLARE rnn CHARACTER;
+		DECLARE iin CHARACTER;
+		DECLARE sic CHARACTER;
+		DECLARE uncp CHARACTER;
+
+		FOR inPersonIdExt AS inRef.PersonIdExt[] DO
+			CASE inPersonIdExt.Key
+			WHEN 'MABPK' THEN
+				SET id = inPersonIdExt.Value;
+			--WHEN 'CRMROZN' THEN
+			--	SET integrationID = inPersonIdExt.Value;
+			WHEN 'CIF' THEN
+				SET integrationID = inPersonIdExt.Value;
+			WHEN 'RNN' THEN
+				SET rnn = inPersonIdExt.Value;
+			WHEN 'IIN' THEN
+				SET iin = inPersonIdExt.Value;
+			WHEN 'SIC' THEN
+				SET sic = inPersonIdExt.Value;
+			WHEN 'UNK' THEN
+				SET uncp = inPersonIdExt.Value;
+			END CASE;
+		END FOR;
+	
+		SET outRef.Id				= id;
+		SET outRef.IntegrationID	= integrationID;
+		SET outRef.UNK				= uncp;
+		SET outRef.RNN				= rnn;
+		SET outRef.IIN				= iin;
+		
+		MOVE outRef TO OutputRoot.XMLNSC.*[<].RequestData.PersonSyncData.Person;
+		
+		CALL transformPersonDataFromESBToNewPragma(inRef, outRef, NULL);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+	Запрос из BSS на получение курсов валют.
+*/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_CurrRate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'BSSCurrencyRates');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.BSS_CURRATES_REQ.CURRENCYRATES_RQ;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.BSS_CURRATES_REQ.CURRENCYRATES_RQ;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZGetCurrencyRateRq;
+		SET outRef.ID 				= inRef.RqUID;
+		SET outRef.DateTime 		= inRef.RqTm;
+		SET outRef.RATEDATE 		= inRef.RateDT;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Платежное поручение ЮЛ
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_PayDoc
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalPayDocRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		CREATE FIELD outRef.RequestData.DocumentSyncData;
+		
+		DECLARE templateSuffix CHARACTER '';
+		IF EXISTS(inRef.ClientList.ClientData[]) THEN
+			SET templateSuffix = 'Register';
+		END IF;	
+		
+		CREATE LASTCHILD OF outRef.RequestData.DocumentSyncData AS docKey NAME 'DocumentKey';
+		SET docKey.Branch 				= '';
+		SET docKey.DocumentType 		= '0';
+		SET docKey.Id 					= '';
+		IF inRef.TransType = '8' THEN
+			SET docKey.Template 			= 'BSSOutFC' || templateSuffix;
+		ELSE 
+			IF inRef.OperationType = 'SAP_ABC_HRB_REESTR' THEN
+				SET docKey.Template 			= 'SAPOutNC' || templateSuffix;
+			ELSE
+				SET docKey.Template 			= 'BSSOutNC' || templateSuffix;
+			END IF;
+		END IF;
+		
+		CREATE LASTCHILD OF outRef.RequestData.DocumentSyncData AS doc NAME 'Document';
+		SET doc.Id 						= '';
+
+        /* u00671 09/07/2014 костыль для сервиса SAP_ABC_PP */ 
+		IF inRef.SAP_MSGUID <> '' THEN 
+	      SET outRef.MessageUID         = inRef.SAP_MSGUID;
+  		  SET doc.SenderReference 		= inRef.SAP_MSGUID;
+		ELSE  
+		  SET doc.SenderReference 		= inRef.PayDocInfo.DocRef;
+		END IF;  
+
+		SET doc.Status 					= '';
+		SET doc.Type 					= '';
+		SET doc.AmountDB 				= inRef.PayDocInfo.Amount;
+		SET doc.CurrencyDB 				= CodToIsoCur(inRef.PayerInfo.AcctInfo.AcctCur);
+		SET doc.AmountCR 				= inRef.PayDocInfo.Amount;
+		SET doc.CurrencyCR 				= CodToIsoCur(inRef.ReceiverInfo.AcctInfo.AcctCur);
+		SET doc.Details 				= inRef.PayDocInfo.Assign;
+		SET doc.CNP 					= inRef.PayDocInfo.PurposeCode;
+		SET doc.Number 					= inRef.PayDocInfo.DocNum;
+		SET doc.Branch 					= '';
+		IF inRef.PayDocInfo.Urgent = '1' THEN
+			SET doc.OrderPay 			= '01';
+		END IF; 
+		SET doc.PrimaryCreationDate		= inRef.PayDocInfo.DocDate;	
+		SET doc.OperationDate			= inRef.PayDocInfo.RefDate;	
+		SET doc.WriteOffDate			= '';	
+		SET doc.InsertDate				= '';	
+		SET doc.CardIndexInsertDate		= '';
+		SET doc.Transaction				= '';
+		SET doc.CBC						= inRef.PayDocInfo.IncomeCode;	
+		SET doc.PayeeCode				= COALESCE(inRef.ReceiverInfo.OrgInfo.OrgAttr.Resident,'') || 
+										  COALESCE(inRef.ReceiverInfo.OrgInfo.OrgAttr.EcSector,'');	
+		SET doc.PayerCode				= COALESCE(inRef.PayerInfo.OrgInfo.OrgAttr.Resident,'') || 
+										  COALESCE(inRef.PayerInfo.OrgInfo.OrgAttr.EcSector,'');
+		SET doc.SpecialProcessingSign	= inRef.PayDocInfo.SpecialService;	
+		SET doc.OperationType			= inRef.PayDocInfo.OperKind;	
+		SET doc.SendMethod				= inRef.PayDocInfo.SendMethod;	
+		SET doc.DetailsInformation		= inRef.PayDocInfo.Note;	
+		SET doc.CreditProceedsPayment	= inRef.PayDocInfo.IsLoanPay;
+		SET doc.PaymentType				= inRef.PayDocInfo.OperTypeCode;
+		SET doc.CommissionAccount		= inRef.PayerInfo.AcctComId.AcctId;
+		SET doc.CommissionCurrency		= CodToIsoCur(inRef.PayerInfo.AcctComId.AcctCur);								  
+		IF inRef.PayerInfo.ChkPay = '1' THEN
+			SET doc.CurrencyOperation	= 'Y';
+		ELSE 
+			SET doc.CurrencyOperation	= 'N';
+		END IF;
+		IF inRef.TransType = '8' THEN
+			SET doc.ContractNumber			= inRef.PayerInfo.ContractNum;
+			SET doc.ContractDate			= inRef.PayerInfo.ContractDate;
+			SET doc.ContractAccountNumber	= inRef.PayerInfo.ContractUN;
+			SET doc.ContractAccountDate		= inRef.PayerInfo.ContractUNDate;	
+		END IF;	
+		SET doc.Invoice					= inRef.PayerInfo.Invoice;
+		SET doc.TaxPayerStatus			= '';
+		SET doc.ConversionType			= '';
+		SET doc.DocCreatorName			= '';
+		SET doc.DocSupervisorName		= '';
+		SET doc.BankMessage				= '';
+		SET doc.AdditionalInfo			= inRef.PayDocInfo.PayerCommission;
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE part REFERENCE TO doc.DocumentParticipants;
+		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS part NAME 'DocumentParticipant';
+		SET part.Role 					= 'Плательщик';
+		SET part.Country 				= '';
+		SET part.Address 				= '';
+		SET part.RNN 					= THE(SELECT ITEM orgId.Value FROM inRef.PayerInfo.OrgInfo.OrgIdExt[] AS orgId WHERE orgId.Key='RNN');
+		SET part.KPP 					= '';
+		SET part.Name 					= inRef.PayerInfo.OrgInfo.*:Name;
+		SET part.BIC 					= '';
+		SET part.Account 				= inRef.PayerInfo.AcctInfo.AcctId;
+		SET part.Chief 					= THE(SELECT ITEM keyPerson.PersonInfo.*:FullName FROM inRef.PayerInfo.OrgInfo.OrgAttr.KeyPerson[] AS keyPerson 
+											  WHERE keyPerson.PositionKey = 'CHIEF');
+		SET part.ChiefBK 				= THE(SELECT ITEM keyPerson.PersonInfo.*:FullName FROM inRef.PayerInfo.OrgInfo.OrgAttr.KeyPerson[] AS keyPerson 
+											  WHERE keyPerson.PositionKey = 'ACC');
+											  
+		CREATE LASTCHILD OF doc.DocumentParticipants AS part NAME 'DocumentParticipant';
+		SET part.Role 					= 'Банк_получателя';
+		SET part.Country 				= inRef.ReceiverInfo.BankInfo.*:PostAddr.*:Country;
+		SET part.Address 				= inRef.ReceiverInfo.BankInfo.*:PostAddr.*:Addr1;
+		SET part.RNN 					= '';
+		SET part.KPP 					= '';
+		SET part.Name 					= inRef.ReceiverInfo.BankInfo.*:Name;
+		SET part.BIC 					= THE(SELECT ITEM orgId.Value FROM inRef.ReceiverInfo.OrgInfo.OrgIdExt[] AS orgId 
+											  WHERE orgId.Key = 'BIC');
+		SET part.Account 				= inRef.ReceiverInfo.BankInfo.*:CorAcctId;
+		SET part.Chief 					= '';
+		SET part.ChiefBK 				= '';
+		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS part NAME 'DocumentParticipant';
+		SET part.Role 					= 'Получатель';
+		SET part.Country 				= inRef.ReceiverInfo.OrgInfo.*:CompositeContactInfo.*:ContactInfo.*:PostAddr.*:Country;
+		SET part.Address 				= inRef.ReceiverInfo.OrgInfo.*:CompositeContactInfo.*:ContactInfo.*:PostAddr.*:Addr1;
+		SET part.RNN 					= THE(SELECT ITEM orgId.Value FROM inRef.ReceiverInfo.OrgInfo.OrgIdExt[] AS orgId 
+											  WHERE orgId.Key = 'RNN');
+		SET part.KPP 					= inRef.ReceiverInfo.OrgInfo.*:KPPInfo.*:TaxId;
+		SET part.Name 					= inRef.ReceiverInfo.OrgInfo.*:Name;
+		SET part.BIC 					= '';
+		SET part.Account 				= inRef.ReceiverInfo.AcctInfo.AcctId;
+		SET part.Chief 					= '';
+		SET part.ChiefBK 				= '';
+		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS part NAME 'DocumentParticipant';
+		SET part.Role 					= 'Банк_посредник';
+		SET part.Country 				= FIELDVALUE(inRef.PayDocInfo.CorrBankInfo.*:PostAddr.*:Country);
+		SET part.Address 				= FIELDVALUE(inRef.PayDocInfo.CorrBankInfo.*:PostAddr.*:Addr1);
+		SET part.Name 					= FIELDVALUE(inRef.PayDocInfo.CorrBankInfo.*:Name);	
+		SET part.BIC 					= FIELDVALUE(inRef.PayDocInfo.CorrBankInfo.*:BankId);
+		SET part.Account 				= FIELDVALUE(inRef.PayDocInfo.CorrBankInfo.*:CorAcctId);
+		
+		CREATE FIELD doc.DocumentClients;
+		DECLARE outClient REFERENCE TO outRef;
+		FOR inClient AS inRef.ClientList.ClientData[] DO
+			CREATE LASTCHILD OF doc.DocumentClients AS outClient NAME 'DocumentClient';	
+			SET outClient.LastName 			= FIELDVALUE(inClient.PersonInfo.inds:PersonName.inds:LastName);
+			SET outClient.FirstNames 		= COALESCE(inClient.PersonInfo.inds:PersonName.inds:FirstName, '') || ' ' ||
+											  COALESCE(inClient.PersonInfo.inds:PersonName.inds:MiddleName, '');
+			SET outClient.ClientAccount 	= inClient.AcctId;
+			SET outClient.IIN 				= inClient.RegData;
+			SET outClient.INN 				= '';
+			SET outClient.Amount 			= inClient.Amount;
+			SET outClient.Currency 			= inClient.CurrCode;
+			SET outClient.BirthDate 		= SUBSTRING(FIELDVALUE(inClient.PersonInfo.inds:BirthDt) FROM 1 FOR 10);
+			SET outClient.Period 			= inClient.Period;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос статуса платежного документа
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_DocStatus
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocGetList');	
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		DECLARE docRef REFERENCE TO outRef;
+		CREATE FIELD outRef.RequestData.DocListReq.DocListReqData AS docRef;
+		SET docRef.Branch 									= '';
+		SET docRef.DocumentType 							= '0';
+		SET docRef.DocumentRefs.DocumentRef.SenderReference = InputRoot.XMLNSC.KZLegalGetPayDocStatusRq.Doc.PayDocInfo.DocRef;
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+/**
+ * Запрос выписки по счету ЮЛ  используется для CRM BSS
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_Statement
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'AcctGetStatement');	
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalGetAccountStatementRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		DECLARE accRef REFERENCE TO outRef;
+		CREATE FIELD outRef.RequestData.AccountStatementRequests.AccountStatementRequest AS accRef;
+		SET accRef.Number				= inRef.AcctReq.AcctId;
+		SET accRef.StartDate			= inRef.DateStart;
+		SET accRef.EndDate				= inRef.DateEnd;
+		SET accRef.Extended				= inRef.IsExtStatement;
+		SET accRef.Turnovers			= inRef.IsTurnovers;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ *	Запрос на отзыв платёжного документа
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_Cancel
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalCanPayDocRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		SET outRef.RequestData.DocumentSyncData.DocumentKey.SenderReference = inRef.PayDocInfo.CancelDocRef;
+		SET outRef.RequestData.DocumentSyncData.Document.SenderReference 	= inRef.PayDocInfo.CancelDocRef;--inRef.PayDocInfo.DocRef; -- || ',' || inRef.TransType
+		SET outRef.RequestData.DocumentSyncData.Document.Status 				= 'A';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ *	Запрос на конвертацию.
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_CurrOper
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalCurrOperRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		
+		DECLARE docData REFERENCE TO outRef;
+		CREATE FIELD outRef.RequestData.DocumentSyncData AS docData;
+		DECLARE docKey REFERENCE TO outRef;
+		CREATE FIELD docData.DocumentKey AS docKey;
+		SET docKey.Branch								= '';
+		SET docKey.DocumentType							= '1';
+		SET docKey.Id									= '';
+		SET docKey.Template								= 'BSSConv';
+		
+		DECLARE convReq REFERENCE TO outRef; 
+		CREATE LASTCHILD OF docData AS convReq NAME 'CurrencyConversionRequest';
+		SET convReq.Branch 								= '';
+		SET convReq.Id 									= '';
+		SET convReq.Number 								= inRef.PayDocInfo.DocNum;
+		SET convReq.Date 								= inRef.PayDocInfo.DocDate;
+		SET convReq.SenderReference 					= inRef.PayDocInfo.DocRef; --  || ',' || inRef.TransType
+		SET convReq.SellAccount 						= inRef.PayerInfo.AcctInfo.AcctId;
+		
+		SET convReq.SellCurrency 						= CodToIsoCur(inRef.PayerInfo.AcctInfo.AcctCur);
+		IF inRef.PayerInfo.AcctInfo.AcctCur = 'KZT' THEN
+			SET convReq.SellAmount 						= inRef.PayDocInfo.Amount;
+		ELSE 
+			SET convReq.SellAmount 						= inRef.PayDocInfo.AmountCur;
+		END IF;
+		SET convReq.BuyAccount 							= inRef.ReceiverInfo.AcctInfo.AcctId;
+		SET convReq.BuyCurrency 						= CodToIsoCur(inRef.ReceiverInfo.AcctInfo.AcctCur);
+		IF inRef.PayerInfo.AcctInfo.AcctCur = 'KZT' THEN
+			SET convReq.BuyAmount 						= inRef.PayDocInfo.AmountCur;
+		ELSE 
+			SET convReq.BuyAmount 						= inRef.PayDocInfo.Amount;
+		END IF;
+		SET convReq.CommAccount 						= inRef.PayerInfo.AcctComId.AcctId;
+		IF inRef.PayDocInfo.Urgent = '0' THEN
+			SET convReq.FixedDateConversation 			= 'N';
+		ELSE 
+			SET convReq.FixedDateConversation 			= 'Y';
+		END IF;		
+		SET convReq.Purpose								= inRef.PayDocInfo.Assign;
+		SET convReq.CurrContractNum 					= inRef.PayDocInfo.CurrContractNum;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ *	Запрос перевода средств.
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_Transfer
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.UserProperties.Source.Body 		= 
+								CAST(ASBITSTREAM(InputRoot.XMLNSC ENCODING InputRoot.MQMD.Encoding CCSID InputRoot.MQMD.CodedCharSetId)
+									 AS CHARACTER CCSID InputRoot.MQMD.CodedCharSetId ENCODING InputRoot.MQMD.Encoding
+								);
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZPrivateMoneyTransferRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		
+		DECLARE template CHARACTER;
+		DECLARE midFrom CHARACTER THE(SELECT ITEM extId.Value FROM inRef.XferInfo.AcctFrom.ExtAcctId[] 
+									  AS extId WHERE extId.Key='MID');
+		DECLARE midTo CHARACTER   THE(SELECT ITEM extId.Value FROM inRef.XferInfo.AcctTo.ExtAcctId[] 
+									  AS extId WHERE extId.Key='MID');
+		
+		IF midFrom='W4C' THEN
+			SET template 		= 'WebCrd2Acc';
+		ELSEIF midFrom='W4D' THEN
+			SET template 		= 'WebDepOut';	
+		ELSE 
+			IF midTo='W4C' THEN
+				SET template 	= 'WebAcc2Crd';
+			ELSE 
+				SET template 	= 'WebInternal';
+			END IF;
+		END IF;
+		
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		CREATE FIELD outRef.RequestData.DocumentSyncData.DocumentKey AS docKey;
+		SET docKey.Branch				= '';
+		SET docKey.Id					= COALESCE(inRef.XferInfo.Id,'');
+		SET docKey.DocumentType			= COALESCE(inRef.XferInfo.DocumentType,'');
+		SET docKey.Template				= template;
+		SET docKey.CreateMode			= COALESCE(inRef.XferInfo.CreateMode,NULL);
+		SET docKey.BriefAnswer			= COALESCE(inRef.XferInfo.BriefAnswer,NULL);		
+		CREATE LASTCHILD OF outRef.RequestData.DocumentSyncData AS doc NAME 'Document';
+		SET doc.Id 						= '';
+		SET doc.SenderReference 		= COALESCE( THE(SELECT ITEM attr.AttrValue FROM inRef.ServiceAttr[] 
+									  					AS attr WHERE attr.AttrId='RRN'),'') || ',' || 
+									  	  COALESCE( THE(SELECT ITEM attr.AttrValue FROM inRef.ServiceAttr[] 
+									  					AS attr WHERE attr.AttrId='SRN'),'') || ',' ||
+									  	  COALESCE( THE(SELECT ITEM attr.AttrValue FROM inRef.ServiceAttr[] 
+									  					AS attr WHERE attr.AttrId='STAN'),'');
+		SET doc.Status 					= COALESCE(inRef.XferInfo.Status,'');
+		SET doc.Type					= '';
+		SET doc.AmountDB				= inRef.XferInfo.Amount;
+		SET doc.CurrencyDB				= CodToIsoCur(inRef.XferInfo.AmtCur);
+		SET doc.AmountCR				= inRef.XferInfo.Amount;
+		SET doc.CurrencyCR				= CodToIsoCur(inRef.XferInfo.AmtCur);
+		SET doc.Details					= inRef.XferInfo.TransPurpose;
+		SET doc.CNP						= '';
+		
+		SET doc.Number					= THE(SELECT ITEM attr.AttrValue FROM inRef.ServiceAttr[] 
+									  		  AS attr WHERE attr.AttrId='RRN');
+		SET doc.Branch					= '';
+		SET doc.OrderPay				= '';
+		SET doc.PrimaryCreationDate		= inRef.XferInfo.BillingInfo.TransDt;
+		SET doc.OperationDate			= inRef.XferInfo.BillingInfo.TransDt;		
+		SET doc.WriteOffDate			= '';
+		SET doc.InsertDate				= '';
+		SET doc.CardIndexInsertDate		= '';		
+		SET doc.Transaction				= '';
+		SET doc.CBC						= '';
+		SET doc.PayeeCode				= '';		
+		SET doc.PayerCode				= '';
+		SET doc.SpecialProcessingSign	= '';
+		SET doc.OperationType			= '';
+		SET doc.SendMethod				= '';
+		SET doc.DetailsInformation		= '';		
+		SET doc.CreditProceedsPayment	= '';
+		SET doc.PaymentType				= '';
+		SET doc.CommissionAccount		= '';
+		SET doc.CommissionCurrency		= '';
+		SET doc.CurrencyOperation		= '';
+		SET doc.ContractNumber			= '';
+		SET doc.ContractDate			= '';
+		SET doc.ContractAccountNumber	= '';
+		SET doc.ContractAccountDate		= '';		
+		SET doc.Invoice					= '';
+		SET doc.TaxPayerStatus			= '';
+		SET doc.ConversionType			= '';
+		SET doc.DocCreatorName			= '';		
+		SET doc.DocSupervisorName		= '';
+		SET doc.BankMessage				= '';
+		
+		DECLARE docPt REFERENCE TO outRef;
+		CREATE FIELD doc.DocumentParticipants;
+		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPt NAME 'DocumentParticipant';
+		SET docPt.Role					= 'Плательщик';
+		SET docPt.Country				= '';
+		SET docPt.Address				= '';
+		SET docPt.RNN					= THE(SELECT ITEM extId.Value FROM inRef.XferInfo.AcctFrom.ClientInfo.PersonInfo.PersonIdExt[] 
+									  		  AS extId WHERE extId.Key='TAXID');
+		SET docPt.KPP					= '';
+		SET docPt.Name					= inRef.XferInfo.AcctFrom.ClientInfo.PersonInfo.inds:PersonName.inds:LastName;
+		SET docPt.BIC					= '';
+		SET docPt.Account				= inRef.XferInfo.AcctFrom.AcctId;
+		SET docPt.Chief					= '';
+		SET docPt.ChiefBK				= '';
+		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPt NAME 'DocumentParticipant';
+		SET docPt.Role					= 'Получатель';
+		SET docPt.Country				= '';
+		SET docPt.Address				= '';
+		SET docPt.RNN					= THE(SELECT ITEM extId.Value FROM inRef.XferInfo.AcctTo.ClientInfo.PersonInfo.PersonIdExt[] 
+									  		  AS extId WHERE extId.Key='TAXID');
+		SET docPt.KPP					= '';
+		SET docPt.Name					= inRef.XferInfo.AcctTo.ClientInfo.PersonInfo.inds:PersonName.inds:LastName;
+		SET docPt.BIC					= '';
+		SET docPt.Account				= inRef.XferInfo.AcctTo.AcctId;
+		SET docPt.Chief					= '';
+		SET docPt.ChiefBK				= '';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Технический запрос мобильного оператора  ": KZTechnicalRequestProviderRq -> PragmaEnvelope:DocumentSync
+ * XTX001
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma8
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTBillingPay';
+		SET outRef.DocumentKey.CreateMode	= 'N';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.SenderReference	= inRef.RqUID;
+		SET outRef.Document.Number			= '1';
+		SET outRef.Document.OperationDate	= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd');
+		SET outRef.Document.EquipNumber		= smid;
+		SET outRef.Document.OperatorPrefix	= inRef.PayDocInfo.ProviderCode;
+		SET outRef.Document.PayerID			= inRef.PayDocInfo.ProviderNum;
+		SET outRef.Document.IPTPayType		= inRef.PayDocInfo.PaymentType;
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * XTX008
+ * Запрос в МАБПК Прагма "Технический запрос проведения налогового платежа  ": KZTechnicalRequestProviderRq -> PragmaEnvelope:DocumentSync
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma9
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTBudgetPay';
+		SET outRef.DocumentKey.CreateMode	= 'N';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		SET outRef.DocumentKey.RegistrationNumber = inRef.PayDocInfo.RegistrationNumber; -- Гос. номер ТС
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.SenderReference	= inRef.RqUID;
+		SET outRef.Document.AmountDB		= inRef.PayDocInfo.Amount;
+		SET outRef.Document.CNP				= inRef.PayDocInfo.PaymentTargetCode;
+		SET outRef.Document.Number			= '1';
+		SET outRef.Document.OperationDate	= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd');
+		SET outRef.Document.CBC				= inRef.PayDocInfo.PaymentCBC;
+		SET outRef.Document.IPTPayType		= inRef.PayDocInfo.PaymentType;
+		SET outRef.Document.CardNumber		= inRef.PayDocInfo.CardNum;
+		SET outRef.Document.EquipNumber		= smid;
+		SET outRef.Document.PayerID			= inRef.PayDocInfo.CustomsNum;
+
+		DECLARE rnn CHARACTER;
+		DECLARE iin CHARACTER;
+		FOR inPersonIdExt AS inRef.PayerInfo.PersonInfo.PersonIdExt[] DO
+			IF		inPersonIdExt.Key = 'RNN' THEN
+				SET rnn = inPersonIdExt.Value;
+			ELSEIF	inPersonIdExt.Key = 'IIN' THEN
+				SET iin = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Role	= 'Плательщик';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].RNN		= CASE WHEN iin <> '' THEN iin ELSE rnn END;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Name	= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Number	= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum);
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].Role	= 'Получатель';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].RNN		= inRef.PayDocInfo.TaxOfficeId;
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Технический запрос по платежу за услуги станции диагностики": KZTechnicalRequestProviderRq -> PragmaEnvelope:DocumentSync
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma12
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTAutoPay';
+		SET outRef.DocumentKey.CreateMode	= 'N';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.SenderReference	= inRef.RqUID;
+		SET outRef.Document.CBC				= inRef.PayDocInfo.PaymentCBC;
+		SET outRef.Document.IPTPayType		= inRef.PayDocInfo.PaymentType;
+		SET outRef.Document.CardNumber		= inRef.PayDocInfo.CardNum;
+		SET outRef.Document.EquipNumber		= smid;
+		SET outRef.Document.PayerID			= inRef.PayDocInfo.PaymentSubType;
+
+		DECLARE rnn CHARACTER;
+		DECLARE iin CHARACTER;
+		FOR inPersonIdExt AS inRef.PayerInfo.PersonInfo.PersonIdExt[] DO
+			IF		inPersonIdExt.Key = 'RNN' THEN
+				SET rnn = inPersonIdExt.Value;
+			ELSEIF	inPersonIdExt.Key = 'IIN' THEN
+				SET iin = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Role	= 'Плательщик';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].RNN		= CASE WHEN iin <> '' THEN iin ELSE rnn END;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Name	= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Number	= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum);
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].Role	= 'Получатель';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].RNN		= inRef.PayDocInfo.StationRNN;
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Технический запрос по платежу за образовательные услуги": KZTechnicalRequestProviderRq -> PragmaEnvelope:DocumentSync
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma13
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+		--SET outRoot.FilialCode = '12';
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTEducationPay';
+		SET outRef.DocumentKey.CreateMode	= 'N';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.SenderReference	= inRef.RqUID;
+		SET outRef.Document.Details			= inRef.PayDocInfo.PaymentTarget;
+		SET outRef.Document.IPTPayType		= inRef.PayDocInfo.PaymentType;
+		SET outRef.Document.CardNumber		= inRef.PayDocInfo.CardNum;
+		SET outRef.Document.EquipNumber		= smid;
+		SET outRef.Document.PayerID			= inRef.PayDocInfo.PaymentExtAttr.Value;
+
+		DECLARE rnn CHARACTER;
+		FOR inPersonIdExt AS inRef.PayerInfo.PersonInfo.PersonIdExt[] DO
+			IF		inPersonIdExt.Key = 'RNN' THEN
+				SET rnn = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Role	= 'Плательщик';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].RNN		= rnn;
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Финансовый запрос по платежу за услуги мобильного оператора" : KZPaymentProviderRq -> PragmaEnvelope:DocumentSync
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma10
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTBillingPay';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.SenderReference	= inRef.RqUID;
+		SET outRef.Document.Number			= '1';
+		SET outRef.Document.OperationDate	= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd');
+		SET outRef.Document.EquipNumber		= smid;
+		SET outRef.Document.OperatorPrefix	= inRef.PayDocInfo.ProviderCode;
+		SET outRef.Document.PayerID			= inRef.PayDocInfo.ProviderNum;
+		SET outRef.Document.AmountDB		= inRef.PayDocInfo.Amount;
+		SET outRef.Document.IPTPayType		= inRef.PayDocInfo.PaymentType;
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * XTX009
+ * Запрос в МАБПК Прагма "Финансовый запрос по бюджетному платежу" : KZPaymentProviderRq -> PragmaEnvelope:DocumentSync
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma11
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTBudgetPay';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.SenderReference	= inRef.RqUID;
+		SET outRef.Document.AmountDB		= inRef.PayDocInfo.Amount;
+		SET outRef.Document.CNP				= inRef.PayDocInfo.PaymentTargetCode;
+		SET outRef.Document.Number			= '1';
+		SET outRef.Document.OperationDate	= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd');
+		SET outRef.Document.CBC				= inRef.PayDocInfo.PaymentCBC;
+		SET outRef.Document.CommissionAmount	= inRef.PayDocInfo.BCAmount;
+		SET outRef.Document.IPTPayType		= inRef.PayDocInfo.PaymentType;
+		SET outRef.Document.CardNumber		= inRef.PayDocInfo.CardNum;
+		SET outRef.Document.EquipNumber		= smid;
+		SET outRef.Document.PayerID			= inRef.PayDocInfo.CustomsNum;
+
+		DECLARE rnn CHARACTER;
+		DECLARE iin CHARACTER;
+		FOR inPersonIdExt AS inRef.PayerInfo.PersonInfo.PersonIdExt[] DO
+			IF		inPersonIdExt.Key = 'RNN' THEN
+				SET rnn = inPersonIdExt.Value;
+			ELSEIF	inPersonIdExt.Key = 'IIN' THEN
+				SET iin = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Role	= 'Плательщик';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].RNN		= CASE WHEN iin <> '' THEN iin ELSE rnn END;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Name	= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Number	= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum);
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].Role	= 'Получатель';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].RNN		= inRef.PayDocInfo.TaxOfficeId;
+
+		CREATE FIELD outRef.Document.DocumentVINs;
+		FOR inPaymentExtAttr AS inRef.PayDocInfo.PaymentExtAttr[] DO
+			IF inPaymentExtAttr.Key = 'VINCODE' THEN
+				CREATE LASTCHILD OF outRef.Document.DocumentVINs NAME 'DocumentVIN';
+				
+				SET outRef.Document.DocumentVINs.DocumentVIN[<].VINCode         = inPaymentExtAttr.Value;
+				SET outRef.Document.DocumentVINs.DocumentVIN[<].PenaltyId       = inPaymentExtAttr.Value2;
+				SET outRef.Document.DocumentVINs.DocumentVIN[<].CarTransportRid = inPaymentExtAttr.Value3;
+				
+				IF NOT EXISTS(outRef.DocumentKey.VINCode[]) THEN
+					SET outRef.DocumentKey.VINCode	        = inPaymentExtAttr.Value;
+					SET outRef.DocumentKey.PenaltyId   	    = inPaymentExtAttr.Value2; 
+					SET outRef.DocumentKey.CarTransportRid	= inPaymentExtAttr.Value3; 
+				END IF;
+			END IF;		
+		END FOR;
+		IF NOT EXISTS(outRef.Document.DocumentVINs.*[]) THEN
+			SET outRef.Document.DocumentVINs = NULL;
+		END IF;
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Финансовый запрос по платежу за услуги станции диагностики" : KZPaymentProviderRq -> PragmaEnvelope:DocumentSync
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma14
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTAutoPay';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.SenderReference		= inRef.RqUID;
+		SET outRef.Document.AmountDB			= inRef.PayDocInfo.Amount;
+		SET outRef.Document.CBC					= inRef.PayDocInfo.PaymentCBC;
+		SET outRef.Document.CommissionAmount	= inRef.PayDocInfo.BCAmount;
+		SET outRef.Document.IPTPayType			= inRef.PayDocInfo.PaymentType;
+		SET outRef.Document.CardNumber			= inRef.PayDocInfo.CardNum;
+		SET outRef.Document.EquipNumber			= smid;
+		SET outRef.Document.PayerID				= inRef.PayDocInfo.PaymentSubType;
+		
+		DECLARE attrKodrp CHARACTER '';
+		DECLARE attrNomreq CHARACTER '';
+		FOR extAttr AS inRef.PayDocInfo.PaymentExtAttr[] DO
+			IF extAttr.Key = 'KODRP' THEN
+				SET attrKodrp = COALESCE(extAttr.Value,'');
+			ELSEIF extAttr.Key = 'NOMREQ' THEN 
+				SET attrNomreq = COALESCE(extAttr.Value,'');
+			END IF;
+		END FOR;
+		
+		SET outRef.Document.AdditionalInfo		= attrNomreq || ',' || attrKodrp;
+
+		DECLARE rnn CHARACTER;
+		DECLARE iin CHARACTER;
+		FOR inPersonIdExt AS inRef.PayerInfo.PersonInfo.PersonIdExt[] DO
+			IF		inPersonIdExt.Key = 'RNN' THEN
+				SET rnn = inPersonIdExt.Value;
+			ELSEIF	inPersonIdExt.Key = 'IIN' THEN
+				SET iin = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Role	= 'Плательщик';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].RNN		= CASE WHEN iin <> '' THEN iin ELSE rnn END;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Name	= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:FullName);
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Number	= FIELDVALUE(inRef.PayerInfo.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum);
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].Role	= 'Получатель';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].RNN		= inRef.PayDocInfo.StationRNN;
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Финансовый запрос по платежу за образовательные услуги" : KZPaymentProviderRq -> PragmaEnvelope:DocumentSync
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma15
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTEducationPay';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.SenderReference		= inRef.RqUID;
+		SET outRef.Document.Details				= inRef.PayDocInfo.PaymentTarget;
+		SET outRef.Document.AmountDB			= inRef.PayDocInfo.Amount;		
+		SET outRef.Document.CommissionAmount	= inRef.PayDocInfo.BCAmount;
+		SET outRef.Document.IPTPayType			= inRef.PayDocInfo.PaymentType;
+		SET outRef.Document.CardNumber			= inRef.PayDocInfo.CardNum;
+		SET outRef.Document.EquipNumber			= smid;
+		SET outRef.Document.PayerID				= inRef.PayDocInfo.PaymentExtAttr.Value;
+
+		DECLARE rnn CHARACTER;
+		FOR inPersonIdExt AS inRef.PayerInfo.PersonInfo.PersonIdExt[] DO
+			IF		inPersonIdExt.Key = 'RNN' THEN
+				SET rnn = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Role	= 'Плательщик';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].RNN		= rnn;
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Получение расчёта задолженности клиента - KZGetCalcLoanDeptRq
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_GetCalcLoan
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'LoanGetCalcDebt');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.LoanCalcDebtRequests.LoanCalcDebtRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.LoanCalcDebtRequests.LoanCalcDebtRequest;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.appId			= inRef.LoanId;
+		SET outRef.processDate		= inRef.CalcDate;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Экпорт данных ФЛ из ЕПК
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_ExpMDMPrivateClient
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'PersonSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonSyncData.PersonKey;
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonSyncData.Person;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<].PersonInfo;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.PersonSyncData.PersonKey;
+
+		DECLARE id CHARACTER;
+		DECLARE integrationID CHARACTER;
+		DECLARE rnn CHARACTER;
+		DECLARE iin CHARACTER;
+		DECLARE sic CHARACTER;
+		DECLARE uncp CHARACTER;
+
+		FOR inPersonIdExt AS inRef.PersonIdExt[] DO
+			CASE inPersonIdExt.Key
+			WHEN 'MABPK' THEN
+				SET id = inPersonIdExt.Value;
+			WHEN 'CIF' THEN
+				SET integrationID = inPersonIdExt.Value;
+			WHEN 'RNN' THEN
+				SET rnn = inPersonIdExt.Value;
+			WHEN 'IIN' THEN
+				SET iin = inPersonIdExt.Value;
+			WHEN 'SIC' THEN
+				SET sic = inPersonIdExt.Value;
+			WHEN 'UNK' THEN
+				SET uncp = inPersonIdExt.Value;
+			END CASE;
+		END FOR;
+	
+		SET outRef.Id				= id;
+		SET outRef.IntegrationID	= integrationID;
+		SET outRef.UNK				= uncp;
+		SET outRef.RNN				= rnn;
+		SET outRef.IIN				= iin;
+		
+		MOVE outRef TO OutputRoot.XMLNSC.*[<].RequestData.PersonSyncData.Person;
+		
+		CALL transformPersonDataFromESBToNewPragma(inRef, outRef, NULL);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Экпорт данных ЮЛ из ЕПК
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_ExpMDMLegalClient
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'OrgSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Organizations;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.Organizations;
+		
+		DECLARE outOrg REFERENCE TO outRef;
+		DECLARE index INTEGER 0;
+		FOR inOrgInfo AS inRef.OrgInfo[] DO
+			CREATE LASTCHILD OF outRef AS outOrg NAME 'Organization';
+			SET index = index + 1;
+			CALL transformOrgDataFromESBToNewPragma(inOrgInfo, outOrg, index);
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Финансовый запрос на перевод на счета до востребования / до выяснения" : KZPaymentProviderRq -> PragmaEnvelope:DocumentSync
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma16
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTCancelPay';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.SenderReference	= inRef.RqUID;
+		SET outRef.Document.AmountDB		= inRef.PayDocInfo.Amount;
+		SET outRef.Document.IPTPayType		= inRef.PayDocInfo.PaymentType;
+		SET outRef.Document.CardNumber		= inRef.PayDocInfo.CardNum;
+		SET outRef.Document.EquipNumber		= smid;
+		SET outRef.Document.PayerID			= inRef.PayDocInfo.PaymentSubType;
+
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Role	= 'Плательщик';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Name	= inRef.PayDocInfo.CustomsNum;
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Технический запрос ICON, AlmaTV
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX013
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonLoanDebtListRequests.PersonLoanDebtListRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.PersonLoanDebtListRequests.PersonLoanDebtListRequest;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE key REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS key NAME 'DocumentKey';
+		SET key.Branch					= '';
+		SET key.DocumentType			= '0';
+		SET key.Id						= '';
+		SET key.Template				= 'IPTCreditPay';
+		SET key.CreateMode				= 'N';
+		SET key.BriefAnswer				= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference			= inRef.RqUID;
+		SET doc.IPTPayType				= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber				= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber				= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		SET doc.PayerID					= THE(SELECT ITEM attr.Value FROM inRef.PayDocInfo.PaymentExtAttr[] AS attr WHERE attr.Key='ACCT');
+		
+		SET doc.DocumentParticipants.DocumentParticipant.Role 		 = 'Получатель';
+		SET doc.DocumentParticipants.DocumentParticipant.RNN		 = THE(SELECT ITEM attr.Value FROM inRef.PayDocInfo.PaymentExtAttr[] AS attr WHERE attr.Key='BIN');
+	
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос на оплату ICON, AlmaTV
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX014
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonLoanDebtListRequests.PersonLoanDebtListRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.PersonLoanDebtListRequests.PersonLoanDebtListRequest;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE key REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS key NAME 'DocumentKey';
+		SET key.Branch					= '';
+		SET key.DocumentType			= '0';
+		SET key.Id						= '';
+		SET key.Template				= 'IPTServicePay';
+		SET key.BriefAnswer				= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference			= inRef.RqUID;
+		SET doc.AmountDB				= inRef.PayDocInfo.Amount;
+		SET doc.CommissionAmount		= inRef.PayDocInfo.BCAmount;
+		SET doc.IPTPayType				= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber				= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber				= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		SET doc.PayerID					= THE(SELECT ITEM attr.Value FROM inRef.PayDocInfo.PaymentExtAttr[] AS attr WHERE attr.Key='ACCT');
+		
+		SET doc.DocumentParticipants.DocumentParticipant.Role 		 = 'Получатель';
+		SET doc.DocumentParticipants.DocumentParticipant.RNN		 = THE(SELECT ITEM attr.Value FROM inRef.PayDocInfo.PaymentExtAttr[] AS attr WHERE attr.Key='BIN');
+	
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Технический запрос погашение кредита (информационный)
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX018_1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'LoanDebtGetList');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonLoanDebtListRequests.PersonLoanDebtListRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.PersonLoanDebtListRequests.PersonLoanDebtListRequest;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.TypePayment					= inRef.PayDocInfo.PaymentType;
+		SET outRef.CardNumber					= inRef.PayDocInfo.CardNum;
+		SET outRef.RNN							= THE(SELECT ITEM personId.Value FROM inRef.PayerInfo.PersonInfo.PersonIdExt[] AS personId 
+													  WHERE personId.Key='RNN');
+		SET outRef.TypeRequest					= THE(SELECT ITEM extAttr.Value FROM inRef.PaymentExtAttr[] AS extAttr 
+													  WHERE extAttr.Key='TYPER');
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Технический запрос погашение кредита (расчетный)
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX018_2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE key REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS key NAME 'DocumentKey';
+		SET key.Branch					= '';
+		SET key.DocumentType			= '0';
+		SET key.Id						= '';
+		SET key.Template				= 'IPTCreditPay';
+		SET key.CreateMode				= 'N';
+		SET key.BriefAnswer				= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference			= inRef.RqUID;
+		SET doc.AmountCR				= inRef.PayDocInfo.Amount;
+		SET doc.CurrencyCR				= CodToIsoCur(inRef.PayDocInfo.CurrCode);		
+		SET doc.IPTPayType				= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber				= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber				= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		
+		SET doc.DocumentParticipants.DocumentParticipant.Role 		 = 'Получатель';
+		SET doc.DocumentParticipants.DocumentParticipant.Account	 = THE(SELECT ITEM attr.Value FROM inRef.PayDocInfo.PaymentExtAttr[] AS attr WHERE attr.Key='ACCTCR');
+					
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		SET Environment.UserProperties.PaymentType	 = inRef.PayDocInfo.PaymentType;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Технический запрос ДДУ по Атырау (и ДДУ по Петропавловску) 
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX025
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		DECLARE ngr, kodrp, rnnnk, fio, amtdop CHARACTER;
+		
+		FOR extAttr AS inRef.PayDocInfo.PaymentExtAttr[] DO 
+			IF extAttr.Key='NGR' THEN
+				SET ngr 	= extAttr.Value;
+			ELSEIF extAttr.Key='KODRP' THEN
+				SET kodrp 	= extAttr.Value;
+			ELSEIF extAttr.Key='RNNNK' THEN
+				SET rnnnk 	= extAttr.Value;
+			ELSEIF extAttr.Key='FIO' THEN
+				SET fio 	= extAttr.Value;
+			ELSEIF extAttr.Key='AMTDOP' THEN
+				SET amtdop 	= extAttr.ValueD;
+			END IF;
+		END FOR;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Branch 								= '';
+		SET docKey.DocumentType 						= '0';
+		SET docKey.Id	 								= '';
+		SET docKey.Template								= 'IPTKinderGardenPay ';
+		SET docKey.CreateMode 							= 'N';
+		SET docKey.BriefAnswer 							= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;
+		SET doc.Details									= inRef.PayDocInfo.PaymentTarget;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.PayerID									= inRef.PayDocInfo.PaymentSubType;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		--SET doc.PayerID									= COALESCE(ngr,'') || ',' || COALESCE(kodrp,'');
+		SET doc.PaymentAmount							= amtdop;
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= THE(SELECT ITEM idExt.Value FROM inRef.PayerInfo.PersonInfo.PersonIdExt[] AS idExt WHERE idExt.Key='RNN');
+		SET docPrt.Name									= fio;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.RNN									= rnnnk;		
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос погашения кредита
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX019
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		DECLARE attrACCTCR, attrKCRATE CHARACTER;
+		
+		FOR extAttr AS inRef.PayDocInfo.PaymentExtAttr[] DO 
+			IF extAttr.Key='ACCTCR' THEN
+				SET attrACCTCR 	= extAttr.Value;
+			ELSEIF extAttr.Key='KCRATE' THEN
+				SET attrKCRATE 	= extAttr.ValueD;	
+			END IF;
+		END FOR;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Branch 								= '';
+		SET docKey.DocumentType 						= '0';
+		SET docKey.Id	 								= '';
+		SET docKey.Template								= 'IPTCreditPay';
+		SET docKey.BriefAnswer 							= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;
+		SET doc.CurrencyRate							= attrKCRATE;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Account								= attrACCTCR;
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Финансовый запрос ДДУ по Атырау (и ДДУ по Петропавловску) 
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX026
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		DECLARE ngr, kodrp, rnnnk, fio, amtdop CHARACTER;
+		
+		FOR extAttr AS inRef.PayDocInfo.PaymentExtAttr[] DO 
+			IF extAttr.Key='NGR' THEN
+				SET ngr 	= extAttr.Value;
+			ELSEIF extAttr.Key='KODRP' THEN
+				SET kodrp 	= extAttr.Value;
+			ELSEIF extAttr.Key='RNNNK' THEN
+				SET rnnnk 	= extAttr.Value;
+			ELSEIF extAttr.Key='FIO' THEN
+				SET fio 	= extAttr.Value;
+			ELSEIF extAttr.Key='AMTDOP' THEN
+				SET amtdop 	= extAttr.ValueD;
+			END IF;
+		END FOR;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Branch 								= '';
+		SET docKey.DocumentType 						= '0';
+		SET docKey.Id	 								= '';
+		SET docKey.Template								= 'IPTKinderGardenPay';
+		SET docKey.BriefAnswer 							= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;
+		SET doc.CommissionAmount						= inRef.PayDocInfo.BCAmount;
+		SET doc.Details									= inRef.PayDocInfo.PaymentTarget;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		SET doc.PayerID									= COALESCE(ngr,'') || ',' || COALESCE(kodrp,'');
+		SET doc.PaymentAmount							= amtdop;
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= THE(SELECT ITEM idExt.Value FROM inRef.PayerInfo.PersonInfo.PersonIdExt[] AS idExt WHERE idExt.Key='RNN');
+		SET docPrt.Name									= fio;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.RNN									= rnnnk;		
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в МАБПК Прагма "Получение информации по карте": KZGetCardInfoRq -> PragmaEnvelope:GetCardData
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_GetCardInfo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.UserProperties.Source.Body 		= 
+								CAST(ASBITSTREAM(InputRoot.XMLNSC ENCODING InputRoot.MQMD.Encoding CCSID InputRoot.MQMD.CodedCharSetId)
+									 AS CHARACTER CCSID InputRoot.MQMD.CodedCharSetId ENCODING InputRoot.MQMD.Encoding
+								);
+										
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'GetCardData');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.CardsID.CardID;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.CardsID.CardID;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.TypeID 			= inRef.PersonInfo.PersonIdType;
+		SET outRef.CardNum 			= FIELDVALUE(inRef.CardAcctId.*:CardNum);
+		
+		SET outRef.IdEpk 			= THE(SELECT ITEM idExt.Value FROM inRef.PersonInfo.PersonIdExt[] AS idExt 
+										  WHERE idExt.Key = 'CIF');
+		SET outRef.DtOpenCrd 		= inRef.CardAcctId.CardStart;
+		SET outRef.DtPeriodCrd 		= inRef.CardAcctId.CardEnd;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Получение эффективной ставки и графика погашения" : KZGetScheduleEffRateRq -> PragmaEnvelope:GetScheduleEffRate
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma17
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'GetScheduleEffRate');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.GetScheduleEffRates.GetScheduleEffRate;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.GetScheduleEffRates.GetScheduleEffRate;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+--		DECLARE comforreg CHARACTER NULL;
+--		DECLARE comforcash CHARACTER NULL;
+		DECLARE firstpay CHARACTER NULL;
+/* 25/06/2014 u00671		
+		FOR inExtAmountRec AS inRef.LoanInfo.ExtAmountInfo.ExtAmountRec[] DO
+			IF inExtAmountRec.AmtType = 'COMFORREG' THEN
+				SET comforreg	= inExtAmountRec.Amount;
+			END IF;
+			IF inExtAmountRec.AmtType = 'COMFORCASH' THEN
+				SET comforcash	= inExtAmountRec.Amount;
+			END IF;
+		END FOR;
+*/		
+		FOR inExtDateRec AS inRef.LoanInfo.ExtDatesInfo.ExtDateRec[] DO
+			IF inExtDateRec.DateType = 'FIRSTPAY' THEN
+				SET firstpay	= inExtDateRec.ExtDate;
+			END IF;
+		END FOR;
+		
+		SET outRef.CreditCurrency			= inRef.LoanInfo.LoanCurr;
+		SET outRef.CreditSum				= inRef.LoanInfo.LoanAmount;
+		SET outRef.ComisTotal				= inRef.LoanInfo.ComisTotal; -- Сумма единоразовых комиссий		
+--		SET outRef.ComisForRegistration		= comforreg;
+--		SET outRef.ComisForCash				= comforcash;
+		SET outRef.TermLoan					= inRef.LoanInfo.TermLoan;
+		SET outRef.PrcRate					= inRef.LoanInfo.LoanRate;
+		SET outRef.RepaymentType			= inRef.LoanInfo.RepaymentType;
+		SET outRef.DtIssue					= inRef.LoanInfo.IssueDate;
+		SET outRef.DtFirstPayment			= firstpay;
+
+		-- сохраним TSMUID в переменных среды
+		-- он нам понадобится при формировании ответа
+		SET Environment.UserProperties.TSMUID = inRef.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Получение графика платежей по кредиту ФЛ" : KZGetPrivateClientPayScheduleRq -> PragmaEnvelope:CreditGetPayment
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma18
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'CreditGetPayment');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.CreditPaymentRequests.CreditPaymentRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.CreditPaymentRequests.CreditPaymentRequest;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.Branch			= FIELDVALUE(inRef.AcctInfo.BankInfo.*:BankId);
+		SET outRef.AccountNumber	= inRef.AcctInfo.AcctId;
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * СБОЛ – получение кросс-курса валюты
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_CrossCurrRate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'SBOLCurrencyRate');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.SBOL_REQUEST.CurrencyRate;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.SBOL_REQUEST.CurrencyRate;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.RegNumber 					= inRef.RqUID;
+		SET outRef.HandbookItem.Source_curr		= CodToIsoCur(inRef.SourceCurr);
+		SET outRef.HandbookItem.Target_curr		= CodToIsoCur(inRef.TargetCurr);
+		SET outRef.HandbookItem.Fx_date			= inRef.ConvDate;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Отмена операции перевода средств
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_TransferCancel
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE rrn CHARACTER '';
+		DECLARE srn CHARACTER '';
+		DECLARE stan CHARACTER '';
+		
+		FOR attr AS inRef.ServiceAttr[] DO
+			IF attr.AttrId='RRN' THEN
+				SET rrn = attr.AttrValue;
+			ELSEIF attr.AttrId='SRN' THEN 
+				SET srn = attr.AttrValue;
+			ELSEIF attr.AttrId='STAN' THEN
+				SET stan = attr.AttrValue;
+			END IF;
+		END FOR;
+		
+		SET outRef.DocumentKey.Branch				= '';
+		SET outRef.DocumentKey.DocumentType			= '';
+		SET outRef.DocumentKey.Id					= '';
+		SET outRef.DocumentKey.Template				= '';
+		
+		SET outRef.Document.Id						= '';
+		SET outRef.Document.SenderReference			= COALESCE(rrn,'') || ',' || COALESCE(srn,'') || ',' || COALESCE(stan,'');
+		SET outRef.Document.Status					= 'A';
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Получение информации по депозитам KZGetDepInfoRq -> PragmaEnvelope:DepositGetData
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_GetDepInfo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.UserProperties.Source.Body 		= 
+								CAST(ASBITSTREAM(InputRoot.XMLNSC ENCODING InputRoot.MQMD.Encoding CCSID InputRoot.MQMD.CodedCharSetId)
+									 AS CHARACTER CCSID InputRoot.MQMD.CodedCharSetId ENCODING InputRoot.MQMD.Encoding
+								);
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DepositGetData');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DepositIDs.DepositID;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DepositIDs.DepositID;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.AccNumber 				= inRef.DepAcctId.AcctId;
+		SET outRef.TypeID	 				= inRef.PersonInfo.PersonIdType;	
+		SET outRef.BranchCode 				= RIGHT(inRef.BankInfo.*:RegionId,2);	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос пополнение текущего счета
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX004
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE key REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS key NAME 'DocumentKey';
+		SET key.Branch					= '';
+		SET key.DocumentType			= '0';
+		SET key.Id						= '';
+		SET key.Template				= 'IPTCurrentPay';
+		SET key.BriefAnswer				= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference			= inRef.RqUID;
+		SET doc.AmountDB				= inRef.PayDocInfo.Amount;
+		SET doc.IPTPayType				= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber				= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber				= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		
+		DECLARE docPrt REFERENCE TO outRef;
+		CREATE FIELD doc.DocumentParticipants.DocumentParticipant AS docPrt;		
+		SET docPrt.Role 	 = 'Получатель';
+		SET docPrt.Account	 = THE(SELECT ITEM attr.Value FROM inRef.PayDocInfo.PaymentExtAttr[] AS attr WHERE attr.Key='ACCOUNT');
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Технический запрос пополнение текущего счета
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX003
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTCurrentPay';
+		SET outRef.DocumentKey.CreateMode	= 'N';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		
+		DECLARE doc REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference				= inRef.RqUID;
+		SET doc.IPTPayType					= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber					= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber					= smid;
+				
+		DECLARE docPrt REFERENCE TO outRef;
+		CREATE FIELD doc.DocumentParticipants.DocumentParticipant AS docPrt;		
+		SET docPrt.Role 	 = 'Получатель';
+		SET docPrt.Account	 = THE(SELECT ITEM attr.Value FROM inRef.PayDocInfo.PaymentExtAttr[] AS attr WHERE attr.Key='ACCOUNT');
+				
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Технический запрос пополнение депозита
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX016
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTDepositPay';
+		SET outRef.DocumentKey.CreateMode	= 'N';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		
+		DECLARE doc REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference				= inRef.RqUID;
+		SET doc.IPTPayType					= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber					= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber					= smid;
+				
+		DECLARE docPrt REFERENCE TO outRef;
+		CREATE FIELD doc.DocumentParticipants.DocumentParticipant AS docPrt;		
+		SET docPrt.Role 	 = 'Получатель';
+		SET docPrt.Account	 = THE(SELECT ITEM attr.Value FROM inRef.PayDocInfo.PaymentExtAttr[] AS attr WHERE attr.Key='ACCOUNT');
+				
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос пополнение депозита
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX017
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE key REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS key NAME 'DocumentKey';
+		SET key.Branch					= '';
+		SET key.DocumentType			= '0';
+		SET key.Id						= '';
+		SET key.Template				= 'IPTDepositPay';
+		SET key.BriefAnswer				= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference			= inRef.RqUID;
+		SET doc.AmountDB				= inRef.PayDocInfo.Amount;
+		SET doc.IPTPayType				= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber				= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber				= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		
+		DECLARE docPrt REFERENCE TO outRef;
+		CREATE FIELD doc.DocumentParticipants.DocumentParticipant AS docPrt;		
+		SET docPrt.Role 	 = 'Получатель';
+		SET docPrt.Account	 = THE(SELECT ITEM attr.Value FROM inRef.PayDocInfo.PaymentExtAttr[] AS attr WHERE attr.Key='ACCOUNT');
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Проверка идентификатора клиента : KZCheckPersonIdRq -> PragmaEnvelope:PersonGetIdSts
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_CheckPersonId
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.UserProperties.Source.Body 		= 
+								CAST(ASBITSTREAM(InputRoot.XMLNSC ENCODING InputRoot.MQMD.Encoding CCSID InputRoot.MQMD.CodedCharSetId)
+									 AS CHARACTER CCSID InputRoot.MQMD.CodedCharSetId ENCODING InputRoot.MQMD.Encoding
+								);
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'PersonGetIdSts');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonIDs.PersonID;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.PersonIDs.PersonID;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<].PersonInfo;
+		
+		SET outRef.TypeID			= inRef.PersonIdType;
+		SET outRef.ID				= inRef.PersonId;
+		SET outRef.LastName			= inRef.*:PersonName.*:LastName;
+		SET outRef.FirstName		= inRef.*:PersonName.*:FirstName;
+		SET outRef.MiddleName		= inRef.*:PersonName.*:MiddleName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Заявка на оформление кредита : KZGetBackOfficeDateRq -> PragmaEnvelope:LoanGetRequest
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_BackOfficeDate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'LoanGetRequest');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.LoanRequests.LoanRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.LoanRequests.LoanRequest;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.BranchCode 					= FIELDVALUE(inRef.BankInfo.*:AgencyId);
+		SET outRef.FilialCode 					= FIELDVALUE(inRef.BankInfo.*:RegionId);
+		
+		SET outRef.CardNumber 					= inRef.CardAcctId.*:CardNum;
+		SET outRef.AmountLimit 					= inRef.CardAcctId.CreditLimit;
+		SET outRef.Interest 					= inRef.LoanInfo.LoanRate;
+		SET outRef.Guarantee 					= inRef.LoanInfo.Security;		
+		SET outRef.RequestNumber				= inRef.LoanInfo.DocNumber;
+		SET outRef.RefusalLoan 					= inRef.LoanInfo.RejectionReason;
+		SET outRef.TypeID	 					= inRef.PersonInfo.PersonIdType;		
+		SET outRef.ID							= inRef.PersonInfo.PersonId;
+		SET outRef.Resident						= COALESCE(inRef.PersonInfo.*:Resident,'');
+		SET outRef.Coefficient					= inRef.FlagKZ;
+		SET outRef.TypeCard						= inRef.CardAcctId.*:CardType;
+		SET outRef.Currency						= CodToIsoCur(inRef.CardAcctId.*:CurCode); 
+		SET outRef.PlaceWork					= inRef.PersonInfo.*:EmploymentHistory.*:Occupation;
+		SET outRef.PrivateWord					= inRef.CardAcctId.SecWord;
+		SET outRef.Stmt							= inRef."Extract";
+		SET outRef.Country						= THE(SELECT ITEM addr.*:Country FROM inRef.PersonInfo.*:ContactInfo.*:PostAddr[] AS addr 
+													  WHERE addr.*:AddrType='Home');
+		SET outRef.SubtypeCard					= inRef.CardAcctId.SubProductType;
+		SET outRef.MessageForSigns				= inRef.DSData;
+		SET outRef.Signs						= inRef.DSKey;
+		
+		CREATE FIELD outRef.PledgeDeposits;
+		DECLARE outPledgeDeposit REFERENCE TO outRef.PledgeDeposits;
+		FOR inDepData AS inRef.DepData[] DO
+			CREATE LASTCHILD OF outRef.PledgeDeposits AS outPledgeDeposit NAME 'PledgeDeposit';
+		SET outPledgeDeposit.AccountDeposit		= inDepData.AcctId;
+		SET outPledgeDeposit.Pledged			= inDepData.PledgeSum;
+		END FOR;
+		
+		SET outRef.TSMUID						= inRef.TSMUID;
+		
+		DECLARE comisForRegistration CHARACTER;
+		DECLARE comisForCash CHARACTER;
+		DECLARE comisForCred CHARACTER;	-- 26/05/2014 u00671	
+		FOR inExtAmountRec AS inRef.LoanInfo.ExtAmountInfo.ExtAmountRec[] DO
+			IF inExtAmountRec.AmtType = 'COMFORREG' THEN
+				SET comisForRegistration = inExtAmountRec.Amount;
+			END IF;
+			IF inExtAmountRec.AmtType = 'COMFORCASH' THEN
+				SET comisForCash = inExtAmountRec.Amount;
+			END IF;
+			IF inExtAmountRec.AmtType = 'COMFORCRED' THEN
+				SET comisForCred = inExtAmountRec.Amount; -- Комиссия за зачисление кредитных средств на счета клиента
+			END IF;			
+		END FOR;		
+		
+		DECLARE idEpk CHARACTER '';
+		DECLARE personId CHARACTER '';
+		FOR inPersonIdExt AS inRef.PersonInfo.PersonIdExt[] DO
+			IF inPersonIdExt.Key = 'CIF' THEN
+				SET idEpk = inPersonIdExt.Value;
+			ELSEIF inPersonIdExt.Key = 'IIN' THEN
+				SET personId = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		
+		DECLARE homePhone CHARACTER;
+		DECLARE workPhone CHARACTER;
+		DECLARE mobilePhone CHARACTER;
+		FOR inPhone AS inRef.PersonInfo.Phones.Phone[] DO
+			IF inPhone.PhoneType = 'Home' THEN
+				SET homePhone = inPhone.PhoneNum;
+			END IF;
+			IF inPhone.PhoneType = 'Mobile' THEN
+				SET mobilePhone = inPhone.PhoneNum;
+			END IF;
+			IF inPhone.PhoneType = 'Work' THEN
+				SET workPhone = inPhone.PhoneNum;
+			END IF;
+		END FOR;
+
+		DECLARE homeAddress CHARACTER;
+		DECLARE homeCity CHARACTER;
+		DECLARE workAddress CHARACTER;
+		FOR inPostAddr AS inRef.PersonInfo.*:ContactInfo.*:PostAddr[] DO
+			IF inPostAddr.*:AddrType  = 'Home' THEN
+				SET homeAddress = inPostAddr.*:Addr1;
+				SET homeCity = inPostAddr.*:City;
+			END IF;
+			IF inPostAddr.*:AddrType  = 'Work' THEN
+				SET workAddress = inPostAddr.*:Addr1;
+			END IF;
+		END FOR;
+
+		DECLARE varPaymentDay CHARACTER;
+		SET varPaymentDay = inRef.LoanInfo.paymentDay;
+
+		SET outRef.LoginManager					= inRef.ManLogin;
+		SET outRef.ManagersData					= inRef.ManData;
+		SET outRef.ProductCode					= FIELDVALUE(inRef.CardAcctId.*:ProductType);
+		SET outRef.Product						= recodeProductTypeForPragma(inRef.CardAcctId.*:ProdType);
+		SET outRef.DtOpenCrd					= inRef.CardAcctId.CardStart;
+		SET outRef.DtPeriodCrd					= inRef.CardAcctId.CardEnd;
+		SET outRef.TermLoan						= inRef.LoanInfo.TermLoan;
+		SET outRef.CreditPurpose				= inRef.LoanInfo.LoanPurpose;
+		SET outRef.RepaymentType				= recodeRepaymentTypeForPragma(inRef.LoanInfo.RepaymentType);
+		SET outRef.ComisForRegistration			= comisForRegistration;
+		SET outRef.ComisForCash					= comisForCash;
+		SET outRef.ComisForCreditingAccount		= comisForCred; -- Комиссия за зачисление кредитных средств на счета клиента		           
+		SET outRef.SalesChannel					= inRef.LoanInfo.SalesChannel;
+		SET outRef.paymentDay					= varPaymentDay; --inRef.LoanInfo.paymentDay; -- ТЗ Куаныш
+		---SET outRef.PaymentDay56					= '888'; --inRef.LoanInfo.paymentDay; -- ТЗ Куаныш
+		SET outRef.Processing					= inRef.Processing;
+		SET outRef.EmbossedName					= inRef.CardAcctId.EmbossedName;
+		SET outRef.EmbossedSurname				= inRef.CardAcctId.EmbossedSurName;
+		SET outRef.NumberDecision				= inRef.LoanInfo.DecisionDocNumber;
+		SET outRef.DtNumberDecision				= inRef.LoanInfo.DecisionDocDate;
+		SET outRef.LastName						= inRef.PersonInfo.*:PersonName.*:LastName;
+		SET outRef.FirstName					= inRef.PersonInfo.*:PersonName.*:FirstName;
+		SET outRef.MiddleName					= inRef.PersonInfo.*:PersonName.*:MiddleName;
+		SET outRef.PersonId						= personId;
+		SET outRef.IdEpk						= idEpk;
+		SET outRef.ClientCategory				= inRef.PersonInfo.ClientCategory;
+		SET outRef.IdType						= CASE inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType
+			WHEN 'VidKZ' THEN 'ВидНаЖит'
+			WHEN 'UdKZ' THEN 'Удост'
+			WHEN 'PassKZ' THEN 'Паспорт'
+			ELSE inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType
+		END;
+		SET outRef.IdNum						= inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum;
+		SET outRef.IssuedBy						= inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IssuedBy;
+		SET outRef.IssueDt						= inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IssueDt;
+		SET outRef.ExpDt						= inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:ExpireDate;
+		SET outRef.Citizenship					= inRef.PersonInfo.*:Citizenship;
+		SET outRef.BirthDay						= inRef.PersonInfo.*:BirthDt;
+		SET outRef.BirthPlace					= inRef.PersonInfo.*:BirthPlace;
+		SET outRef.HomePhone					= homePhone;
+		SET outRef.MobilePhone					= mobilePhone;
+		SET outRef.HomeAddress					= homeAddress;
+		SET outRef.Position						= inRef.PersonInfo.*:EmploymentHistory.*:JobTitle;
+		SET outRef.WorkAddress					= workAddress;
+		SET outRef.WorkPhone					= workPhone;
+		SET outRef.EMailAddr					= inRef.PersonInfo.*:ContactInfo.*:EmailAddr;
+		SET outRef.City							= homeCity;
+		SET outRef.DocDate						= inRef.LoanInfo.DocDate;
+		
+		CREATE LASTCHILD OF outRef NAME 'Clients';
+		DECLARE outClients REFERENCE TO outRef;
+		FOR inParticipant AS inRef.LoanInfo.Participants.Participant[] DO
+			CREATE LASTCHILD OF outRef.Clients AS outClients NAME 'Client';
+			DECLARE idEpkC CHARACTER;
+			DECLARE personIdC CHARACTER;
+			FOR inPersonIdExt AS inParticipant.PersonInfo.PersonIdExt[] DO
+				IF inPersonIdExt.Key = 'CIF' THEN
+					SET idEpkC = inPersonIdExt.Value;
+				ELSEIF inPersonIdExt.Key = 'IIN' THEN
+					SET personIdC = inPersonIdExt.Value;
+				END IF;
+			END FOR;
+
+			SET outClients.LastName			= inParticipant.PersonInfo.*:PersonName.*:LastName;
+			SET outClients.FirstName		= inParticipant.PersonInfo.*:PersonName.*:FirstName;
+			SET outClients.MiddleName		= inParticipant.PersonInfo.*:PersonName.*:MiddleName;
+			SET outClients.PersonId			= personIdC;
+			SET outClients.IdEpk			= idEpkC;
+			SET outClients.ClientCategory	= inParticipant.PersonInfo.ClientCategory;
+			SET outClients.RoleClient		= inParticipant.PartType;
+		END FOR;
+		
+		CREATE LASTCHILD OF outRef NAME 'Commissions';
+		DECLARE outComm REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef.Commissions AS outComm NAME 'Commission';	
+		
+		FOR inComm AS inRef.LoanInfo.Participants.Participant[] DO				
+
+			SET outComm.Code		= inComm.Commissions.Commission.Code;
+			SET outComm.Name		= inComm.Commissions.Commission.Name;
+			SET outComm.Period		= inComm.Commissions.Commission.Period;
+			SET outComm.Enrollment	= inComm.Commissions.Commission.Enrollment;
+			SET outComm.Amount		= inComm.Commissions.Commission.Amount;
+
+		END FOR;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Заявка на оформление кредита : KZGetSalaryTurnoverRq -> PragmaEnvelope:GetWagesTurn 
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_SalaryTurnover
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.UserProperties.Source.Body 		= 
+								CAST(ASBITSTREAM(InputRoot.XMLNSC ENCODING InputRoot.MQMD.Encoding CCSID InputRoot.MQMD.CodedCharSetId)
+									 AS CHARACTER CCSID InputRoot.MQMD.CodedCharSetId ENCODING InputRoot.MQMD.Encoding
+								);
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'GetWagesTurn');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.WagesTurnRequests.WagesTurnRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.WagesTurnRequests.WagesTurnRequest;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.CardNumber			= inRef.CardAcctId.*:CardNum;
+		SET outRef.TypeID				= inRef.PersonInfo.PersonIdType;
+		
+		SET outRef.RBSNumber			= '';
+		SET outRef.ID					= '';
+		
+		SET outRef.IdEpk 				= THE(SELECT ITEM idExt.Value FROM inRef.PersonInfo.PersonIdExt[] AS idExt 
+										 	  WHERE idExt.Key = 'CIF');
+		SET outRef.DtOpenCrd 			= inRef.CardAcctId.CardStart;
+		SET outRef.DtPeriodCrd 			= inRef.CardAcctId.CardEnd;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Получение кредитной истории клиента : KZGetCreditHistoryRq -> PragmaEnvelope:LoanGetHist 
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_CreditHistory
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'LoanGetHist');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DebtorsID.DebtorID;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DebtorsID.DebtorID;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<].PersonInfo;
+		
+		SET outRef.DealMemberType			= InputRoot.XMLNSC.*[<].DealMemberType;
+		SET outRef.CompanyName				= InputRoot.XMLNSC.*[<].CompanyName;
+
+		SET outRef.TypeID					= inRef.PersonIdType;
+		SET outRef.ID						= inRef.PersonId;
+		SET outRef.LastName					= inRef.*:PersonName.*:LastName;
+		SET outRef.FirstName				= inRef.*:PersonName.*:FirstName;
+		SET outRef.MiddleName				= inRef.*:PersonName.*:MiddleName;
+		SET outRef.OldLastName				= inRef.OldLastName[1];
+		
+		SET Environment.UserProperties.TSMUID = inRef.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Репликация НСИ по подписке : KZExpClassifierRq -> PragmaEnvelope:ClassifierSync 
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_ExpClassifier
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'ClassifierSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Classifiers;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.Classifiers;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		CALL CopyClassifiersFromMDO(inRef,outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Получение карточки ЮЛ из АБС : KZGetLegalInfoByAttrRq -> PragmaEnvelope:OrganizationGetData 
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_GetLegalInfo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'OrganizationGetData');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.OrganizationGetData.OrganizationKey;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.OrganizationGetData.OrganizationKey;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		SET outRef.Id			= THE(SELECT ITEM idExt.Value FROM inRef.OrgInfo.OrgIdExt[] AS idExt WHERE idExt.Key='MABPK');
+		SET outRef.BIN			= THE(SELECT ITEM idExt.Value FROM inRef.OrgInfo.OrgIdExt[] AS idExt WHERE idExt.Key='IIN');
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Передача идентификатора сделки в АБС : KZSendDealInfoRq -> PragmaEnvelope:DealId 
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_SendDealInfo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DealId');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Contacts.Contact;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.Contacts.Contact;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE integrationId CHARACTER;
+		FOR inPersonIdExt AS inRef.PersonInfo.PersonIdExt[] DO
+			IF inPersonIdExt.Key = 'MABPK' THEN
+				SET integrationId = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+
+		DECLARE opportunityId CHARACTER;
+		FOR inDealIdExt AS inRef.DealInfo.DealIdExt[] DO
+			IF inDealIdExt.Key = 'CRMr' THEN
+				SET opportunityId = inDealIdExt.Value;
+			END IF;
+		END FOR;
+		
+		SET outRef.IntegrationId			= integrationId;
+		SET outRef.Opportunity.Id			= opportunityId;
+		SET outRef.Opportunity.ManagerLogin	= inRef.DealInfo.MngLogin;
+		SET outRef.Opportunity.ProductType	= inRef.DealInfo.ProductType;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Подключение к SMS информированию по продуктам АБС : KZMngSMSInfoServiceRq -> PragmaEnvelope:AcctSetNotifService 
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_SMS
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'AcctSetNotifService');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.Accounts.Account;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.Accounts.Account;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.Branch				= '';
+		SET outRef.Number				= inRef.AcctInfo.AcctId;
+		SET outRef.Service				= 'SMS';
+		SET outRef.Mode					= SUBSTRING(inRef.ActionType FROM 1 FOR 3);
+		SET outRef.Param				= inRef.PersonInfo.Phones.Phone.PhoneNum;	
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Загрузка входящих платежных документов" : KZComplexPayDocRq -> PragmaEnvelope:DocumentSync
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma19
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'SAPDOCUMENT');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch			= '';
+		SET outRef.DocumentKey.DocumentType		= '0';
+		SET outRef.DocumentKey.Id				= '';
+		SET outRef.DocumentKey.Template			= 'BSSOutNC';
+
+		CREATE FIELD Environment.UserProperties.PayDocs;
+
+		DECLARE currentId INTEGER 0;
+		DECLARE outDocument REFERENCE TO outRef;
+		FOR inPayDoc AS inRef.PayDoc[] DO
+			CREATE LASTCHILD OF outRef AS outDocument NAME 'Document';
+			
+			DECLARE payeeCode CHARACTER;
+			DECLARE receiverRnn CHARACTER;
+			FOR inOrgIdExt AS inPayDoc.ReceiverInfo.OrgInfo.OrgIdExt[] DO
+				IF inOrgIdExt.Key = 'CODE' THEN
+					SET payeeCode = inOrgIdExt.Value;
+				END IF;
+				IF inOrgIdExt.Key = 'RNN' THEN
+					SET receiverRnn = inOrgIdExt.Value;
+				END IF;
+			END FOR;
+			DECLARE payerCode CHARACTER;
+			DECLARE payerRnn CHARACTER;
+			FOR inOrgIdExt AS inPayDoc.PayerInfo.OrgInfo.OrgIdExt[] DO
+				IF inOrgIdExt.Key = 'CODE' THEN
+					SET payerCode = inOrgIdExt.Value;
+				END IF;
+				IF inOrgIdExt.Key = 'RNN' THEN
+					SET payerRnn = inOrgIdExt.Value;
+				END IF;
+			END FOR;
+			
+			SET outDocument.Id						= currentId;
+			SET outDocument.SenderReference			= inPayDoc.PayDocInfo.DocRef || '_' || inPayDoc.PayDocInfo.DocNum;
+			SET outDocument.Type					= inPayDoc.PayDocInfo.DocType;
+			SET outDocument.AmountDB				= inPayDoc.PayDocInfo.DBAmount;
+			SET outDocument.CurrencyDB				= IsoToCodCurSafe(inPayDoc.PayerInfo.AcctInfo.AcctCur);
+			SET outDocument.AmountCR				= inPayDoc.PayDocInfo.CRAmount;
+			SET outDocument.CurrencyCR				= IsoToCodCurSafe(inPayDoc.ReceiverInfo.AcctInfo.AcctCur);
+			SET outDocument.Details					= inPayDoc.PayDocInfo.Assign;
+			SET outDocument.CNP						= inPayDoc.PayDocInfo.PurposeCode;
+			SET outDocument.Number					= inPayDoc.PayDocInfo.DocNum;
+			SET outDocument.OrderPay				= inPayDoc.PayDocInfo.OrderPayment;
+			SET outDocument.PrimaryCreationDate		= inPayDoc.PayDocInfo.DocDate;
+			SET outDocument.OperationDate			= inPayDoc.PayDocInfo.RefDate;
+			SET outDocument.CBC						= inPayDoc.PayDocInfo.CBCPayment;
+			SET outDocument.PayeeCode				= payeeCode;
+			SET outDocument.PayerCode				= payerCode;
+			SET outDocument.CurrencyRate			= inPayDoc.PayDocInfo.CurrRate;
+			SET outDocument.DocCreatorName			= inPayDoc.PayDocInfo.DocCreatorName;
+			
+			SET outDocument.DocumentParticipants.DocumentParticipant[1].Role		= 'Плательщик';
+			SET outDocument.DocumentParticipants.DocumentParticipant[1].RNN			= payerRnn;
+			SET outDocument.DocumentParticipants.DocumentParticipant[1].Name		= inPayDoc.PayerInfo.OrgInfo.*:Name;
+			SET outDocument.DocumentParticipants.DocumentParticipant[1].Account		= inPayDoc.PayerInfo.AcctInfo.AcctId;
+
+			SET outDocument.DocumentParticipants.DocumentParticipant[2].Role		= 'Банк_получателя';
+			SET outDocument.DocumentParticipants.DocumentParticipant[2].BIC			= inPayDoc.ReceiverInfo.BankInfo.*:BankId;
+
+			SET outDocument.DocumentParticipants.DocumentParticipant[3].Role		= 'Получатель';
+			SET outDocument.DocumentParticipants.DocumentParticipant[3].RNN			= receiverRnn;
+			SET outDocument.DocumentParticipants.DocumentParticipant[3].Name		= inPayDoc.ReceiverInfo.OrgInfo.*:Name;
+			SET outDocument.DocumentParticipants.DocumentParticipant[3].Account		= inPayDoc.ReceiverInfo.AcctInfo.AcctId;
+			
+			SET currentId = currentId + 1;
+
+			-- сохраним данные для обработки ответа
+			CREATE LASTCHILD OF Environment.UserProperties.PayDocs NAME 'PayDoc'
+				VALUE CAST(ASBITSTREAM(inPayDoc OPTIONS FolderBitStream) AS CHARACTER);
+		END FOR;
+
+		-- сохраним данные для обработки ответа
+		SET Environment.UserProperties.TransType = inRef.TransType;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+	Запрос из SAP : Сальдо и обороты по счетам
+*/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_SapSaldo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'AcctGetStatement');
+	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.AccountStatementRequests;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.AccountStatementRequests;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		CREATE FIELD Environment.UserProperties.SapSaldo;
+
+		DECLARE outAccountSt REFERENCE TO outRef;
+		FOR inPayDoc AS inRef.Saldo[] DO
+			CREATE LASTCHILD OF outRef AS outAccountSt NAME 'AccountStatementRequest';
+			
+  		    SET outAccountSt.Branch 					    = inPayDoc.BUKRS;
+		    SET outAccountSt.Number 						= inPayDoc.HKONT;
+		    SET outAccountSt.StartDate 					    = inPayDoc.STARTDATE;
+		    SET outAccountSt.EndDate 					    = inPayDoc.ENDDATE;
+		    SET outAccountSt.Extended    					= ' ';
+		    SET outAccountSt.Turnovers 	   				    = 'Y'; -- всегда с оборотами        
+			
+			-- сохраним данные для обработки ответа
+			CREATE LASTCHILD OF Environment.UserProperties.SapSaldo NAME 'SapSaldo'
+				VALUE CAST(ASBITSTREAM(inPayDoc OPTIONS FolderBitStream) AS CHARACTER);
+		END FOR;
+
+		-- сохраним данные для обработки ответа
+		SET Environment.UserProperties.TransType = inRef.TransType;
+			
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Получение рентабельности компании за период" : KZGetLegalProfitabilityRq -> PragmaEnvelope:GetProfitablity
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_Profit
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'GetProfitablity');
+	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.ProfitablityReq.Profitablity;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.ProfitablityReq.Profitablity;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE rnn CHARACTER;
+		DECLARE bin CHARACTER;
+		FOR inOrgIdExt AS inRef.OrgInfo.OrgIdExt[] DO
+			IF inOrgIdExt.Key = 'RNN' THEN
+				SET rnn = inOrgIdExt.Value;
+			END IF;
+			IF inOrgIdExt.Key = 'BIN' THEN
+				SET bin = inOrgIdExt.Value;
+			END IF;
+		END FOR;
+		
+		SET outRef.Rnn				= rnn;
+		SET outRef.IdEpk			= '';
+		SET outRef.Bin				= bin;
+		SET outRef.StartDate		= inRef.StartDate;
+		SET outRef.EndDate			= inRef.EndDate;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Технический запрос пополнение карт-счета  
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX023
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Branch 								= '';
+		SET docKey.DocumentType 						= '0';
+		SET docKey.Id	 								= '';
+		SET docKey.Template								= 'IPTCardPay ';
+		SET docKey.CreateMode 							= 'N';
+		SET docKey.BriefAnswer 							= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.CurrencyDB								= inRef.PayDocInfo.CurrCode;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Account								= THE(SELECT ITEM attr.Value FROM inRef.PayDocInfo.PaymentExtAttr[] AS attr WHERE attr.Key='ACCOUNT');
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Финансовый запрос пополнение карт-счета  
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX024
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Branch 								= '';
+		SET docKey.DocumentType 						= '0';
+		SET docKey.Id	 								= '';
+		SET docKey.Template								= 'IPTCardPay';
+		SET docKey.BriefAnswer 							= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;
+		SET doc.CurrencyDB								= inRef.PayDocInfo.CurrCode;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Account								= THE(SELECT ITEM attr.Value FROM inRef.PayDocInfo.PaymentExtAttr[] AS attr WHERE attr.Key='ACCOUNT');
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК Прагма "Отправка статуса загрузки документов в САП": KZExpPayDocStatusRq -> PragmaEnvelope:SapReturn
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_DocStatusSap
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'SapReturn');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch			= '';
+		SET outRef.DocumentKey.DocumentType		= '0';
+		SET outRef.DocumentKey.Id				= '';
+		SET outRef.DocumentKey.Template			= '';
+
+		DECLARE outDocument REFERENCE TO outRef;
+		FOR inPayDoc AS inRef.PayDoc[] DO
+			CREATE LASTCHILD OF outRef AS outDocument NAME 'Document';
+			
+			SET outDocument.Id						= inPayDoc.PayDocInfo.DocNum;
+			SET outDocument.Status					= inPayDoc.DocStatus;
+			SET outDocument.DetailsInformation		= inPayDoc.DocStatusDesc;
+		END FOR;
+
+		-- сохраним данные для обработки ответа
+		SET Environment.UserProperties.TransType = inRef.TransType;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+ 
+/*
+ * Запрос в МАБПК Технический запрос по платежу в посольство Литвы 	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX052
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.DocumentType 						= '0';
+		SET docKey.Template								= 'IPTEmbassyPay';
+		SET docKey.BriefAnswer 							= 'N';
+		SET docKey.CreateMode							= 'N';
+	
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		SET doc.Details									= inRef.PayDocInfo.PayType;
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		
+		DECLARE outDocument REFERENCE TO outRef;
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Name									= 'LITHUANIAN EMBASSY';
+		SET docPrt.RNN									= '970150024888';		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+			
+		RETURN TRUE;
+	END;
+END MODULE;
+ 
+
+/*
+ * Запрос в МАБПК Финансовый запрос по платежу в посольство Литвы 	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX053
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Template								= 'IPTEmbassyPay';
+		SET docKey.BriefAnswer 							= 'N';
+	
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		SET doc.Details									= inRef.PayDocInfo.PayType;
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.RNN									= '970150024888';
+		SET docPrt.Name									= 'LITHUANIAN EMBASSY';
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос в МАБПК Технический запрос по платежу в ДГОК Филиала АО "ТНК" Казхром 	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX046
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+	 	
+	 		 	
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.DocumentType							= '0';
+		SET docKey.Template								= 'IPTBusinessPay';
+		SET docKey.CreateMode							= 'N';
+		SET docKey.BriefAnswer 							= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		SET doc.Details									= inRef.PayDocInfo.PayType;
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		 
+		DECLARE outDocument REFERENCE TO outRef;
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Name									= 'КАЗХРОМ';
+		SET docPrt.RNN									= '021041001594';
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос в МАБПК Финансовый запрос по платежу в ДГОК Филиала АО "ТНК" Казхром 	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX047
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Template								= 'IPTBusinessPay';
+		SET docKey.BriefAnswer 							= 'N';
+	
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		SET doc.Details									= inRef.PayDocInfo.PayType;
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Name									= 'КАЗХРОМ';
+		SET docPrt.RNN									= '021041001594';
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос в МАБПК Технический запрос по платежу коммунальных услуг ТОО "Батыс Энергоресурс г.Уральск"  	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX044
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Template								= 'IPTUtilityPay';
+		SET docKey.CreateMode							= 'N';
+		SET docKey.BriefAnswer 							= 'N';
+	
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+	    SET doc.Details									= inRef.PayDocInfo.PayType;
+		SET doc.MeterBegin                              = inRef.PayDocInfo.PRBalance;
+		SET doc.MeterEnd								= inRef.PayDocInfo.Balance;            
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.Name									= inRef.PayDocInfo.FIO;
+		SET docPrt.Address								= inRef.PayDocInfo.Adr;
+		SET docPrt.Account     							= inRef.PayDocInfo.Account;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Account								= '2';
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос в МАБПК Финансовый запрос по платежу коммунальных услуг ТОО "Батыс Энергоресурс г.Уральск"  	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX045
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Template								= 'IPTUtilityPay';
+		SET docKey.BriefAnswer 							= 'N';
+	
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+	    SET doc.Details									= inRef.PayDocInfo.PayType;
+		SET doc.MeterBegin                              = inRef.PayDocInfo.PRBalance;
+		SET doc.MeterEnd								= inRef.PayDocInfo.Balance;            
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.Name									= inRef.PayDocInfo.FIO;
+		SET docPrt.Address								= inRef.PayDocInfo.Adr;
+		SET docPrt.Account     							= inRef.PayDocInfo.Account;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Account   							= '2';
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос в МАБПК Технический запрос по платежу технического осмотра ТОО "Оралтехосмотр г.Уральск"  	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX050
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Template								= 'IPTInspectionPay';
+		SET docKey.CreateMode							= 'N';
+		SET docKey.BriefAnswer 							= 'N';
+	
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+	    SET doc.PayerID									= inRef.PayDocInfo.NumAuto;           
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.RNN									= '120140003696';
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос в МАБПК Финансовый запрос по платежу технического осмотра ТОО "Оралтехосмотр г.Уральск"  	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX051
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Template								= 'IPTInspectionPay';
+		SET docKey.BriefAnswer 							= 'N';
+	
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+	    SET doc.PayerID									= inRef.PayDocInfo.NumAuto;           
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.RNN									= '120140003696';
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Технический запрос в МАБПК Прагма : «Университет «Мирас» 
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX056
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTEducationPay';
+		SET outRef.DocumentKey.CreateMode	= 'N';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.SenderReference	= inRef.RqUID;
+		SET outRef.Document.IPTPayType		= inRef.PayDocInfo.PaymentType;
+		SET outRef.Document.CardNumber		= inRef.PayDocInfo.CardNum;
+		SET outRef.Document.EquipNumber		= smid;
+		SET outRef.Document.PayerID			= inRef.PayDocInfo.PaymentExtAttr.Value;
+		SET outRef.Document.AmountDB		= inRef.PayDocInfo.Amount;
+
+		DECLARE iin CHARACTER;
+		FOR inPersonIdExt AS inRef.PayerInfo.PersonInfo.PersonIdExt[] DO
+			IF inPersonIdExt.Key = 'IIN' THEN
+				SET iin = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Role	= 'Плательщик';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].RNN		= iin;
+
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].Role	= 'Получатель';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].Name	= 'MIRAS';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].RNN     = '970540003687';
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Финансовый запрос в МАБПК Прагма : «Университет «Мирас»
+ **/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX057
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE key REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS key NAME 'DocumentKey';
+		SET key.Branch					= '';
+		SET key.DocumentType			= '0';
+		SET key.Id						= '';
+		SET key.Template				= 'IPTEducationPay';
+		SET key.BriefAnswer				= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference			= inRef.RqUID;
+		SET doc.AmountDB				= inRef.PayDocInfo.Amount;
+		SET doc.IPTPayType				= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber				= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber				= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		SET doc.PayerID					= inRef.PayDocInfo.NumAuto;
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.NAME									= 'MIRAS';
+		SET docPrt.RNN									= '970540003687';
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+/*
+ * Запрос в МАБПК Технический запрос по платежу образовательного типа МАБ  	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX048
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Template								= 'IPTEducationPay';
+		SET docKey.CreateMode							= 'N';
+		SET docKey.BriefAnswer 							= 'N';
+	
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+	    SET doc.PayerID									= inRef.PayDocInfo.GroupStud;           
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		SET doc.Invoice									= inRef.PayDocInfo.Balance;
+		SET doc.AdditionInfo							= inRef.PayDocInfo.Course;
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Rolw									= 'MBA';
+		SET docPrt.RNN									= '971240001583';
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос в МАБПК Финансовый запрос по платежу образовательного типа МАБ  	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX049
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Template								= 'IPTEducationPay';
+		SET docKey.BriefAnswer 							= 'N';
+	
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+	    SET doc.PayerID									= inRef.PayDocInfo.GroupStud;           
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		SET doc.Invoice									= inRef.PayDocInfo.Balance;
+		SET doc.AdditionInfo							= inRef.PayDocInfo.Course;
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Rolw									= 'MBA';
+		SET docPrt.RNN									= '971240001583';
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос в МАБПК Технический запрос по платежу коммунальных услуг ТОО "Аксайжылукуат" г.Аксай ЗКО  	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX042
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Template								= 'IPTUtilityPay';
+		SET docKey.CreateMode							= 'N';
+		SET docKey.BriefAnswer 							= 'N';
+	
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+	    SET doc.PayerID									= inRef.PayDocInfo.NumberK;			
+	    SET doc.Details									= inRef.PayDocInfo.PayType;
+		SET doc.AdditionalInfo							= inRef.PayDocInfo.Period;           
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.Name									= inRef.PayDocInfo.FIO;
+		SET docPrt.Address								= inRef.PayDocInfo.Address;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Account								= '1';
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос в МАБПК Финансовый запрос по платежу коммунальных услуг ТОО "Аксайжылукуат" г.Аксай ЗКО   	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX043
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.Template								= 'IPTUtilityPay';
+		SET docKey.BriefAnswer 							= 'N';
+	
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+	    SET doc.PayerID									= inRef.PayDocInfo.NumberK;			
+	    SET doc.Details									= inRef.PayDocInfo.PayType;
+		SET doc.AdditionalInfo							= inRef.PayDocInfo.Period;           
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.Name									= inRef.PayDocInfo.FIO;
+		SET docPrt.Address								= inRef.PayDocInfo.Address;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Account								= '1';
+
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос в МАБПК Технический запрос по платежу коммерческих услуг РГКП "Центр по недвижимости по ЗКО" г.Уральск   	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX054
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+	 	
+	 		 	
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.DocumentType							= '0';
+		SET docKey.Template								= 'IPTBusinessPay';
+		SET docKey.CreateMode							= 'N';
+		SET docKey.BriefAnswer 							= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		SET doc.Details									= inRef.PayDocInfo.PayType;
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		 
+		DECLARE outDocument REFERENCE TO outRef;
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Name									= 'ESTATE_URAL_CENTER';
+		SET docPrt.RNN									= '071040016437';
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Запрос в МАБПК Финансовый запрос по платежу коммерческих услуг РГКП "Центр по недвижимости по ЗКО" г.Уральск   	 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX055
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+	 	
+	 		 	
+		CREATE LASTCHILD OF outRef AS docKey NAME 'DocumentKey';
+		SET docKey.DocumentType							= '0';
+		SET docKey.Template								= 'IPTBusinessPay';
+		SET docKey.BriefAnswer 							= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference							= inRef.RqUID;
+		SET doc.IPTPayType								= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber								= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber								= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		SET doc.Details									= inRef.PayDocInfo.PayType;
+		SET doc.AmountDB								= inRef.PayDocInfo.Amount;	
+		 
+		DECLARE outDocument REFERENCE TO outRef;
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.Name									= 'ESTATE_URAL_CENTER';
+		SET docPrt.RNN									= '071040016437';
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ *  Тестовый сервис для Жанибека из отдела Ильса 21/07/2014 u06068
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma22
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'GetPersonInfo');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonReq.Person;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.PersonReq.Person;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.PersonID = inRef.PersonID;
+		SET outRef.Status	= inRef.Status;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForNewPragma_Compute
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- CALL CopyMessageHeaders();
+		-- CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+/*
+  u00671 12/08/2014 Технический запрос пополнение  счета
+*/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_ADM001
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE FIELD outRef.RequestData.DocumentSyncData;		
+		CREATE LASTCHILD OF outRef.RequestData.DocumentSyncData AS docKey NAME 'DocumentKey';
+		
+		SET docKey.Branch 				= '';
+		SET docKey.DocumentType 		= '0';
+		SET docKey.Id 					= '';
+        SET docKey.Template 			= 'AutoSafePay';
+		SET docKey.CreateMode			= 'N';
+		SET docKey.BriefAnswer			= 'Y';
+		
+		CREATE LASTCHILD OF outRef.RequestData.DocumentSyncData AS doc NAME 'Document';
+		SET doc.Id 						= '';
+
+		SET doc.SenderReference			= inRef.SenderReference;
+		SET doc.EquipNumber     		= inRef.EquipNumber;
+		SET doc.PayerID		     	    = inRef.PayerID;
+			
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+  u00671 12/08/2014 Финансовый запрос на пополнение счета
+*/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_ADM002
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+
+		DECLARE docKey REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE FIELD outRef.RequestData.DocumentSyncData;		
+		CREATE LASTCHILD OF outRef.RequestData.DocumentSyncData AS docKey NAME 'DocumentKey';
+		
+		SET docKey.Branch 				= '';
+		SET docKey.DocumentType 		= '0';
+		SET docKey.Id 					= '';
+        SET docKey.Template 			= 'AutoSafePay';
+		SET docKey.CreateMode			= 'Y';
+		SET docKey.BriefAnswer			= 'N';
+		
+		CREATE LASTCHILD OF outRef.RequestData.DocumentSyncData AS doc NAME 'Document';
+		SET doc.Id 						= '';
+
+		SET doc.SenderReference			= inRef.SenderReference;
+		SET doc.EquipNumber     		= inRef.EquipNumber;
+
+		SET doc.AmountDB		     	= inRef.trx_amount;
+		SET doc.PayerID		            = inRef.PayerID;
+
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE part REFERENCE TO doc.DocumentParticipants;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS part NAME 'DocumentParticipant';
+		SET part.Role 					= 'Получатель';
+		SET part.Account 				= inRef.client_account;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/* microbiz - KZRequestGESV */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_RequestGESV
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'GetScheduleEffRate');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.GetScheduleEffRates.GetScheduleEffRate;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.GetScheduleEffRates.GetScheduleEffRate;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZRequestGESV.GetScheduleEffRate;
+		
+		SET outRef.CreditCurrency			= inRef.Currency;
+		SET outRef.CreditSum				= inRef.Sum;
+		SET outRef.ComisTotal				= inRef.SingleCommissionSum; -- Сумма единоразовых комиссий		
+		SET outRef.TermLoan					= inRef.Period;
+		SET outRef.PrcRate					= inRef.Percent;
+		SET outRef.RepaymentType			= inRef.Method;
+		SET outRef.DtIssue					= inRef.IssueDate;
+		SET outRef.DtFirstPayment			= inRef.FirstPayDate;
+
+		-- сохраним TSMUID в переменных среды
+		-- он нам понадобится при формировании ответа
+		-- SET Environment.UserProperties.TSMUID = inRef.TSMUID;
+		
+		RETURN TRUE;
+	END;	
+END MODULE;
+
+
+/* microbiz - KZGSLRequest */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_GSLRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'gsltsm');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.BlockInfo;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<].BlockInfos;
+		
+		SET outRef 					            = inRef;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/* microbiz */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_BankAccountRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'BlockData');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.BlockData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<].BlockDatas;
+		
+		SET outRef 					            = inRef;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_GetCurrency
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'BlockData');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.BlockData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<].BlockDatas;
+		
+		SET outRef 					            = inRef;
+		
+		RETURN TRUE;
+	END;	
+END MODULE;
+
+/* KZGetBackOfficeRq */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_GetBackOffice
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'LoanGetRequest');
+			
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.LoanRequests.LoanRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.LoanRequests.LoanRequest;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.BranchCode 					= FIELDVALUE(inRef.BankInfo.*:AgencyId);
+		SET outRef.FilialCode 					= FIELDVALUE(inRef.BankInfo.*:RegionId);
+		
+		SET outRef.CardNumber 					= inRef.CardAcctId.*:CardNum;
+		SET outRef.AmountLimit 					= inRef.CardAcctId.CreditLimit;
+		SET outRef.Interest 					= inRef.LoanInfo.LoanRate;
+		SET outRef.Guarantee 					= inRef.LoanInfo.Security;		
+		SET outRef.RequestNumber				= inRef.LoanInfo.DocNumber;
+		SET outRef.RefusalLoan 					= inRef.LoanInfo.RejectionReason;
+		SET outRef.TypeID	 					= inRef.PersonInfo.PersonIdType;		
+		SET outRef.ID							= inRef.PersonInfo.PersonId;
+		SET outRef.Resident						= COALESCE(inRef.PersonInfo.*:Resident,'');
+		SET outRef.Coefficient					= inRef.FlagKZ;
+		SET outRef.TypeCard						= inRef.CardAcctId.*:CardType;
+		SET outRef.Currency						= inRef.CardAcctId.*:CurCode; 
+		SET outRef.PlaceWork					= inRef.PersonInfo.*:EmploymentHistory.*:Occupation;
+		SET outRef.PrivateWord					= inRef.CardAcctId.SecWord;
+		SET outRef.Stmt							= inRef."Extract";
+		SET outRef.Country						= THE(SELECT ITEM addr.*:Country FROM inRef.PersonInfo.*:ContactInfo.*:PostAddr[] AS addr 
+													  WHERE addr.*:AddrType='Home');
+		SET outRef.SubtypeCard					= inRef.CardAcctId.SubProductType;
+		SET outRef.MessageForSigns				= inRef.DSData;
+		SET outRef.Signs						= inRef.DSKey;
+		
+		CREATE FIELD outRef.PledgeDeposits;
+		DECLARE outPledgeDeposit REFERENCE TO outRef.PledgeDeposits;
+		FOR inDepData AS inRef.DepData[] DO
+			CREATE LASTCHILD OF outRef.PledgeDeposits AS outPledgeDeposit NAME 'PledgeDeposit';
+		SET outPledgeDeposit.AccountDeposit		= inDepData.AcctId;
+		SET outPledgeDeposit.Pledged			= inDepData.PledgeSum;
+		END FOR;
+		
+		SET outRef.TSMUID						= inRef.LoanInfo.DocNumber;
+		
+		DECLARE comisForRegistration CHARACTER;
+		DECLARE comisForCash CHARACTER;
+		DECLARE comisForCred CHARACTER;	-- 26/05/2014 u00671	
+		FOR inExtAmountRec AS inRef.LoanInfo.ExtAmountInfo.ExtAmountRec[] DO
+			IF inExtAmountRec.AmtType = 'COMFORREG' THEN
+				SET comisForRegistration = inExtAmountRec.Amount;
+			END IF;
+			IF inExtAmountRec.AmtType = 'COMFORCASH' THEN
+				SET comisForCash = inExtAmountRec.Amount;
+			END IF;
+			IF inExtAmountRec.AmtType = 'COMFORCRED' THEN
+				SET comisForCred = inExtAmountRec.Amount; -- Комиссия за зачисление кредитных средств на счета клиента
+			END IF;			
+		END FOR;		
+		
+		DECLARE idEpk CHARACTER '';
+		DECLARE personId CHARACTER '';
+		FOR inPersonIdExt AS inRef.PersonInfo.PersonIdExt[] DO
+			IF inPersonIdExt.Key = 'CIF' THEN
+				SET idEpk = inPersonIdExt.Value;
+			ELSEIF inPersonIdExt.Key = 'IIN' THEN
+				SET personId = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		
+		DECLARE homePhone CHARACTER;
+		DECLARE workPhone CHARACTER;
+		DECLARE mobilePhone CHARACTER;
+		FOR inPhone AS inRef.PersonInfo.Phones.Phone[] DO
+			IF inPhone.PhoneType = 'Home' THEN
+				SET homePhone = inPhone.PhoneNum;
+			END IF;
+			IF inPhone.PhoneType = 'Mobile' THEN
+				SET mobilePhone = inPhone.PhoneNum;
+			END IF;
+			IF inPhone.PhoneType = 'Work' THEN
+				SET workPhone = inPhone.PhoneNum;
+			END IF;
+		END FOR;
+
+		DECLARE homeAddress CHARACTER;
+		DECLARE homeCity CHARACTER;
+		DECLARE workAddress CHARACTER;
+		FOR inPostAddr AS inRef.PersonInfo.*:ContactInfo.*:PostAddr[] DO
+			IF inPostAddr.*:AddrType  = 'Home' THEN
+				SET homeAddress = inPostAddr.*:Addr1;
+				SET homeCity = inPostAddr.*:City;
+			END IF;
+			IF inPostAddr.*:AddrType  = 'Work' THEN
+				SET workAddress = inPostAddr.*:Addr1;
+			END IF;
+		END FOR;
+
+		SET outRef.LoginManager					= inRef.ManLogin;
+		SET outRef.ManagersData					= inRef.ManData;
+		SET outRef.ProductCode					= FIELDVALUE(inRef.CardAcctId.*:ProductType);
+		SET outRef.DtOpenCrd					= inRef.CardAcctId.CardStart;
+		SET outRef.DtPeriodCrd					= inRef.CardAcctId.CardEnd;
+		SET outRef.TermLoan						= inRef.LoanInfo.TermLoan;
+		SET outRef.CreditPurpose				= inRef.LoanInfo.LoanPurpose;
+		SET outRef.RepaymentType				= inRef.LoanInfo.RepaymentType;
+		SET outRef.ComisForRegistration			= comisForRegistration;
+		SET outRef.ComisForCash					= comisForCash;
+		SET outRef.ComisForCreditingAccount		= comisForCred; -- Комиссия за зачисление кредитных средств на счета клиента		           
+		SET outRef.SalesChannel					= inRef.LoanInfo.SalesChannel;
+		SET outRef.Processing					= inRef.Processing;
+		SET outRef.EmbossedName					= inRef.CardAcctId.EmbossedName;
+		SET outRef.EmbossedSurname				= inRef.CardAcctId.EmbossedSurName;
+		SET outRef.NumberDecision				= inRef.LoanInfo.DecisionDocNumber;
+		SET outRef.DtNumberDecision				= inRef.LoanInfo.DecisionDocDate;
+		SET outRef.ApprovedDecisionTerm			= inRef.LoanInfo.ApprovedDecisionTerm;--u07357 17.08.2015
+		SET outRef.LastName						= inRef.PersonInfo.*:PersonName.*:LastName;
+		SET outRef.FirstName					= inRef.PersonInfo.*:PersonName.*:FirstName;
+		SET outRef.MiddleName					= inRef.PersonInfo.*:PersonName.*:MiddleName;
+		SET outRef.PersonId						= personId;
+		SET outRef.IdEpk						= idEpk;
+
+		SET outRef.ClientCategory				= inRef.LoanInfo.Participants.Participant.PersonInfo.ClientCategory;
+		
+		SET outRef.IdType						= CASE inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType
+			WHEN 'VidKZ' THEN 'ВидНаЖит'
+			WHEN 'UdKZ' THEN 'Удост'
+			WHEN 'PassKZ' THEN 'Паспорт'
+			ELSE inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType
+		END;
+		SET outRef.IdNum						= inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum;
+		SET outRef.IssuedBy						= inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IssuedBy;
+		SET outRef.IssueDt						= inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:IssueDt;
+		SET outRef.ExpDt						= inRef.PersonInfo.*:IdentityCards.*:IdentityCard.*:ExpireDate;
+		SET outRef.Citizenship					= inRef.PersonInfo.*:Citizenship;
+		SET outRef.BirthDay						= inRef.PersonInfo.*:BirthDt;
+		SET outRef.BirthPlace					= inRef.PersonInfo.*:BirthPlace;
+		SET outRef.HomePhone					= homePhone;
+		SET outRef.MobilePhone					= mobilePhone;
+		SET outRef.HomeAddress					= homeAddress;
+		SET outRef.Position						= inRef.PersonInfo.*:EmploymentHistory.*:JobTitle;
+		SET outRef.WorkAddress					= workAddress;
+		SET outRef.WorkPhone					= workPhone;
+		SET outRef.EMailAddr					= inRef.PersonInfo.*:ContactInfo.*:EmailAddr;
+		SET outRef.City							= homeCity;
+		SET outRef.DocDate						= inRef.LoanInfo.DocDate;
+		
+		CREATE LASTCHILD OF outRef NAME 'Clients';
+		DECLARE outClients REFERENCE TO outRef;
+		FOR inParticipant AS inRef.LoanInfo.Participants.Participant[] DO
+			CREATE LASTCHILD OF outRef.Clients AS outClients NAME 'Client';
+			DECLARE idEpkC CHARACTER;
+			DECLARE personIdC CHARACTER;
+			FOR inPersonIdExt AS inParticipant.PersonInfo.PersonIdExt[] DO
+				IF inPersonIdExt.Key = 'CIF' THEN
+					SET idEpkC = inPersonIdExt.Value;
+				ELSEIF inPersonIdExt.Key = 'IIN' THEN
+					SET personIdC = inPersonIdExt.Value;
+				END IF;
+			END FOR;
+			
+			IF NOT EXISTS(inParticipant.PersonInfo.*:PersonName.*:LastName[]) THEN
+				SET outClients.LastName			= inParticipant.PersonInfo.ClientCategory;
+			ELSE			
+				SET outClients.LastName			= inParticipant.PersonInfo.*:PersonName.*:LastName;
+			END IF;
+			SET outClients.FirstName		= inParticipant.PersonInfo.*:PersonName.*:FirstName;
+			SET outClients.MiddleName		= inParticipant.PersonInfo.*:PersonName.*:MiddleName;
+			SET outClients.PersonId			= personIdC;
+			SET outClients.IdEpk			= idEpkC;
+			SET outClients.ClientCategory	= inParticipant.PersonInfo.ClientCategory;
+			SET outClients.RoleClient		= inParticipant.PartType;
+		END FOR;
+		
+		CREATE LASTCHILD OF outRef NAME 'Commissions';
+		DECLARE outComm REFERENCE TO outRef;
+			
+		FOR inComm AS inRef.Commissions.Commission[] DO	
+						
+			CREATE LASTCHILD OF outRef.Commissions AS outComm NAME 'Commission';
+			SET outComm.Code		= inComm.Code;
+			SET outComm.Name		= inComm.Name;
+			SET outComm.Period		= inComm.Period;
+			SET outComm.Enrollment	= inComm.Enrollment;
+			SET outComm.Amount		= inComm.Amount;
+
+		END FOR;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_CreditHistoryCorp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'LoanGetHist'); -- Неизвестно название сервиса
+	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE debtors REFERENCE TO outRef;
+		DECLARE debtor  REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS debtors NAME 'DebtorsID';
+		
+		CREATE LASTCHILD OF debtors AS debtor NAME 'DebtorID';
+		 
+		SET debtor.DealMemberType			= InputRoot.XMLNSC.*[<].DealMemberType;
+		SET debtor.CompanyName				= InputRoot.XMLNSC.*[<].CompanyName;
+		 
+		SET debtor.TypeID			=	inRef.DebtorsID.DebtorID.TypeID;
+		SET debtor.ID				= 	inRef.DebtorsID.DebtorID.ID;
+		SET debtor.OldLastName		=	'';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* KZSBDKQP */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO_SBDKQP
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'SBDK');	
+		
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.RequestBlockData;
+		DECLARE RequestBlockData REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.RequestBlockData;
+		DECLARE inPersonInfo REFERENCE TO InputRoot.XMLNSC.*[<].PersonInfo;
+		
+		SET RequestBlockData.ClientData.Type    = inPersonInfo.PersonIdType;
+		SET RequestBlockData.ClientData.InnBin  = inPersonInfo.PersonId;
+		SET RequestBlockData.ClientData.Family  VALUE = inPersonInfo.inds:PersonName.inds:LastName;
+		SET RequestBlockData.ClientData.Name    VALUE = inPersonInfo.inds:PersonName.inds:FirstName;
+		SET RequestBlockData.ClientData.SurName VALUE = inPersonInfo.inds:PersonName.inds:MiddleName;
+		SET RequestBlockData.ClientData.CompanyName  = InputRoot.XMLNSC.*[<].CompanyName;
+
+		RETURN TRUE;
+	END;	
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX060
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTEducationPay';
+		SET outRef.DocumentKey.CreateMode	= 'N';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.SenderReference	= inRef.RqUID;
+		SET outRef.Document.IPTPayType		= inRef.PayDocInfo.PaymentType;
+		SET outRef.Document.CardNumber		= inRef.PayDocInfo.CardNum;
+		SET outRef.Document.EquipNumber		= smid;
+		SET outRef.Document.PayerID			= inRef.PayDocInfo.PaymentExtAttr.Value;
+		SET outRef.Document.AmountDB		= inRef.PayDocInfo.Amount;
+		SET outRef.Document.PaymentTarget	= inRef.PayDocInfo.typetr;
+		--SET outRef.Document.RNN				= inRef.PayDocInfo.RNN;
+		DECLARE iin CHARACTER;
+		FOR inPersonIdExt AS inRef.PayerInfo.PersonInfo.PersonIdExt[] DO
+			IF inPersonIdExt.Key = 'IIN' THEN
+				SET iin = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Role	= 'Плательщик';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].RNN		= iin;
+
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].Role	= 'Получатель';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].Name	= 'GUK_KazGUU';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].RNN     = '040140002422';
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX061
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE key REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS key NAME 'DocumentKey';
+		SET key.Branch					= '';
+		SET key.DocumentType			= '0';
+		SET key.Id						= '';
+		SET key.Template				= 'IPTEducationPay';
+		SET key.BriefAnswer				= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference			= inRef.RqUID;
+		SET doc.AmountDB				= inRef.PayDocInfo.Amount;
+		SET doc.PaymentTarget			= inRef.PayDocInfo.typetr;
+		--SET doc.RNN						= inRef.PayDocInfo.RNN;
+		SET doc.IPTPayType				= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber				= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber				= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		SET doc.PayerID					= inRef.PayDocInfo.NumAuto;
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.NAME									= 'GUK_KazGUU';
+		SET docPrt.RNN									= '040140002422';
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX062
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.DocumentKey.Branch		= '';
+		SET outRef.DocumentKey.DocumentType	= '0';
+		SET outRef.DocumentKey.Id			= '';
+		SET outRef.DocumentKey.Template		= 'IPTEducationPay';
+		SET outRef.DocumentKey.CreateMode	= 'N';
+		SET outRef.DocumentKey.BriefAnswer	= 'N';
+		
+		DECLARE smid CHARACTER;
+		FOR inServiceAttr AS inRef.ServiceAttr[] DO
+			IF inServiceAttr.Key = 'SMID' THEN
+				SET smid = inServiceAttr.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.SenderReference	= inRef.RqUID;
+		SET outRef.Document.IPTPayType		= inRef.PayDocInfo.PaymentType;
+		SET outRef.Document.CardNumber		= inRef.PayDocInfo.CardNum;
+		SET outRef.Document.EquipNumber		= smid;
+		SET outRef.Document.PayerID			= inRef.PayDocInfo.PaymentExtAttr.Value;
+		SET outRef.Document.AmountDB		= inRef.PayDocInfo.Amount;
+		SET outRef.Document.PaymentTarget	= inRef.PayDocInfo.typetr;
+		--SET outRef.Document.RNN				= inRef.PayDocInfo.RNN;
+		DECLARE iin CHARACTER;
+		FOR inPersonIdExt AS inRef.PayerInfo.PersonInfo.PersonIdExt[] DO
+			IF inPersonIdExt.Key = 'IIN' THEN
+				SET iin = inPersonIdExt.Value;
+			END IF;
+		END FOR;
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].Role	= 'Плательщик';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[1].RNN		= iin;
+
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].Role	= 'Получатель';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].Name	= 'ВКГТУ';
+		SET outRef.Document.DocumentParticipants.DocumentParticipant[2].RNN     = '010440002379';
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_XTX063
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DocumentSync');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DocumentSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		DECLARE key REFERENCE TO outRef;
+		DECLARE doc REFERENCE TO outRef;
+		
+		CREATE LASTCHILD OF outRef AS key NAME 'DocumentKey';
+		SET key.Branch					= '';
+		SET key.DocumentType			= '0';
+		SET key.Id						= '';
+		SET key.Template				= 'IPTEducationPay';
+		SET key.BriefAnswer				= 'N';
+		
+		CREATE LASTCHILD OF outRef AS doc NAME 'Document';
+		SET doc.SenderReference			= inRef.RqUID;
+		SET doc.AmountDB				= inRef.PayDocInfo.Amount;
+		SET doc.PaymentTarget			= inRef.PayDocInfo.typetr;
+		--SET doc.RNN						= inRef.PayDocInfo.RNN;
+		SET doc.IPTPayType				= inRef.PayDocInfo.PaymentType;
+		SET doc.CardNumber				= inRef.PayDocInfo.CardNum;
+		SET doc.EquipNumber				= THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='SMID');
+		SET doc.PayerID					= inRef.PayDocInfo.NumAuto;
+		
+		CREATE FIELD doc.DocumentParticipants;
+		DECLARE docPrt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Плательщик';
+		SET docPrt.RNN									= inRef.PayDocInfo.IIN;
+		CREATE LASTCHILD OF doc.DocumentParticipants AS docPrt NAME 'DocumentParticipant';
+		SET docPrt.Role									= 'Получатель';
+		SET docPrt.NAME									= 'ВКГТУ';
+		SET docPrt.RNN									= '010440002379';
+		
+		-- сохраним все сервисные атрибуты в переменных среды
+		-- они нам понадобятся при формировании ответа
+		SET Environment.UserProperties.ServiceAttr[] = inRef.ServiceAttr[];
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_GetClientInfo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'PersonGetIIN');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonFilters;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.PersonFilters;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		 
+		DECLARE val CHARACTER inRef.PersonInfo.PersonIdExt[<].Value;
+		
+		SET outRef.PossibleKeys.IIN				= val; 
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+u07357 09.05.2015
+*/
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_KZGetContractListRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot); 
+		 
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'GetContractList');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.ContractListRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.ContractListRequest;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE cust REFERENCE TO outRef;
+		DECLARE custs REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS custs NAME 'Customers';
+		FOR contract AS inRef.Contract[] DO
+		CREATE LASTCHILD OF custs AS cust NAME 'Customer';
+		SET cust.BIN = contract.BIN;
+		END FOR;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_PersonGetPensionInfoRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'PragmaEnvelope';
+		
+		DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRoot.MessageUID = InputRoot.XMLNSC.*[<].RqUID;
+		SET outRoot.SourceMessageUID = InputRoot.XMLNSC.*[<].RqUID;
+		SET outRoot.SystemCode = InputRoot.XMLNSC.*[<].SPName;
+		SET outRoot.ServiceCode = 'PersonGetPensionInfo';
+		SET outRoot.MessageDateTime = InputRoot.XMLNSC.*[<].RqTm;
+		IF InputRoot.XMLNSC.*[<].SPName = 'Transact' THEN
+			SET outRoot.FilialCode = COALESCE(REPLACE(InputRoot.XMLNSC.*[<].BankInfo.*:RegionId,'TXB',''), '00');
+		ELSE 
+			SET outRoot.FilialCode = COALESCE(InputRoot.XMLNSC.*[<].BankInfo.*:RegionId, '00');
+		END IF;
+		
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.PersonKeys;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.PersonKeys;
+  		DECLARE perskeys REFERENCE TO outRef;
+		FOR keys AS inRoot.RequestData.PersonKeys.PersonKey[] DO
+		CREATE LASTCHILD OF outRef AS perskeys NAME 'PersonKey';
+		SET perskeys.Id 	= keys.Id;
+		SET perskeys.UNK 	= keys.UNK;
+		SET perskeys.IIN 	= keys.IIN;
+		SET perskeys.Period = keys.Period;
+		END FOR;
+				
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+/*
+ * Done by Djapenov Aydar u06068 14.05.2015
+ 
+   Запрос в QPragma
+   
+   Интерфейс отрабатывает непосредственно перед началом процедуры открытия вклада - проверяет возможность открытия вклада клиентом, 
+   а так же возвращает результаты проверок и филиал (подразделение) на котором ведется карточка клиента в АБИС QPragma. 
+ 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_DepChkAddRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DepChkAdd');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DepChkAddRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DepChkAddRq;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.BankInfo.RbTbBrchId							     	= inRef.RbTbBrchId;
+		SET outRef.CustRec.CustInfo.PersonInfo.TaxId			     	= inRef.TaxId;
+		SET outRef.CustRec.CustInfo.PersonInfo.Birthday 		     	= inRef.Birthday;
+		SET outRef.CustRec.CustInfo.PersonInfo.PersonName.LastName   	= inRef.LastName;
+		SET outRef.CustRec.CustInfo.PersonInfo.PersonName.FirstName  	= inRef.FirstName;
+		SET outRef.CustRec.CustInfo.PersonInfo.PersonName.MiddleName 	= inRef.MiddleName;
+		SET outRef.CustRec.CustInfo.PersonInfo.IdentityCard.IdType   	= inRef.IdType;
+		SET outRef.CustRec.CustInfo.PersonInfo.IdentityCard.IdSeries 	= inRef.IdSeries;
+		SET outRef.CustRec.CustInfo.PersonInfo.IdentityCard.IdNum	 	= inRef.IdNum;
+		SET outRef.CustRec.CustInfo.PersonInfo.IdentityCard.IssuedBy 	= inRef.IssuedBy;
+		SET outRef.CustRec.CustInfo.PersonInfo.IdentityCard.IssuedCode  = inRef.IssuedCode;
+		SET outRef.CustRec.CustInfo.PersonInfo.IdentityCard.ExpDt		= inRef.ExpDt;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+ * Done by Djapenov Aydar u06068 14.05.2015
+ 
+   Запрос в QPragma
+    
+   Интерфейс позволяет осуществить открытие вклада с пополнением в АБИС Qpragma, согласно выбранным и заполненным клиентом параметрам. 
+   Пополнение вклада доступно, как с карты (в любой валюте), так и с текущего счета (при наличии счета в валюте открываемого вклада).
+ 
+ */
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_NewDepAddFillRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'NewDepAddFill');	
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.NewDepAddFillRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.NewDepAddFillRq;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET outRef.ServiceId.OperRRN	= inRef.OperRRN;
+		SET outRef.BankInfo.RbTbBrchId	= inRef.RbTbBrchId;
+		SET outRef.XferInfo.AcctType	= inRef.AcctType;
+		
+		SET outRef.XferInfo.CardAcctIdFrom.SystemId	= inRef.CardAcctIdFrom.SystemId;
+		SET outRef.XferInfo.CardAcctIdFrom.CardNum	= inRef.CardAcctIdFrom.CardNum;
+		SET outRef.XferInfo.CardAcctIdFrom.EndDt	= inRef.CardAcctIdFrom.EndDt;
+		SET outRef.XferInfo.CardAcctIdFrom.RbBrchId	= inRef.CardAcctIdFrom.RbBrchId;
+		
+		SET outRef.XferInfo.DepAcctIdFrom.SystemId	= inRef.DepAcctIdFrom.SystemId;
+		SET outRef.XferInfo.DepAcctIdFrom.AcctId	= inRef.DepAcctIdFrom.AcctId;
+		SET outRef.XferInfo.DepAcctIdFrom.RbBrchId	= inRef.DepAcctIdFrom.RbBrchId;
+		
+		SET outRef.XferInfo.DepAcctIdTo.VariantInterestPayment.IsInterestToCard	= inRef.DepAcctIdTo.IsInterestToCard;
+		SET outRef.XferInfo.DepAcctIdTo.VariantInterestPayment.CardNumber		= inRef.DepAcctIdTo.CardNumber;
+		SET outRef.XferInfo.DepAcctIdTo.BranchId								= inRef.DepAcctIdTo.BranchId;
+		SET outRef.XferInfo.DepAcctIdTo.AgencyId								= inRef.DepAcctIdTo.AgencyId;
+		
+		SET outRef.XferInfo.AgreemtInfo.AgreemtType								= inRef.AgreemtInfo.AgreemtType;
+		SET outRef.XferInfo.AgreemtInfo.AcctCode								= inRef.AgreemtInfo.AcctCode;
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.CurAmt							= inRef.AgreemtInfo.CurAmt;
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.AcctCur							= CodToIsoCur(inRef.AgreemtInfo.AcctCur);
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.AddDt							= inRef.AgreemtInfo.AddDt;
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.MatDt							= inRef.AgreemtInfo.MatDt;
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.Term							= inRef.AgreemtInfo.Term;
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.Rate							= inRef.AgreemtInfo.Rate;
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.EffRate							= inRef.AgreemtInfo.EffRate;
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.IrreducibleAmt					= inRef.AgreemtInfo.IrreducibleAmt;
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.ProfitPeriod					= inRef.AgreemtInfo.ProfitPeriod;
+		
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.CustRec.CustInfo.PersonInfo.TaxId					= inRef.AgreemtInfo.TaxId;
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.CustRec.CustInfo.PersonInfo.Birthday				= inRef.AgreemtInfo.Birthday;
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.CustRec.CustInfo.PersonInfo.PersonName.LastName		= inRef.AgreemtInfo.PersonName.LastName;
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.CustRec.CustInfo.PersonInfo.PersonName.FirstName	= inRef.AgreemtInfo.PersonName.FirstName;
+		SET outRef.XferInfo.AgreemtInfo.DepInfo.CustRec.CustInfo.PersonInfo.PersonName.MiddleName	= inRef.AgreemtInfo.PersonName.MiddleName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_KZDepositSyncRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DepositSync');
+			
+		CREATE FIELD OutputRoot.XMLNSC.*[<].RequestData.DepositSyncData;
+
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<].RequestData.DepositSyncData;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+
+		SET OutputRoot.XMLNSC.*[<].FilialCode 	= inRef.FILIALID;
+		
+		SET outRef.ClientInfo					= inRef.ClientInfo;
+		SET outRef.DepositInfo					= inRef.DepositInfo;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMO_SBDKQP_Subflow
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		SET OutputRoot.MQMD.CorrelId	= CAST(InputRoot.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY; 
+		
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(InputRoot, OutputLocalEnvironment);
+			
+		CALL FillStandartMDORs(InputRoot, OutputRoot, 'KZSBDKQPRs');
+		
+		SET OutputRoot.XMLNSC.*[<].Status.ifxca:StatusCode = '0';
+		
+		SET OutputRoot.XMLNSC.*[<].BLStatus   = '2';
+		SET OutputRoot.XMLNSC.*[<].TerrStatus = 0;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_KZDepositStatusRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'DepositStatus');	
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		DECLARE docRef REFERENCE TO outRef;
+		CREATE FIELD outRef.RequestData.DepositStatusData.DepositStatus AS docRef;
+		SET docRef.DOCTYPE 	= InputRoot.XMLNSC.KZDepositStatusRq.Doc.DocType;
+		SET docRef.DOCREF 	= InputRoot.XMLNSC.KZDepositStatusRq.Doc.PayDocInfo.DocRef;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+
+
+
+-- Открытие счета ДБО сббол 08083
+CREATE COMPUTE MODULE RequestForNewPragma_Compute_ConvertMDO2NewPragma_OpenAccount
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+			
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'OpenAccount');	
+		
+		--SET OutputRoot.MQMD.ReplyToQ	= 'ESB.CBBOLHTTP.AGGR.OUT';
+	    --SET OutputRoot.MQMD.ReplyToQMgr	= 'MKZ.ESB.ADP1';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.OpenAccount;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		SET outRef.ServiceCode 			=	'SbbolOpenAcct';
+		
+		DECLARE accRef REFERENCE TO outRef;
+		CREATE FIELD outRef.RequestData.OpenAccount_req.OpenAccount AS accRef;
+		
+		
+		SET accRef.ID		 			= 	inRef.RqUID;
+		SET accRef.DateTime 			= 	inRef.RqTm;
+		SET accRef.AccountDetails.ClientBIN 			= 	inRef.AccountDetails.ClientBIN;
+		SET accRef.AccountDetails.AccountCurrency		= 	inRef.AccountDetails.AccountCurrency;
+		SET accRef.AccountDetails.AccountCommission 	= 	inRef.AccountDetails.AccountCommission;
+		SET accRef.AccountDetails.FilialId 			= 	inRef.AccountDetails.FilialId;
+		SET accRef.AccountDetails.Signature 			= 	inRef.AccountDetails.Signature;
+		
+		RETURN TRUE;	
+
+	END;
+END MODULE;
+
+-- Запрос деталей по счету ДБО сббол 
+CREATE COMPUTE MODULE RequestForNewPragma_ConvertMDO2NewPragma_OpenAccountDetails
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillStandartNewPragmaRq(InputRoot, OutputRoot, 'OpenAccountDetailsRequest');	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.OpenAccountDetailsRequest;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.PragmaEnvelope;
+		SET outRef.ServiceCode 			=	'SbbolStatAcct';
+		SET outRef.RequestData.StatData.OpenAccountDetailsRequest.ID = inRef.RqUID;
+		SET outRef.RequestData.StatData.OpenAccountDetailsRequest.DateTime = inRef.RqTm;
+		SET outRef.RequestData.StatData.OpenAccountDetailsRequest.DocRef    			=	inRef.DocRef;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+

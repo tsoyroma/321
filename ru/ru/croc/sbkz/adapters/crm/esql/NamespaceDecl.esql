@@ -1,0 +1,34 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crm.esql
+
+-- Namespace МДО
+DECLARE NS_MDO_ORGS CONSTANT CHARACTER 'http://sberbank.ru/dem/organizations/15';
+DECLARE	orgs	NAMESPACE 	NS_MDO_ORGS;
+DECLARE NS_MDO_IFXCA CONSTANT CHARACTER 'http://sberbank.ru/dem/commonAggregates/15';
+DECLARE ifxca NAMESPACE NS_MDO_IFXCA;
+
+
+-- Namespace Siebel
+DECLARE NS_SIEBEL_ACCOUNT CONSTANT CHARACTER 'http://www.siebel.com/xml/FINCORP%20Account%20-%20Integration';
+DECLARE fc NAMESPACE NS_SIEBEL_ACCOUNT;
+DECLARE NS_SIEBEL_PROFITABILITY CONSTANT CHARACTER 'http://siebel.com/CustomUI';
+DECLARE prf NAMESPACE NS_SIEBEL_PROFITABILITY;
+
+DECLARE NS_CRM_NS2 CONSTANT CHARACTER 'http://sberbank.ru/dem/CRM_MG';
+		DECLARE space NAMESPACE NS_CRM_NS2;
+		DECLARE NS_CRM CONSTANT CHARACTER 'http://www.w3.org/2001/XMLSchema-instance';
+		DECLARE space1 NAMESPACE NS_CRM;
+		
+DECLARE NS_CRM_MDO CONSTANT CHARACTER 'http://sberbank.ru/dem/CRM_MG';
+DECLARE	orgs_crm	NAMESPACE 	NS_CRM_MDO;
+
+DECLARE NS_CRM_MDO2 CONSTANT CHARACTER 'http://www.w3.org/2001/XMLSchema-instance';
+DECLARE	orgs_xsi	NAMESPACE 	NS_CRM_MDO2;
+
+
+--29/10/16 выписка по счету 08083
+DECLARE NS_MDO_BANKS CONSTANT CHARACTER 'http://sberbank.ru/dem/organizations/banks/15';
+DECLARE banks	NAMESPACE	NS_MDO_BANKS;
+DECLARE NS_MDO_INDS CONSTANT CHARACTER 'http://sberbank.ru/dem/individual/15';
+DECLARE inds	NAMESPACE	NS_MDO_INDS;	
+DECLARE NS_MDO_COMMONS CONSTANT CHARACTER 'http://sberbank.ru/dem/commonAggregates/18';
+DECLARE	commons	NAMESPACE 	NS_MDO_COMMONS;	 

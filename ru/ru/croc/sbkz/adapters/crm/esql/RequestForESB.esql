@@ -1,0 +1,964 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.crm.esql
+
+PATH ru.croc.sbkz.utils; 
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation			 
+		WHEN 'Envelope' THEN
+			SET labelName = 'Envelope'; --- in BPM
+/*
+			WHEN 'Envelope' THEN
+			 DECLARE Operation2 CHARACTER FIELDVALUE(InputRoot.XMLNSC.*:Envelope.*:Header.*:"operation-name");
+			 CASE Operation2 
+			 WHEN 'ForceSignal'THEN
+			 	SET labelName = 'ForceSignal';
+			 ELSE
+			-- Неизвестный тип сообщения
+				THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForESB(CRM Corp)_Envelope', Operation2);
+			END CASE;
+*/			
+		-- Задача от Ким Н. 24.09.2015 г07357
+		WHEN 'InternetClientInformationRequest' THEN
+			SET labelName = 'InternetClientInformationRequest';
+		WHEN 'ClientMailRequest' THEN
+			SET labelName = 'ClientMailRequest';
+		WHEN 'InternetClientRequisitionRequest' THEN
+			SET labelName = 'InternetClientRequisitionRequest';
+			
+			
+		WHEN 'GetInstantLoanDeptRq' THEN
+			SET labelName = 'GetInstantLoanDeptRq';
+		WHEN 'GetAverageDailyBalanceRq' THEN
+			SET labelName = 'GetAverageDailyBalanceRq';
+		WHEN 'GetInterestIncomeRq' THEN
+			SET labelName = 'GetInterestIncomeRq';
+		WHEN 'GetNonInterestIncomeRq' THEN
+			SET labelName = 'GetNonInterestIncomeRq';
+		WHEN 'GetFinAccountTurnoverRq' THEN
+			SET labelName = 'GetFinAccountTurnoverRq';
+		WHEN 'GetFinAccountNetTurnoverRq' THEN
+			SET labelName = 'GetFinAccountNetTurnoverRq';
+		WHEN 'SMSGateRq' THEN
+			SET labelName = 'SMSGateRq';
+		WHEN 'KZGetMDMLegalInfoByAttrRq' THEN
+			SET labelName = 'KZGetMDMLegalInfoByAttrRq';
+		WHEN 'KZSendMDMLegalClientDataRq' THEN
+			SET labelName = 'KZSendMDMLegalClientDataRq';	
+		WHEN 'KZSendMDMPrivateClientDataRq' THEN
+			SET labelName = 'KZSendMDMPrivateClientDataRq';	
+		WHEN 'AccountTransactionsRq' THEN
+			SET labelName = 'AccountTransactionsRq';
+		WHEN 'GetProfitability_Input' THEN
+			SET labelName = 'GetProfitability_Input';
+		WHEN 'calculate' THEN
+			SET labelName = 'calculate';
+		WHEN 'confirm' THEN
+			SET labelName = 'confirm';
+		WHEN 'StructRequest' THEN
+			SET labelName = 'StructRequest';
+		WHEN 'correct' THEN
+			SET labelName = 'correct';
+		WHEN 'historicalDetailsRequest' THEN
+			SET labelName = 'historicalDetailsRequest';
+		WHEN 'calculationRequest' THEN
+			SET labelName = 'calculationRequest';
+		WHEN 'finalizationRequest' THEN
+			SET labelName = 'finalizationRequest';
+		WHEN 'PutBusinessPartnerRq' THEN
+			SET labelName = 'PutBusinessPartnerRq';
+		WHEN 'UpdateGSZRq' THEN
+			SET labelName = 'UpdateGSZRq';
+		WHEN 'UpdateProductDetailsRq' THEN
+			SET labelName = 'UpdateProductDetailsRq';						
+		WHEN 'UpdateGSZRq' THEN
+			SET labelName = 'UpdateGSZRq';
+		WHEN 'UpdateProductDetailsRq' THEN
+			SET labelName = 'UpdateProductDetailsRq';						
+		WHEN 'PutCreditDealRq' THEN
+			SET labelName = 'PutCreditDealRq';			
+		WHEN 'SendRateRq' THEN
+			SET labelName = 'SendRateRq';	
+		WHEN 'UpdateCRMReferencesRq' THEN
+			SET labelName = 'UpdateCRMReferencesRq';
+		WHEN 'GetLimitRq' THEN
+			SET labelName = 'GetLimitRq';	
+		WHEN 'CreateLimitRq' THEN
+			SET labelName = 'CreateLimitRq';
+		WHEN 'UpdateLimitRq' THEN
+			SET labelName = 'UpdateLimitRq';
+		WHEN 'PutRelatedBorrowersGroupStructRq' THEN
+			SET labelName = 'PutRelatedBorrowersGroupStructRq';
+		WHEN 'CalcMarkerDebtCapacityRq' THEN
+			SET labelName = 'CalcMarkerDebtCapacityRq';
+		WHEN 'SendMasterDataNf' THEN
+			SET labelName = 'SendMasterDataNf';
+		WHEN 'PutPositionRq' THEN
+			SET labelName = 'PutPositionRq';
+		WHEN 'UpdateFinTransactionRq' THEN
+			SET labelName = 'UpdateFinTransactionRq';
+		WHEN 'UpdateLegalClientSubsidiaryRq' THEN
+			SET labelName = 'UpdateLegalClientSubsidiaryRq';
+		WHEN 'UpdateLegalClientSubsidiaryDealRq' THEN
+			SET labelName = 'UpdateLegalClientSubsidiaryDealRq';
+		WHEN 'UpdateCreditDealData' THEN
+			SET labelName = 'UpdateCreditDealData';
+		WHEN 'Message_DB_UCAppRq' THEN
+			SET labelName = 'Message_DB_UCAppRq';
+		-- 3. ПереназначениеКМ ЕК :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_UCModKMEKRq' THEN
+			SET labelName = 'Message_DB_UCModKMEKRq';
+
+		-- 5. Сообщение о переназначении ГКМ :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_MGModGKMRq' THEN
+			SET labelName = 'Message_DB_MGModGKMRq';
+		-- 6. Сообщение о признании связи внутри Мета-группы несущественной/существенной 
+		--     :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_MGAppRq' THEN
+			SET labelName = 'Message_DB_MGAppRq';	
+		-- 7. Сообщение-ответ :: Служебное сообщение
+		WHEN 'Message_DB_StatusRq' THEN
+			SET labelName = 'Message_DB_StatusRq';
+		-- 8. Создание или изменение юр. Лица :: Клиентские данные
+		WHEN 'CustOrgModRq' THEN
+			SET labelName = 'CustOrgModRq';	
+		-- 9. Создание или изменение физ. Лица :: Клиентские данные
+		WHEN 'RequestUpdateRelatedPrivateClientRq' THEN
+			SET labelName = 'RequestUpdateRelatedPrivateClientRq';
+		
+		-- запрос на выписку по счету
+		WHEN 'STATEMENT_RQ' THEN
+			SET labelName = 'STATEMENT_RQ';
+		
+			/* Requests for NEW PRAGMA */
+		WHEN 'PragmaEnvelope' THEN
+			DECLARE ServiceCode CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode);
+			CASE ServiceCode
+			-- OrganisationGetClient_Request 		
+			WHEN 'OrganisationGetClient' THEN
+				SET labelName = 'OrganisationGetClient';
+			-- OrganizationSync_Request 		
+			WHEN 'OrgSync_CRM' THEN
+				SET labelName = 'OrgSync_CRM';
+			WHEN 'Report-Rent' THEN
+				SET labelName = 'Report-Rent';	
+			ELSE
+				-- Непонятный тэг
+				THROW USER EXCEPTION VALUES ('Unknown message format in RequestForESB(CRM Corp)', ServiceCode);
+			END CASE;	
+		
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForESB(CRM Corp)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке 
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		-- также проставим SPName CRM-Корпоративного, если он отсутствует
+		/*
+		IF NOT EXISTS(OutputRoot.XMLNSC.*:*[<].SPName[]) THEN
+			CREATE NEXTSIBLING OF OutputRoot.XMLNSC.*:*[<].RqTm NAME 'SPName' VALUE 'CRMc';
+		END IF;
+		*/
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма : GetCompanySDOForPeriodRq -> GetCompanySDOForPeriodRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyEntireMessage();
+		
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение значения моментной ссудной задолженности компании за период": GetInstantLoanDeptRq -> KZGetInstantLoanDeptRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetInstantLoanDeptRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GetInstantLoanDeptRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetInstantLoanDeptRq;
+		
+		DECLARE outOrgId REFERENCE TO OutRq;
+		IF InpRq.OrgBIN <> '' THEN
+			CREATE LASTCHILD OF OutRq AS outOrgId NAME 'OrgId';
+			SET outOrgId.orgs:OrgType = ORG_TYPE_KZBIN;
+			SET outOrgId.orgs:OrgNum = InpRq.OrgBIN;
+		END IF;
+		IF InpRq.OrgRNN <> '' THEN
+			CREATE LASTCHILD OF OutRq AS outOrgId NAME 'OrgId';
+			SET outOrgId.orgs:OrgType = ORG_TYPE_KZRNN;
+			SET outOrgId.orgs:OrgNum = InpRq.OrgRNN;
+		END IF;
+		SET OutRq.StartDate = InpRq.StartDate;
+		SET OutRq.EndDate 	= InpRq.EndDate;
+		SET OutRq.CurrCode 	= InpRq.CurrCode;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в АБПК Прагма "Получение СДО компании за период": GetAverageDailyBalanceRq -> KZGetAverageDailyBalanceRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetAverageDailyBalanceRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GetAverageDailyBalanceRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetAverageDailyBalanceRq;
+		
+		DECLARE outOrgId REFERENCE TO OutRq;
+		IF InpRq.OrgBIN <> '' THEN
+			CREATE LASTCHILD OF OutRq AS outOrgId NAME 'OrgId';
+			SET outOrgId.orgs:OrgType = ORG_TYPE_KZBIN;
+			SET outOrgId.orgs:OrgNum = InpRq.OrgBIN;
+		END IF;
+		IF InpRq.OrgRNN <> '' THEN
+			CREATE LASTCHILD OF OutRq AS outOrgId NAME 'OrgId';
+			SET outOrgId.orgs:OrgType = ORG_TYPE_KZRNN;
+			SET outOrgId.orgs:OrgNum = InpRq.OrgRNN;
+		END IF;
+		SET OutRq.StartDate = InpRq.StartDate;
+		SET OutRq.EndDate 	= InpRq.EndDate;
+		SET OutRq.CurrCode 	= InpRq.CurrCode;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение суммы процентных доходов от компании за период": GetInterestIncomeRq -> KZGetInterestIncomeRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetInterestIncomeRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GetInterestIncomeRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetInterestIncomeRq;
+		
+		DECLARE outOrgId REFERENCE TO OutRq;
+		IF InpRq.OrgBIN <> '' THEN
+			CREATE LASTCHILD OF OutRq AS outOrgId NAME 'OrgId';
+			SET outOrgId.orgs:OrgType = ORG_TYPE_KZBIN;
+			SET outOrgId.orgs:OrgNum = InpRq.OrgBIN;
+		END IF;
+		IF InpRq.OrgRNN <> '' THEN
+			CREATE LASTCHILD OF OutRq AS outOrgId NAME 'OrgId';
+			SET outOrgId.orgs:OrgType = ORG_TYPE_KZRNN;
+			SET outOrgId.orgs:OrgNum = InpRq.OrgRNN;
+		END IF;
+		SET OutRq.StartDate = InpRq.StartDate;
+		SET OutRq.EndDate 	= InpRq.EndDate;
+		SET OutRq.CurrCode 	= InpRq.CurrCode;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение суммы непроцентных доходов от компании за период": GetNonInterestIncomeRq -> KZGetNonInterestIncomeRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO5
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetNonInterestIncomeRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GetNonInterestIncomeRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetNonInterestIncomeRq;
+		
+		DECLARE outOrgId REFERENCE TO OutRq;
+		IF InpRq.OrgBIN <> '' THEN
+			CREATE LASTCHILD OF OutRq AS outOrgId NAME 'OrgId';
+			SET outOrgId.orgs:OrgType = ORG_TYPE_KZBIN;
+			SET outOrgId.orgs:OrgNum = InpRq.OrgBIN;
+		END IF;
+		IF InpRq.OrgRNN <> '' THEN
+			CREATE LASTCHILD OF OutRq AS outOrgId NAME 'OrgId';
+			SET outOrgId.orgs:OrgType = ORG_TYPE_KZRNN;
+			SET outOrgId.orgs:OrgNum = InpRq.OrgRNN;
+		END IF;
+		SET OutRq.StartDate = InpRq.StartDate;
+		SET OutRq.EndDate 	= InpRq.EndDate;
+		SET OutRq.CurrCode 	= InpRq.CurrCode;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение оборотов по счетам компании за период": GetFinAccountTurnoverRq -> KZGetFinAccountTurnoverRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO6
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetFinAccountTurnoverRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GetFinAccountTurnoverRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetFinAccountTurnoverRq;
+		
+		DECLARE outOrgId REFERENCE TO OutRq;
+		IF InpRq.OrgBIN <> '' THEN
+			CREATE LASTCHILD OF OutRq AS outOrgId NAME 'OrgId';
+			SET outOrgId.orgs:OrgType = ORG_TYPE_KZBIN;
+			SET outOrgId.orgs:OrgNum = InpRq.OrgBIN;
+		END IF;
+		IF InpRq.OrgRNN <> '' THEN
+			CREATE LASTCHILD OF OutRq AS outOrgId NAME 'OrgId';
+			SET outOrgId.orgs:OrgType = ORG_TYPE_KZRNN;
+			SET outOrgId.orgs:OrgNum = InpRq.OrgRNN;
+		END IF;
+		SET OutRq.StartDate = InpRq.StartDate;
+		SET OutRq.EndDate 	= InpRq.EndDate;
+		SET OutRq.CurrCode 	= InpRq.CurrCode;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение чистых оборотов по счетам компании за период": GetFinAccountNetTurnoverRq -> KZGetFinAccountNetTurnoverRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO7
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetFinAccountNetTurnoverRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GetFinAccountNetTurnoverRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetFinAccountNetTurnoverRq;
+		
+		DECLARE outOrgId REFERENCE TO OutRq;
+		IF InpRq.OrgBIN <> '' THEN
+			CREATE LASTCHILD OF OutRq AS outOrgId NAME 'OrgId';
+			SET outOrgId.orgs:OrgType = ORG_TYPE_KZBIN;
+			SET outOrgId.orgs:OrgNum = InpRq.OrgBIN;
+		END IF;
+		IF InpRq.OrgRNN <> '' THEN
+			CREATE LASTCHILD OF OutRq AS outOrgId NAME 'OrgId';
+			SET outOrgId.orgs:OrgType = ORG_TYPE_KZRNN;
+			SET outOrgId.orgs:OrgNum = InpRq.OrgRNN;
+		END IF;
+		SET OutRq.StartDate = InpRq.StartDate;
+		SET OutRq.EndDate 	= InpRq.EndDate;
+		SET OutRq.CurrCode 	= InpRq.CurrCode;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в Intervale "Передача SMS на телефон клиента": SMSGateRq -> KZSendSMSRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO8
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSendSMSRq';		
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZSendSMSRq;
+		
+		SET OutRq.RqUID			= InpRq.RqUID;
+		SET OutRq.RqTm			= InpRq.RqTm;
+		SET OutRq.OperUID		= InpRq.SMS.SiebelId;
+		SET OutRq.SPName		= 'B'; -- CRM корпоративный
+		SET OutRq.VersionId 	= '1.3.0';
+		SET OutRq.PhoneNumber 	= REPLACE(InpRq.SMS.PhoneNumber, '+', '');
+		SET OutRq.SMSText 		= InpRq.SMS.SMSText;
+		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+/**
+ * Транзакции по счёту, запрос в МАБПК
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO_AcctTrans
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillMDOStandartElementsRq2(InputRoot, OutputRoot, 'KZGetTransactionsInfoRq');	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZGetTransactionsInfoRq;
+		
+		SET outRef.OperUID					= '';	
+		SET outRef.SPName					= '';	
+		SET outRef.BankInfo					= '';	
+		SET outRef.AcctInfo.AcctId			= inRef.AccNumber;
+		SET outRef.StartDate				= inRef.StartDate;
+		SET outRef.EndDate					= inRef.EndDate;
+		SET outRef.IsExtStatement			= 'Y';
+		SET outRef.IsTurnovers				= 'Y';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Получение данных о рентабельности компании за период
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO_Profit
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillMDOStandartElementsRq2(InputRoot, OutputRoot, 'KZGetLegalProfitabilityRq');	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZGetLegalProfitabilityRq;
+		
+		SET outRef.SPName						= 'CRMc';
+		SET outRef.StartDate					= FIELDVALUE(inRef.*:StartDate);
+		SET outRef.EndDate						= FIELDVALUE(inRef.*:EndDate);
+		SET outRef.OrgInfo.OrgIdExt[1].Key		= 'BIN';
+		SET outRef.OrgInfo.OrgIdExt[1].Value	= FIELDVALUE(inRef.*:Bin);
+		SET outRef.OrgInfo.OrgIdExt[2].Key		= 'RNN';
+		SET outRef.OrgInfo.OrgIdExt[2].Value	= FIELDVALUE(inRef.*:Rnn);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO_Calculate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.calculate.arg0;
+				
+				
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'calculate';
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET OutputRoot.XMLNSC.calculate.RqUID = InputRoot.XMLNSC.calculate.RqUID; 
+		
+		SET outRef = inRef;
+		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+/*
+u07357 08.04.2015
+*/
+CREATE COMPUTE MODULE RequestForESB_ConvertToSAPLM_KZGetLimitRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRq REFERENCE TO InputRoot.XMLNSC.GetLimitRq;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE OutRq REFERENCE TO OutputRoot;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS OutRq NAME 'KZGetLimitRqFromCRMtoSAPLM';
+		SET OutRq = InRq;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_toBPM
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		-- также проставим SPName CRM-Корпоративного, если он отсутствует
+		IF NOT EXISTS(OutputRoot.XMLNSC.*:*[<].SPName[]) THEN
+			CREATE NEXTSIBLING OF OutputRoot.XMLNSC.*:*[<].RqTm NAME 'SPName' VALUE 'CRMc';
+		END IF;
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDVALUE(InputRoot.XMLNSC.*:Envelope.*:Header.*:"operation-name");
+
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_SOAP -- in BPM
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDVALUE(OutputRoot.XMLNSC.*:Envelope.*:Header.*:"operation-name");
+
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh_SAPLM
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter:async:response';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:saplm';
+
+		RETURN TRUE;
+	END;	
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertToCRMCorp_RequestUpdateRelatedPrivateClientRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- CALL CopyMessageHeaders();
+		-- CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO_Message_DB_UCAppRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		-- На этом этапе начинается перешивка сообщения с нэймспейсом по умолчанию
+		
+		DECLARE RootXMLElement CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		SET OutputRoot.XMLNSC.orgs_crm:{RootXMLElement}.(XMLNSC.NamespaceDecl)xmlns = orgs_crm;
+		SET OutputRoot.XMLNSC.orgs_crm:{RootXMLElement}.(XMLNSC.NamespaceDecl)xmlns:xsi = orgs_xsi;
+		
+		CALL COPYIN2OUT(InputRoot.XMLNSC.*[<], OutputRoot.XMLNSC.orgs_crm:{RootXMLElement});
+		
+		RETURN TRUE;
+	END;	
+	
+	CREATE PROCEDURE COPYIN2OUT (IN inRoot REFERENCE, IN outRoot REFERENCE)
+	BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		DECLARE K INTEGER;
+		DECLARE elementName CHARACTER;
+			
+		SET J = CARDINALITY(inRoot.[]);
+		WHILE I <= J DO
+			
+			SET K = CARDINALITY(inRoot.*[I].[]);
+			IF K > 0 THEN
+				SET elementName = FIELDNAME(inRoot.*[I]);
+				CREATE LASTCHILD OF outRoot
+					TYPE FIELDTYPE(inRoot.*[I])
+					NAMESPACE orgs_crm
+					NAME FIELDNAME(inRoot.*[I]);
+				
+				DECLARE newIn REFERENCE TO inRoot.*[I];
+				DECLARE newOut REFERENCE TO outRoot.orgs_crm:{elementName};
+				  
+				CALL COPYIN2OUT(newIn, newOut);
+			ELSE
+				SET elementName = FIELDNAME(inRoot.*[I]);
+				IF elementName = 'Properties' THEN
+					SET outRoot.*[I] = inRoot.*[I]; 
+				ELSE
+					SET outRoot.orgs_crm:*[I] = inRoot.*[I];
+				END IF;
+			END IF;
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+
+
+ 
+
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh_DBO
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:dbo';
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM_ToDBOInternetClientInformationRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);							
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'InternetClientInformationRequest';
+
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+
+		SET outRef = inRef;
+		SET outRef.mqgid = InputRoot.MQMD.MsgId;
+		SET Environment.UserProperties.MsgId2 = InputRoot.MQMD.MsgId;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+ 
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM_ToDBOClientMailRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);				
+					
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'ClientMailRequest';
+
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+
+		SET outRef = inRef;
+		SET outRef.mqgid = InputRoot.MQMD.MsgId;
+		SET Environment.UserProperties.MsgId2 = InputRoot.MQMD.MsgId;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM_ToDBOInternetClientRequisitionRequest
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);							
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';				
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'InternetClientRequisitionRequest';
+
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+
+		SET outRef = inRef;
+		SET outRef.mqgid = InputRoot.MQMD.MsgId;
+		SET Environment.UserProperties.MsgId2 = InputRoot.MQMD.MsgId;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_addCorrelId
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN	
+		CALL CopyEntireMessage();
+
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC;
+
+		SET outRef = inRef;
+		--SET outRef.*[<].Reply = Environment.ComIbmAggregateRequestNode.CRMDBORq.REQUEST.replyIdentifier;
+		SET outRef.*[<].Reply = InputLocalEnvironment.WrittenDestination.MQ.DestinationData.replyIdentifier;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh_MDM 
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter:async:response';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:mdm';
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh_CRM_CA
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter:async:response';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:crm_ca';
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+  --запрос выписки по счету 29.10.15 
+CREATE COMPUTE MODULE RequestForESB_ConvertCRM2MDO_Statement
+CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		CALL FillMDOStandardElementsRq(InputRoot, OutputRoot, 'KZLegalGetAccountStatementRq');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:STATEMENT_RQ;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZLegalGetAccountStatementRq;
+		
+		SET outRef.AcctReq.AcctId 					= inRef.ACCOUNTS.ACCOUNT;
+		SET outRef.AcctReq.BankInfo.banks:BankId 	= inRef.ACCOUNTS.BIC;
+		SET outRef.DateStart						= inRef.DATE;
+		SET outRef.DateEnd							= inRef.DATE;
+		SET outRef.IsExtStatement					= 'Y';
+		SET outRef.IsTurnovers						= 'Y';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- CRM corp
+CREATE COMPUTE MODULE RequestForESB_FillHeaders
+	CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		CALL CopyEntireMessage();
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDVALUE(OutputRoot.XMLNSC.*[<].ServiceCode);
+
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillHeaders2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+
+	 	-- Маршрутизация через SystemId
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:newpragma';
+
+		RETURN TRUE;
+
+	END;
+END MODULE;

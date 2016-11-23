@@ -1,0 +1,151 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.gcvp_web.esql
+PATH ru.croc.sbkz.adapters.gcvp_web.esql;
+
+
+
+CREATE COMPUTE MODULE SOAPRequestResponse_SOAPEnvelope
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		/*DECLARE Soa CONSTANT CHARACTER 'http://schemas.xmlsoap.org/soap/envelope/';
+		DECLARE S NAMESPACE Soa;
+
+		DECLARE TNS CONSTANT CHARACTER 'http://ws.billing.gcvp.kz/';
+		DECLARE tns NAMESPACE TNS;
+		DECLARE envBody REFERENCE TO OutputRoot;
+		DECLARE envPart REFERENCE TO OutputRoot;
+		DECLARE pensPart REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';	
+		
+		CREATE FIELD OutputRoot.XMLNSC.S:Envelope as  envPart;
+		SET envPart.(XMLNSC.NamespaceDecl)xmlns:S = S;
+		CREATE LASTCHILD OF envPart AS envBody NAMESPACE S NAME 'Body';
+		CREATE FIELD envBody.getDeductionShortInfo AS pensPart NAMESPACE tns;
+		SET pensPart.(XMLNSC.NamespaceDecl)xmlns:ns2 = TNS;
+		SET envBody.*:*[<] = InputRoot.XMLNSC.*:*[<];*/	
+			
+		/*
+		CREATE FIELD OutputRoot.XMLNSC.S:Envelope as  envPart;
+		SET envPart.(XMLNSC.NamespaceDecl)xmlns:S = S;
+		CREATE LASTCHILD OF envPart AS envBody NAMESPACE S NAME 'Body';
+		CREATE LASTCHILD OF envBody AS pensPart NAMESPACE tns NAME 'getPensionInfo';
+		SET pensPart.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+		SET envBody.*:*[<] = InputRoot.XMLNSC.*:*[<];
+		*/
+		/*
+		CREATE FIELD OutputRoot.XMLNSC.S:Envelope.S:Body AS envPart;
+		SET envPart.(XMLNSC.NamespaceDecl)xmlns:S = S;
+		DECLARE Env REFERENCE TO OutputRoot.XMLNSC.S:Envelope;
+		SET Env.(XMLNSC.NamespaceDecl)xmlns:S = S;
+		CREATE LASTCHILD OF envPart NAMESPACE tns NAME 'getPensionInfo';
+		SET envPart.(XMLNSC.NamespaceDecl)xmlns:tns = tns;
+		SET envPart.tns:*[<] = InputRoot.XMLNSC.*:*[<];			
+		*/
+		
+		/*
+		--------------------------------------------------------------------------
+				CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.DoIFXRs AS outRoot NAMESPACE erib NAME 'CardOffSMSRs';
+		
+		SET outRoot.(XMLNSC.NamespaceDecl)xmlns:erib = erib;
+		
+		*/
+/*
+DECLARE space1 NAMESPACE 'namespace1';
+SET OutputRoot.XMLNSC.space1:root.(XMLNSC.NamespaceDecl)xmlns:ns1 = space1;
+SET OutputRoot.XMLNSC.space1:root.space1:example = 'ABCDE';
+*/
+
+		/*
+		DECLARE envPart REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';		
+		CREATE FIELD OutputRoot.XMLNSC.S:Envelope.S:Body AS envPart;
+		SET envPart.S:Envelope.(XMLNSC.NamespaceDecl)xmlns:S = Soa;
+		SET envPart.*:*[<].S:Body.(XMLNSC.NamespaceDecl)xmlns:S = Soa;
+			  
+		CREATE LASTCHILD OF envPart NAMESPACE tns NAME 'getPensionInfo';
+		SET envPart.tns:*[<] = InputRoot.XMLNSC.*:*[<];	
+		*/
+		
+		/*
+		DECLARE envPart REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		
+		CREATE FIELD OutputRoot.XMLNSC.S:Envelope.S:Body AS envPart;
+		CREATE LASTCHILD OF envPart NAMESPACE tns NAME 'getPensionInfo';
+		SET envPart.*:*[<] = InputRoot.XMLNSC.*:*[<];	
+		*/
+					
+				
+					
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPRequestResponse_SetOperation
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Operation 
+				= FIELDNAME(InputRoot.XMLNSC.S:Envelope.S:Body.*[<]);
+		
+		-- Установка параметров веб-сервиса для SoapRequest
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.WebServiceURL 	= HttpWebServiceUrl;
+		SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.Timeout 			= HttpWebServiceTimeout;
+		--SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.KeyAlias = 'db79bb07b4722c042e025979b3b11995fc46765b';
+		--SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.ProxyURL = '192.168.2.4:3128';
+		-- Установка параметр прокси-сервера
+		IF HttpProxyAddress IS NOT NULL AND TRIM(HttpProxyAddress) <> '' AND TRIM(HttpProxyAddress) <> 'NO' THEN
+			SET OutputLocalEnvironment.Destination.SOAP.Request.Transport.HTTP.ProxyURL = HttpProxyAddress;
+		END IF;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE SOAPreqresp_gcvp_web_ConvertToBLOB
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		DECLARE tcpHeader CHAR;
+		DECLARE tcpMsgLen INTEGER;
+		DECLARE tcpData BLOB ASBITSTREAM(InputRoot.XMLNSC CCSID 1208);
+		
+		SET tcpMsgLen = LENGTH(CAST(tcpData AS CHAR CCSID 1208)); 
+		SET tcpHeader = LEFT(CAST(tcpMsgLen AS CHAR) || '', 4);
+		SET OutputRoot.Properties.MessageFormat = 'BLOB';
+		--SET OutputRoot.BLOB.BLOB	=	CAST(tcpHeader AS BLOB CCSID 1208) || tcpData;
+		SET OutputRoot.BLOB.BLOB	=	tcpData;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+
+CREATE COMPUTE MODULE SOAPreqresp_gcvp_web_ConvertFromBLOB
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+				
+		CREATE FIRSTCHILD OF OutputRoot.XMLNSC 
+                  PARSE ( 
+                        InputRoot.BLOB.BLOB
+                        CCSID 1208
+                        OPTIONS FolderBitStream + ValidateNone);
+		
+		--DECLARE oRef REFERENCE TO OutputRoot.XMLNSC.*[<]; 
+		
+		--SET OutputRoot.XMLNSC.*[<].*:Header.*:Signature.*:KeyInfo.*:X509Data.*:X509Certificate = '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';
+		
+		--CREATE FIRSTCHILD OF OutputRoot.XMLNSC.*[<] AS oRef NAME 'Header'; 
+		
+	
+		
+		RETURN TRUE;
+	END;
+END MODULE;

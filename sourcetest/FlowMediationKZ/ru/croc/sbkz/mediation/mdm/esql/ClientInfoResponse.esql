@@ -1,0 +1,184 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.mdm.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE ClientInfoResponse_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDVALUE(Environment.UserProperties.Operation);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZGetCompPersonInfoByIDRq' THEN
+			SET labelName = 'KZGetCompPersonInfoByIDRq';
+		WHEN 'KZExpMDMCompPrivateClientDataRq' THEN
+			SET labelName = 'KZExpMDMCompPrivateClientDataRq';
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown format XML', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ClientInfoResponse_CreateCombinedResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE origMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+		SET Environment.UserProperties = origMsg.UserProperties;
+		DECLARE inRef REFERENCE TO origMsg.Body.*[<];
+
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(origMsg, OutputLocalEnvironment);
+
+		DECLARE outRef REFERENCE TO OutputRoot;
+		CREATE FIELD OutputRoot.XMLNSC.KZGetCompPersonInfoByIDRs AS outRef;
+		SET outRef.(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+		SET outRef.(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+		SET outRef.(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+
+		SET outRef.RqUID	= inRef.RqUID;
+		SET outRef.RqTm		= inRef.RqTm;
+		
+		IF NOT EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST1[]) AND sendRequestToEpk = '1' THEN
+			SET outRef.Status.ifxca:StatusCode	= '-100';
+			SET outRef.Status.ifxca:StatusDesc	= 'Не удалось получить ответ от ЕПК в течение установленного временного интервала.';
+		ELSEIF NOT EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST1.XMLNSC.*[<].PersonInfo[]) AND sendRequestToEpk = '1' THEN
+			SET outRef.Status.ifxca:StatusCode	= '-100';
+			SET outRef.Status.ifxca:StatusDesc	= 'В ответе от ЕПК отсутствуют данные. Код ошибки ЕПК: ' ||
+				COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST1.XMLNSC.*[<].Status.*:StatusCode, '') ||
+				', описание ошибки ЕПК: ' ||
+				COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST1.XMLNSC.*[<].Status.*:StatusDesc, '');
+		ELSEIF	NOT EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST2[]) OR
+				NOT EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST3[]) THEN
+			SET outRef.Status.ifxca:StatusCode	= '-100';
+			SET outRef.Status.ifxca:StatusDesc	= 'Не удалось получить ответ от МАБПК в течение установленного временного интервала.';
+		ELSEIF NOT EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST2.XMLNSC.*[<].PersonInfo[]) THEN
+			SET outRef.Status.ifxca:StatusCode	= '-100';
+			SET outRef.Status.ifxca:StatusDesc	= 'В ответе от МАБПК (KZGetPersonInfoByIDRs) отсутствуют данные. Код ошибки МАБПК: ' ||
+				COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST2.XMLNSC.*[<].Status.*:StatusCode, '') ||
+				', описание ошибки МАБПК: ' ||
+				COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST2.XMLNSC.*[<].Status.*:StatusDesc, '');
+		ELSEIF NOT EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST3.XMLNSC.*[<].AcctList[]) THEN
+			SET outRef.Status.ifxca:StatusCode	= '-100';
+			SET outRef.Status.ifxca:StatusDesc	= 'В ответе от МАБПК (KZGetPrivateClientAccountListRs) отсутствуют данные. Код ошибки МАБПК: ' ||
+				COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST3.XMLNSC.*[<].Status.*:StatusCode, '') ||
+				', описание ошибки МАБПК: ' ||
+				COALESCE(InputRoot.ComIbmAggregateReplyBody.REQUEST3.XMLNSC.*[<].Status.*:StatusDesc, '');
+		ELSE
+			SET outRef.Status.ifxca:StatusCode	= '0';
+			SET outRef.Status.ifxca:StatusDesc	= '';
+			
+			IF sendRequestToEpk = '1' THEN
+				SET outRef.PersonInfo	= InputRoot.ComIbmAggregateReplyBody.REQUEST1.XMLNSC.*[<].PersonInfo;
+				IF EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST2.XMLNSC.*[<].PersonInfo.AuthorityList.Authority[]) THEN
+					IF EXISTS(outRef.PersonInfo.AuthorityList[]) THEN
+						CREATE PREVIOUSSIBLING OF outRef.PersonInfo.AuthorityList NAME 'AuthorityList';
+						SET outRef.PersonInfo.AuthorityList[<]	= NULL;
+					ELSEIF EXISTS(outRef.PersonInfo.ClientJobTitle[]) THEN
+						CREATE PREVIOUSSIBLING OF outRef.PersonInfo.ClientJobTitle NAME 'AuthorityList';
+					ELSE
+						CREATE PREVIOUSSIBLING OF outRef.PersonInfo.ClientWorkPlace NAME 'AuthorityList';
+					END IF;
+					
+					SET outRef.PersonInfo.AuthorityList	= InputRoot.ComIbmAggregateReplyBody.REQUEST2.XMLNSC.*[<].PersonInfo.AuthorityList;
+				END IF;
+			ELSE
+				SET outRef.PersonInfo	= InputRoot.ComIbmAggregateReplyBody.REQUEST2.XMLNSC.*[<].PersonInfo;
+			END IF;
+			IF EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST3.XMLNSC.*[<].AcctList.AcctInfo[]) THEN
+				SET outRef.AcctList.AcctInfo[] = InputRoot.ComIbmAggregateReplyBody.REQUEST3.XMLNSC.*[<].AcctList.AcctInfo[];
+			END IF;
+		END IF;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ClientInfoResponse_CreateCombinedResponse1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE origMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+		SET Environment.UserProperties = origMsg.UserProperties;
+		DECLARE inRef REFERENCE TO origMsg.Body.*[<];
+		
+		SET OutputRoot.MQMD = origMsg.MQMD;
+
+		CALL ResolveMQMDTypes(OutputRoot.MQMD);
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZExpMDMPrivateClientDataRq';
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+	
+		SET outRef.(XMLNSC.NamespaceDecl)xmlns:inds 	= inds;
+		SET outRef.(XMLNSC.NamespaceDecl)xmlns:ifxca 	= ifxca;
+		SET outRef.(XMLNSC.NamespaceDecl)xmlns:banks 	= banks;
+		
+		SET outRef.RqUID 			= inRef.RqUID;
+		SET outRef.RqTm 			= inRef.RqTm;
+		SET outRef.SPName			= inRef.SPName;
+		SET outRef.TargetSPName		= inRef.TargetSPName;
+
+		SET outRef.PersonInfo		= inRef.PersonInfo;
+
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+		SET OutputRoot.MQMD.Format = MQFMT_RF_HEADER_2;
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+
+		DECLARE systemId CHARACTER;
+		
+ 		CASE inRef.TargetSPName
+		WHEN 'MABPK' THEN
+			SET systemId = 'urn:sbkzsystems:newpragma';
+		WHEN 'CRMc' THEN
+			SET systemId = 'urn:sbkzsystems:crm';
+		WHEN 'CRMr' THEN
+			SET systemId = 'urn:sbkzsystems:crmretail';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown destination system specified', inRef.TargetSPName);
+		END CASE;
+		
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+		SET OutputRoot.MQRFH2.usr.SystemId	= systemId;
+
+		IF	EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST1[]) AND 
+			InputRoot.ComIbmAggregateReplyBody.REQUEST1.XMLNSC.*[<].Status.*:StatusCode = '0' THEN
+
+			IF EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST1.XMLNSC.*[<].PersonInfo.AuthorityList.Authority[]) THEN
+				IF EXISTS(outRef.PersonInfo.AuthorityList[]) THEN
+					CREATE PREVIOUSSIBLING OF outRef.PersonInfo.AuthorityList NAME 'AuthorityList';
+					SET outRef.PersonInfo.AuthorityList[<]	= NULL;
+				ELSEIF EXISTS(outRef.PersonInfo.ClientJobTitle[]) THEN
+					CREATE PREVIOUSSIBLING OF outRef.PersonInfo.ClientJobTitle NAME 'AuthorityList';
+				ELSE
+					CREATE PREVIOUSSIBLING OF outRef.PersonInfo.ClientWorkPlace NAME 'AuthorityList';
+				END IF;
+				
+				SET outRef.PersonInfo.AuthorityList	= InputRoot.ComIbmAggregateReplyBody.REQUEST1.XMLNSC.*[<].PersonInfo.AuthorityList;
+			END IF;
+		END IF;
+		
+		IF	EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST2[]) AND 
+			InputRoot.ComIbmAggregateReplyBody.REQUEST2.XMLNSC.*[<].Status.*:StatusCode = '0' THEN
+
+			IF EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST2.XMLNSC.*[<].AcctList.AcctInfo[]) THEN
+				SET outRef.AcctList.AcctInfo[] = InputRoot.ComIbmAggregateReplyBody.REQUEST2.XMLNSC.*[<].AcctList.AcctInfo[];
+			END IF;
+		END IF;
+
+		RETURN TRUE;
+	END;
+END MODULE;

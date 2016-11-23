@@ -1,0 +1,285 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.epk.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Установка ответных заголовков а также получение ответного сообщения из агрегации
+CREATE COMPUTE MODULE ResponseForESB_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- зафиксируем статус таймаута
+		IF NOT EXISTS(InputRoot.ComIbmAggregateReplyBody.REQUEST[]) THEN
+		   SET Environment.Timeout = TRUE;
+		END IF;
+		
+		DECLARE OrigMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+		SET Environment.UserProperties = OrigMsg.UserProperties;
+
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+		
+		SET OutputRoot.XMLNSC = InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC;
+		IF NOT EXISTS(OutputRoot.XMLNSC[]) THEN
+		   CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC');
+		END IF;
+
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(OrigMsg, OutputLocalEnvironment);
+
+		IF Environment.UserProperties.Operation = '' THEN
+		   SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = 'unchanged';
+		END IF;
+		
+		-- обработаем статус таймаута
+		IF Environment.Timeout = TRUE THEN 
+          SET OutputRoot.XMLNSC = OrigMsg.Body;			
+	      PROPAGATE TO TERMINAL 'out1' DELETE NONE;
+		  RETURN FALSE;
+		END IF;
+	END;
+END MODULE;
+
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE ResponseForESB_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode);
+		DECLARE labelName CHARACTER;
+		
+		IF Environment.Timeout = TRUE THEN
+			SET labelName = 'Timeout';
+		ELSE
+			CASE Operation
+			WHEN 'PERSONGETDATA' THEN
+				SET labelName = 'KZGetMDMPersonInfoByAttrRs';
+			WHEN 'PERSONSETDATA' THEN
+				SET labelName = 'KZSendMDMPrivateClientDataRs';
+			WHEN 'ORGGETDATA' THEN
+				SET labelName = 'KZGetMDMLegalInfoByAttrRs';
+			WHEN 'ORGSETDATA' THEN
+				SET labelName = 'KZSendMDMLegalClientDataRs';
+			WHEN 'PERSONCHECKIIN' THEN
+				SET labelName = 'KZCheckMDMPersonInfoRs';
+			WHEN 'CLASSIFIERGETALLDATA' THEN
+				SET labelName = 'KZGetAllClassifiersRs';
+			WHEN 'CLASSIFIERGETDATA' THEN
+				SET labelName = 'KZGetClassifierRs';
+			WHEN 'CLASSIFIERUPDATEDATA' THEN
+				SET labelName = 'KZUpdClassifierRs';
+			WHEN 'LSBOO' THEN
+				SET labelName = 'KZLSBOOResponse';
+			WHEN 'OrgSetData' THEN
+				SET labelName = 'OrgSetDataRich';
+			WHEN 'OrgSetDataRich' THEN
+				SET labelName = 'OrgSetDataRich';
+			ELSE
+				-- Неизвестный тип сообщения 
+				THROW USER EXCEPTION VALUES ('Unknown format XML in ResponseForESB(EPK)', Operation);
+			END CASE;
+		END IF;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Ответ из ЕПК на "Запрос на поиск клиента - ФЛ": PragmaEnvelope:PersonGetData -> KZGetMDMPersonInfoByAttrRs
+ **/
+CREATE COMPUTE MODULE ResponseForESB_ConvertEPK2MDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		CALL FillStandartMDORs(InputRoot, OutputRoot, 'KZGetMDMPersonInfoByAttrRs');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		FOR inClient AS inRef.ResponseData.Clients.Client[] DO
+			DECLARE outPersonInfo REFERENCE TO outRef;
+			CREATE LASTCHILD OF outRef AS outPersonInfo NAME 'PersonInfo';
+
+			CALL CopyClient2PersonInfo(inClient, outPersonInfo);
+		END FOR;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Ответ из ЕПК на "Запрос на сохранение клиента - ФЛ": PragmaEnvelope:PersonSetData -> KZSendMDMPrivateClientDataRs
+ **/
+CREATE COMPUTE MODULE ResponseForESB_ConvertEPK2MDO2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		CALL FillStandartMDORs(InputRoot, OutputRoot, 'KZSendMDMPrivateClientDataRs');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		DECLARE outPersonInfo REFERENCE TO outRef;
+		
+		FOR client AS inRef.ResponseData.Clients.Client[] DO
+			CREATE LASTCHILD OF outRef AS outPersonInfo NAME 'PersonInfo';
+			SET outPersonInfo.PersonIdExt[1].Key	= Environment.UserProperties.SPName;
+			SET outPersonInfo.PersonIdExt[1].Value	= client.Sources.Source.Surrogate;
+			SET outPersonInfo.PersonIdExt[2].Key	= 'CIF';
+			SET outPersonInfo.PersonIdExt[2].Value	= client.CifId;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* ORGGETDATA */
+CREATE COMPUTE MODULE ResponseForESB_ConvertEPK2MDO_GetLegalInfo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartMDORs(InputRoot, OutputRoot, 'KZGetMDMLegalInfoByAttrRs');
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:orgs = orgs;		
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		FOR inRef AS InputRoot.XMLNSC.*[<].ResponseData.Clients.Client[] DO
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<] AS outRef NAME 'OrgInfo';
+			CALL CopyClient2OrgInfo(inRef,outRef);
+		END FOR;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* ORGSETDATA */
+CREATE COMPUTE MODULE ResponseForESB_ConvertEPK2MDO_SendLegalClient
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartMDORs(InputRoot, OutputRoot, 'KZSendMDMLegalClientDataRs');	
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:orgs = orgs;		
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;	
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		FOR inRef AS InputRoot.XMLNSC.*[<].ResponseData.Clients.Client[] DO
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<] AS outRef NAME 'OrgInfo';
+			CALL CopyClient2OrgInfo(inRef,outRef);
+		END FOR;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Формирование ответного сообщения в случае таймаута ответа ЕПК
+ **/
+CREATE COMPUTE MODULE ResponseForESB_PrepareTimeoutResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC');
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME REPLACE(Environment.UserProperties.Operation, 'Rq', 'Rs');
+		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+		SET outRef.(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+		
+		SET outRef.RqUID = Environment.UserProperties.RqUID;
+		SET outRef.RqTm = Environment.UserProperties.RqTm;
+		SET outRef.Status.ifxca:StatusCode	= '-400';
+		SET outRef.Status.ifxca:Severity	= 'Error';
+		SET outRef.Status.ifxca:StatusDesc	= 'Ошибка обработки, операция не может быть выполнена';
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос "Проверка идентификатора клиента в ЕПК": KZCheckMDMPersonInfoRq -> PragmaEnvelope:PERSONCHECKIIN
+ **/
+CREATE COMPUTE MODULE ResponseForESB_ConvertEPK2MDO_CheckPersonInfo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		CALL FillStandartMDORs(InputRoot, OutputRoot, 'KZCheckMDMPersonInfoRs');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		FOR inClient AS inRef.ResponseData.Clients.Client[] DO
+			DECLARE outPersonInfo REFERENCE TO outRef;
+			CREATE LASTCHILD OF outRef AS outPersonInfo NAME 'PersonInfo';
+			CALL CopyClient2PersonInfo(inClient, outPersonInfo);
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос информации о наличии НСИ: KZGetClassifierRq -> PragmaEnvelope:CLASSIFIERGETDATA
+ * Запрос информации обо всех НСИ: KZGetAllClassifiersRq -> PragmaEnvelope:CLASSIFIERGETALLDATA
+ * Запрос на обновление НСИ: KZUpdClassifierRq -> PragmaEnvelope:CLASSIFIERUPDATEDATA
+ **/
+CREATE COMPUTE MODULE ResponseForESB_ConvertEPK2MDO_GetClassifier
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE serviceCode CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode);
+		DECLARE msgType CHARACTER NULL;
+		IF serviceCode = 'CLASSIFIERGETALLDATA' THEN 
+			SET serviceCode 	= 'KZGetAllClassifiersRs';
+		ELSEIF serviceCode = 'CLASSIFIERGETDATA' THEN 
+			SET serviceCode 	= 'KZGetClassifierRs';
+		ELSEIF serviceCode = 'CLASSIFIERUPDATEDATA' THEN 
+			SET serviceCode 	= 'KZUpdClassifierRs';
+		END IF;
+					
+		CALL FillStandartMDORs(InputRoot, OutputRoot, serviceCode);
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<].ResponseData.Classifiers;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		CALL CopyClassifiersToMDO(inRef, outRef);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_SBOOResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+			
+		CALL FillStandartMDORs(InputRoot, OutputRoot, 'KZLSBOOResponse');
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<].ResponseData.GSLResponse;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef.GSLResponse = inRef; 			
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE ResponseForESB_ConvertEPK2MDO_OrgSetDataRich
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		CALL FillStandartMDORs(InputRoot, OutputRoot, 'KZOrgSetDataRichRs');	
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:orgs = orgs;		
+		SET OutputRoot.XMLNSC.*[<].(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;	
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		FOR inRef AS InputRoot.XMLNSC.*[<].ResponseData.Clients.Client[] DO
+			CREATE LASTCHILD OF OutputRoot.XMLNSC.*[<] AS outRef NAME 'OrgInfo';
+			CALL CopyClient2OrgInfo(inRef,outRef);
+		END FOR;
+		RETURN TRUE;
+	END;
+END MODULE;

@@ -1,0 +1,1195 @@
+BROKER SCHEMA ru.croc.sbrf.common.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+DECLARE RUSSIAN_LANG CONSTANT INTEGER 2200;
+DECLARE ENGLISH_LANG CONSTANT INTEGER 100;
+
+-- Список очередей куда необходимо отправить нотификации об обновлении  
+DECLARE DBType EXTERNAL CHARACTER '';
+DECLARE DB_TYPE_ORACLE CONSTANT CHARACTER 'Oracle';
+
+CREATE COMPUTE MODULE NSICommon_LoadToDB
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- №636735 ЦАС НСИ. Регулярная загрузка справочников НСИ приводит к утечке памяти КСШ (сервер aragva).
+		-- группа выполнения не отпускает захваченную память в принципе.
+		-- Все использованные ниже выкрутасы направлены на уменьшение отжираемой ОП. 
+		-- Например:
+		-- 	использование констант
+		--	удаление обработанных узлов
+
+		CALL CopyMessageHeaders();
+		SET OutputRoot.MQRFH2 = NULL;
+		SET OutputRoot.XMLNSC = NULL;
+
+		-- Удалим значения прежней записи
+		SET Environment.UserProperties.TxAudit = NULL;
+
+		DECLARE rows ROW;
+		DECLARE code ROW;
+		DECLARE name ROW;
+		DECLARE isoCode ROW;
+		DECLARE CodeField ROW;
+		DECLARE DocField ROW;
+
+		SET Environment.UserProperties.TxAudit.TableName = Environment.tableName;
+
+		-- Сохраним текущее время с корректной зоной
+		DECLARE currentTS TIMESTAMP CAST(ru.croc.sbrf.bp.common.esql.getLocalTimeStamp() AS TIMESTAMP
+			FORMAT FORMAT_I);
+			
+		SET Environment.Variables.currentTS = currentTS;
+
+		/**
+		 * Обработка справочников, считанных из файла
+		 */
+		IF (Environment.tableName = ConstPB_document) THEN
+			set CodeField = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstCODE);
+
+			set DocField = THE (SELECT cd.value
+				FROM InputRoot.XMLNSC.record.field[] AS cd
+				WHERE cd.name = ConstDOCUMENT);
+
+			SET rows = THE (SELECT Val.name FROM Database.CDIDTP AS Val WHERE Val.ID_TP_CD = CodeField.value);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(DocField.value);
+			SET Environment.UserProperties.TxAudit.Value	= '';
+			SET Environment.UserProperties.TxAudit.Code		= CodeField.value;
+
+			IF (rows.name IS NOT NULL) THEN
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+
+					UPDATE Database.CDIDTP AS VAL SET NAME = TRIM(DocField.value)
+						, LAST_UPDATE_DT = currentTS
+					WHERE VAL.ID_TP_CD = CodeField.value;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					INSERT INTO Database.CDIDTP (LANG_TP_CD, ID_TP_CD, NAME ) VALUES (RUSSIAN_LANG, CodeField.value, TRIM(DocField.value));
+					INSERT INTO Database.CDIDTP (LANG_TP_CD, ID_TP_CD, NAME ) VALUES (ENGLISH_LANG, CodeField.value, TRIM(DocField.value));
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+		ELSEIF (Environment.tableName = ConstCURRENCY) THEN
+			-- выберем еще код валюты
+			set isoCode = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstISO_curr);
+			-- ИД записи
+			SET code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = Constcr_num);
+			-- наименование
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = Constcr_name);
+
+			-- русское наименование иногда бывает пустым, возьмем тогда английское имя
+			-- чтобы исключить дубли по наименованию, присвоим еще исошный код в скобках
+			set name.value = name.value || ' (' || isoCode.value || ')';
+
+			IF name.value IS NULL THEN
+				SET name = THE(SELECT cd.value
+								FROM InputRoot.XMLNSC.record.field[] AS cd
+								WHERE cd.name = ConstCURRENCY);
+			END IF;
+
+			-- у валюты в справочнике уникальным является код ИСО, будем искать по нему, в качестве первичного ключа будем брать вычисляемое значение
+			SET rows = THE (SELECT Curr.name, Curr.CURRENCY_TP_CD FROM Database.CDCURRENCYTP AS Curr WHERE Curr.CURRENCY_CODE = isoCode.value);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= isoCode.value;
+
+			IF (rows.name IS NOT NULL) THEN
+				SET Environment.UserProperties.TxAudit.Code	= rows.CURRENCY_TP_CD;
+
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+
+					UPDATE Database.CDCURRENCYTP AS CURR SET NAME = TRIM(name.value), 
+						LAST_UPDATE_DT = currentTS
+					WHERE CURR.CURRENCY_CODE = isoCode.value;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					DECLARE Id INTEGER COALESCE(InputRoot.XMLNSC.record.Code, generateId());
+					SET Environment.UserProperties.TxAudit.Code = Id;
+
+					-- не нашли, вставим по-английски и по-русски
+					IF DBType = DB_TYPE_ORACLE THEN
+						INSERT INTO Database.CDCURRENCYTP (LANG_TP_CD, CURRENCY_TP_CD, NAME, CURRENCY_CODE ) VALUES (RUSSIAN_LANG, CAST(Id AS FLOAT), TRIM(name.value), isoCode.value);
+						INSERT INTO Database.CDCURRENCYTP (LANG_TP_CD, CURRENCY_TP_CD, NAME, CURRENCY_CODE ) VALUES (ENGLISH_LANG, CAST(Id AS FLOAT), TRIM(name.value), isoCode.value);
+					ELSE
+						INSERT INTO Database.CDCURRENCYTP (LANG_TP_CD, CURRENCY_TP_CD, NAME, CURRENCY_CODE ) VALUES (RUSSIAN_LANG, Id, TRIM(name.value), isoCode.value);
+						INSERT INTO Database.CDCURRENCYTP (LANG_TP_CD, CURRENCY_TP_CD, NAME, CURRENCY_CODE ) VALUES (ENGLISH_LANG, Id, TRIM(name.value), isoCode.value);
+					END IF;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+		ELSEIF (Environment.tableName = ConstOKSM_NEW) THEN
+			--страны мира
+			-- выберем еще код страны
+			set isoCode = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstISO3);
+			-- ИД записи
+			SET code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstID_OKSM);
+			-- ИД страны
+			SET CodeField = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstOK025);
+			--OKSM_NEW
+			-- наименование
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstSHORTNAME);
+
+			--Сначала пытаемся найти запись по коду страны
+			SET rows = THE (SELECT Country.name FROM Database.CDCOUNTRYTP AS Country WHERE Country.DESCRIPTION = CodeField.value);
+			--Флаг, по которому определяется запись справочника 
+			DECLARE IsIdKey BOOLEAN FALSE;
+			IF rows.name IS NULL THEN
+				--Запись не найдена, ищем по ИД записи
+				SET rows = THE (SELECT Country.name FROM Database.CDCOUNTRYTP AS Country WHERE Country.COUNTRY_TP_CD = code.value);
+				SET IsIdKey = TRUE;
+			END IF;
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= isoCode.value;
+
+			IF (rows.name IS NOT NULL) THEN
+				SET Environment.UserProperties.TxAudit.Code	= code.value;
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+
+					IF IsIdKey = TRUE THEN
+						UPDATE Database.CDCOUNTRYTP AS COUNTRY
+							SET NAME = TRIM(name.value),
+							ISO_CODE = isoCode.value,
+							LAST_UPDATE_DT = currentTS,
+							DESCRIPTION = CodeField.value
+							WHERE COUNTRY.COUNTRY_TP_CD = code.value;
+					ELSE
+						UPDATE Database.CDCOUNTRYTP AS COUNTRY
+							SET NAME = TRIM(name.value),
+							ISO_CODE = isoCode.value,
+							LAST_UPDATE_DT = currentTS
+							WHERE COUNTRY.DESCRIPTION = CodeField.value;
+					END IF;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					SET Environment.UserProperties.TxAudit.Code = code.value;
+
+					-- не нашли, вставим по-английски и по-русски
+					INSERT INTO Database.CDCOUNTRYTP (LANG_TP_CD, COUNTRY_TP_CD, NAME, ISO_CODE, DESCRIPTION) VALUES (RUSSIAN_LANG, code.value, TRIM(name.value), isoCode.value, CodeField.value);
+					INSERT INTO Database.CDCOUNTRYTP (LANG_TP_CD, COUNTRY_TP_CD, NAME, ISO_CODE, DESCRIPTION) VALUES (ENGLISH_LANG, code.value, TRIM(name.value), isoCode.value, CodeField.value);
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+		ELSEIF (Environment.tableName = Constqvb) THEN
+			-- вклады
+			-- код вида вклада
+			DECLARE QDTN1 ROW;
+			-- код подвида вклада
+			DECLARE QDTSUB ROW;
+			-- код признака рубли/валюта
+			DECLARE QVAL ROW;
+			-- составной ИД записи
+			DECLARE prodID CHARACTER;			
+
+			SET QDTN1 = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstQDTN1);
+
+			SET QDTSUB = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstQDTSUB);			
+
+			SET QVAL = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstQVAL);			
+			-- сформируем ИД записи
+			set prodID = 'qvb.' || QDTN1.value || '.' || QDTSUB.value;
+			-- наименование
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstQDN);
+
+			set name.value = name.value || ' (' || prodID || ')';
+
+			SET rows = THE (SELECT prod.name, prod.PROD_TP_CD FROM Database.CDPRODTP AS prod WHERE prod.DESCRIPTION = prodID);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= prodID;
+
+			IF (rows.name IS NOT NULL) THEN
+				SET Environment.UserProperties.TxAudit.Code	= rows.PROD_TP_CD;
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+					UPDATE Database.CDPRODTP AS PROD SET NAME = TRIM(name.value), LAST_UPDATE_DT = currentTS WHERE PROD.DESCRIPTION = prodID;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					-- не нашли, вставим по-английски и по-русски
+	
+					--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					DECLARE Id INTEGER COALESCE(InputRoot.XMLNSC.record.Code, generateId());
+					SET Environment.UserProperties.TxAudit.Code = Id;
+
+					IF DBType = DB_TYPE_ORACLE THEN
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION) VALUES (RUSSIAN_LANG, CAST(Id AS FLOAT), TRIM(name.value), prodID);
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION) VALUES (ENGLISH_LANG, CAST(Id AS FLOAT), TRIM(name.value), prodID);
+					ELSE
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION) VALUES (RUSSIAN_LANG, Id, TRIM(name.value), prodID);
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION) VALUES (ENGLISH_LANG, Id, TRIM(name.value), prodID);
+					END IF;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+		ELSEIF (Environment.tableName = ConstCRED_TYPE) THEN
+			-- кредиты	
+
+			-- ИД записи
+			SET code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstCODE_CRED);
+			-- наименование
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstNAME_CRED);
+
+			SET rows = THE (SELECT prod.name, prod.PROD_TP_CD FROM Database.CDPRODTP AS prod WHERE prod.DESCRIPTION = ConstCRED_TYPEWithDot || code.value);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= ConstCRED_TYPEWithDot || code.value;
+
+			IF (rows.name IS NOT NULL) THEN
+				SET Environment.UserProperties.TxAudit.Code	= rows.PROD_TP_CD;
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+					UPDATE Database.CDPRODTP AS PROD SET NAME = TRIM(name.value), LAST_UPDATE_DT = currentTS WHERE PROD.DESCRIPTION = ConstCRED_TYPEWithDot || code.value;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					-- не нашли, вставим по-английски и по-русски
+	
+					--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					DECLARE Id INTEGER COALESCE(InputRoot.XMLNSC.record.Code, generateId());
+					SET Environment.UserProperties.TxAudit.Code = Id;
+
+					IF DBType = DB_TYPE_ORACLE THEN
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION) VALUES (RUSSIAN_LANG, CAST(Id AS FLOAT), TRIM(name.value), ConstCRED_TYPEWithDot || code.value);
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION) VALUES (ENGLISH_LANG, CAST(Id AS FLOAT), TRIM(name.value), ConstCRED_TYPEWithDot || code.value);
+					ELSE
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION) VALUES (RUSSIAN_LANG, Id, TRIM(name.value), ConstCRED_TYPEWithDot || code.value);
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION) VALUES (ENGLISH_LANG, Id, TRIM(name.value), ConstCRED_TYPEWithDot || code.value);
+					END IF;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+		ELSEIF (Environment.tableName = ConstSUBBRANCH) THEN
+			-- подразделения Сбера	
+
+			-- ИД записи
+			SET code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstCODE);
+			-- наименование
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstSUBNAME);
+
+			SET rows = THE (SELECT sub.name FROM Database.CDSBSUBDIVISIONTP AS sub WHERE sub.SB_SUBDIVISION_TP_CD = code.value);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= '';
+			SET Environment.UserProperties.TxAudit.Code		= code.value;
+
+			IF (rows.name IS NOT NULL) THEN
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и проставить дату последнего обновления
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+					UPDATE Database.CDSBSUBDIVISIONTP AS sub SET NAME = TRIM(name.value)
+						, LAST_UPDATE_DT = currentTS
+					WHERE sub.SB_SUBDIVISION_TP_CD = code.value;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					-- не нашли, вставим по-английски и по-русски
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+	
+					INSERT INTO Database.CDSBSUBDIVISIONTP (LANG_TP_CD, SB_SUBDIVISION_TP_CD, NAME) VALUES (RUSSIAN_LANG, code.value, TRIM(name.value));
+					INSERT INTO Database.CDSBSUBDIVISIONTP (LANG_TP_CD, SB_SUBDIVISION_TP_CD, NAME) VALUES (ENGLISH_LANG, code.value, TRIM(name.value));
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+		ELSEIF (Environment.tableName = ConstCARD_MDM) THEN
+			DECLARE prodID ROW
+				THE (
+						SELECT cd.value
+						FROM InputRoot.XMLNSC.record.field[] AS cd
+						WHERE cd.name = ConstCODE
+					);
+
+			SET name = 
+				THE (
+						SELECT cd.value
+						FROM InputRoot.XMLNSC.record.field[] AS cd
+						WHERE cd.name = ConstNAME
+					);
+
+			set name.value = name.value || ' (' || prodID.value || ')';
+
+			SET rows = THE (SELECT prod.name, prod.PROD_TP_CD FROM Database.CDPRODTP AS prod WHERE prod.DESCRIPTION = prodID.value);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= prodID.value;
+
+			IF (rows.name IS NOT NULL) THEN
+				SET Environment.UserProperties.TxAudit.Code	= rows.PROD_TP_CD;
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+					-- в модели мдм глюк с триггерами на обновление, поэтому обновлять не будем
+					UPDATE Database.CDPRODTP AS PROD SET NAME = TRIM(name.value), LAST_UPDATE_DT = currentTS WHERE PROD.DESCRIPTION = prodID.value;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					-- не нашли, вставим по-английски и по-русски
+					--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					DECLARE Id INTEGER COALESCE(InputRoot.XMLNSC.record.Code, generateId());
+					SET Environment.UserProperties.TxAudit.Code = Id;
+
+					IF DBType = DB_TYPE_ORACLE THEN
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION) VALUES (RUSSIAN_LANG, CAST(Id AS FLOAT), TRIM(name.value), prodID.value);
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION) VALUES (ENGLISH_LANG, CAST(Id AS FLOAT), TRIM(name.value), prodID.value);
+					ELSE
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION) VALUES (RUSSIAN_LANG, Id, TRIM(name.value), prodID.value);
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION) VALUES (ENGLISH_LANG, Id, TRIM(name.value), prodID.value);
+					END IF;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+		ELSEIF (Environment.tableName = ConstKOPF) THEN
+			-- выберем код организационно-правовой формы
+			set code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstKOD);
+			-- наименование
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstNAME1);
+			
+			-- уникальным является код опф
+			SET rows = THE (SELECT opf.name FROM Database.CDORGTP AS opf WHERE opf.ORG_TP_CD = code.value);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= code.value;
+			SET Environment.UserProperties.TxAudit.Code		= code.value;
+
+			IF (rows.name IS NOT NULL) THEN
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+
+					UPDATE Database.CDORGTP AS opf SET NAME = TRIM(name.value), 
+						LAST_UPDATE_DT = currentTS
+					WHERE opf.ORG_TP_CD = code.value;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					-- не нашли, вставим по-английски и по-русски
+					INSERT INTO Database.CDORGTP (LANG_TP_CD, ORG_TP_CD, NAME) VALUES (RUSSIAN_LANG, code.value, TRIM(name.value));
+					INSERT INTO Database.CDORGTP (LANG_TP_CD, ORG_TP_CD, NAME) VALUES (ENGLISH_LANG, code.value, TRIM(name.value));
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+		ELSEIF (Environment.tableName = ConstKFS) THEN
+			-- выберем Код формы собственности
+			set code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstKOD);
+			-- наименование
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstNAME1);
+
+			-- уникальным является код опф
+			SET rows = THE (SELECT kfs.name FROM Database.CDSBOKFS AS kfs WHERE kfs.SB_OKFS_CD = code.value);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= code.value;
+			SET Environment.UserProperties.TxAudit.Code		= code.value;
+
+			IF (rows.name IS NOT NULL) THEN
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+
+					UPDATE Database.CDSBOKFS AS kfs SET NAME = TRIM(name.value), 
+						LAST_UPDATE_DT = currentTS
+					WHERE kfs.SB_OKFS_CD = code.value;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					-- не нашли, вставим по-английски и по-русски
+					INSERT INTO Database.CDSBOKFS (LANG_TP_CD, SB_OKFS_CD, NAME) VALUES (RUSSIAN_LANG, code.value, TRIM(name.value));
+					INSERT INTO Database.CDSBOKFS (LANG_TP_CD, SB_OKFS_CD, NAME) VALUES (ENGLISH_LANG, code.value, TRIM(name.value));
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+
+		/**
+		 * Обработка справочников МДМ, полученных из интерфейса
+		 */
+		ELSEIF (Environment.tableName = ConstCDHIGHESTEDUTP) THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('HIGHEST_EDU_TP_CD');
+		ELSEIF (Environment.tableName = ConstCDMARITALSTTP) THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('MARITAL_ST_TP_CD');
+		ELSEIF (Environment.tableName = ConstCDRELTP) THEN
+			-- выберем код
+			set code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstREL_TP_CD);
+			-- наименование1
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstFROM_TO_NAME);
+			-- наименование2
+			SET CodeField = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstTO_FROM_NAME);
+
+			SET rows = THE (SELECT tbl.FROM_TO_NAME, tbl.NAME FROM Database.CDRELTP AS tbl
+							WHERE tbl.REL_TP_CD = code.value AND tbl.LANG_TP_CD = Environment.UserProperties.langTpCd);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= code.value;
+			SET Environment.UserProperties.TxAudit.Code		= code.value;
+
+			IF (rows.FROM_TO_NAME IS NOT NULL OR rows.NAME IS NOT NULL) THEN
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+	
+					UPDATE Database.CDRELTP AS tbl SET FROM_TO_NAME = TRIM(name.value), 
+						NAME = TRIM(CodeField.value),
+						LAST_UPDATE_DT = currentTS
+						WHERE tbl.REL_TP_CD = code.value AND tbl.LANG_TP_CD = Environment.UserProperties.langTpCd;
+	
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					INSERT INTO Database.CDRELTP (LANG_TP_CD, REL_TP_CD, FROM_TO_NAME, NAME)
+					VALUES (Environment.UserProperties.langTpCd, code.value, TRIM(name.value), TRIM(CodeField.value));
+	
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+		ELSEIF (Environment.tableName = ConstCDSBSOCIALGROUPTP) THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge(ConstSB_SOCIAL_GROUP_TP_CD);
+		ELSEIF (Environment.tableName = 'CDCOUNTRYTP') THEN			
+			--страны мира
+			-- выберем еще код страны
+			set isoCode = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'ISO_CODE');
+			-- ИД записи
+			SET code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'COUNTRY_TP_CD');
+			-- ИД страны
+			SET CodeField = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'DESCRIPTION');
+			--OKSM_NEW
+			-- наименование
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstNAME);
+
+			--Сначала пытаемся найти запись по коду страны
+			IF CodeField.value IS NOT NULL AND LENGTH(CodeField.value) > 0 THEN
+				SET rows = THE (SELECT Country.name FROM Database.CDCOUNTRYTP AS Country
+								WHERE Country.DESCRIPTION = CodeField.value AND Country.LANG_TP_CD = Environment.UserProperties.langTpCd);
+			END IF;
+			--Флаг, по которому определяется запись справочника 
+			DECLARE IsIdKey BOOLEAN FALSE;
+			IF rows.name IS NULL THEN
+				--Запись не найдена, ищем по ИД записи
+				SET rows = THE (SELECT Country.name FROM Database.CDCOUNTRYTP AS Country
+								WHERE Country.COUNTRY_TP_CD = code.value AND Country.LANG_TP_CD = Environment.UserProperties.langTpCd);
+				SET IsIdKey = TRUE;
+			END IF;
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= isoCode.value;
+
+			IF (rows.name IS NOT NULL) THEN
+				SET Environment.UserProperties.TxAudit.Code	= code.value;
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+
+					IF IsIdKey = TRUE THEN
+						UPDATE Database.CDCOUNTRYTP AS COUNTRY
+							SET NAME = TRIM(name.value),
+							ISO_CODE = isoCode.value,
+							LAST_UPDATE_DT = currentTS,
+							DESCRIPTION = CodeField.value
+							WHERE COUNTRY.COUNTRY_TP_CD = code.value
+							AND COUNTRY.LANG_TP_CD = Environment.UserProperties.langTpCd;
+					ELSE
+						UPDATE Database.CDCOUNTRYTP AS COUNTRY
+							SET NAME = TRIM(name.value),
+							ISO_CODE = isoCode.value,
+							LAST_UPDATE_DT = currentTS
+							WHERE COUNTRY.DESCRIPTION = CodeField.value
+							AND COUNTRY.LANG_TP_CD = Environment.UserProperties.langTpCd;
+					END IF;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					SET Environment.UserProperties.TxAudit.Code = code.value;
+
+					-- не нашли, вставим по-английски и по-русски
+					INSERT INTO Database.CDCOUNTRYTP (LANG_TP_CD, COUNTRY_TP_CD, NAME, ISO_CODE, DESCRIPTION)
+					VALUES (Environment.UserProperties.langTpCd, code.value, TRIM(name.value), isoCode.value, CodeField.value);
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+
+		ELSEIF (Environment.tableName = 'CDSBBANKRELTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('SB_BANK_REL_TP_CD');
+		ELSEIF (Environment.tableName = 'CDCLIENTSTTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('CLIENT_ST_TP_CD');
+		ELSEIF (Environment.tableName = 'CDIDTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('ID_TP_CD');
+		ELSEIF (Environment.tableName = 'CDIDSTATUSTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('ID_STATUS_TP_CD');
+		ELSEIF (Environment.tableName = 'CDADDRUSAGETP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('ADDR_USAGE_TP_CD');
+		ELSEIF (Environment.tableName = 'CDCONTMETHCAT') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('CONT_METH_CAT_CD');
+		ELSEIF (Environment.tableName = 'CDCONTMETHTP') THEN
+			-- выберем код
+			set code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'CONT_METH_TP_CD');
+			-- наименование1
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstNAME);
+			-- наименование2
+			SET CodeField = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'CONT_METH_CAT_CD');
+
+			SET rows = THE (SELECT tbl.NAME, tbl.CONT_METH_CAT_CD FROM Database.CDCONTMETHTP AS tbl
+							WHERE tbl.CONT_METH_TP_CD = code.value AND tbl.LANG_TP_CD = Environment.UserProperties.langTpCd);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= code.value;
+			SET Environment.UserProperties.TxAudit.Code		= CodeField.value;
+
+			IF (rows.NAME IS NOT NULL OR rows.NAME IS NOT NULL) THEN
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+	
+					UPDATE Database.CDCONTMETHTP AS tbl
+					SET CONT_METH_CAT_CD = TRIM(CodeField.value), 
+						NAME = TRIM(name.value),
+						LAST_UPDATE_DT = currentTS
+						WHERE tbl.CONT_METH_TP_CD = code.value AND tbl.LANG_TP_CD = Environment.UserProperties.langTpCd;
+	
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					INSERT INTO Database.CDCONTMETHTP (LANG_TP_CD, CONT_METH_TP_CD, NAME, CONT_METH_CAT_CD)
+					VALUES (Environment.UserProperties.langTpCd, code.value, TRIM(name.value), TRIM(CodeField.value));
+	
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+		ELSEIF (Environment.tableName = 'CDCLIENTIMPTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('CLIENT_IMP_TP_CD');
+		ELSEIF (Environment.tableName = 'CDSBOKFS') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('SB_OKFS_CD');
+		ELSEIF (Environment.tableName = 'CDSBORGTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('SB_ORG_TP_CD');
+		ELSEIF (Environment.tableName = 'CDORGCATTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('SB_ORG_CAT_CD');
+		ELSEIF (Environment.tableName = 'CDSBSTOPLISTCATTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('SB_STOP_LIST_CAT_CD');
+		ELSEIF (Environment.tableName = 'CDSBINDUSTRYTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('SB_INDUSTRY_TP_CD');
+		ELSEIF (Environment.tableName = 'CDORGTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('ORG_TP_CD');
+		ELSEIF (Environment.tableName = 'CDSBORGCODETP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('TP_CD');
+		ELSEIF (Environment.tableName = 'CDSBORGSTTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('SB_ORG_ST_CD');
+		ELSEIF (Environment.tableName = 'CDORGNAMETP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('ORG_NAME_TP_CD');
+		ELSEIF (Environment.tableName = 'CDSBORGBUSSEGMENTTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('SB_ORG_SEGMENT_CD');
+		ELSEIF (Environment.tableName = 'CDADMINSYSTP') THEN
+			-- ИД записи
+			SET code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'ADMIN_SYS_TP_CD');
+			-- наименование
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstNAME);
+
+			DECLARE prodID ROW THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'DESCRIPTION');
+			SET CodeField = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'NATIVE_KEY_TOT');
+
+			SET rows = THE (SELECT prod.name, prod.ADMIN_SYS_TP_CD FROM Database.CDADMINSYSTP AS prod
+							WHERE prod.ADMIN_SYS_TP_CD = code.value AND prod.LANG_TP_CD = Environment.UserProperties.langTpCd);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= prodID.value;
+
+			IF (rows.name IS NOT NULL) THEN
+				SET Environment.UserProperties.TxAudit.Code	= rows.ADMIN_SYS_TP_CD;
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+					UPDATE Database.CDADMINSYSTP AS PROD
+					SET	NAME = TRIM(name.value),
+						DESCRIPTION = TRIM(prodID.value),
+						NATIVE_KEY_TOT = TRIM(CodeField),
+						LAST_UPDATE_DT = currentTS
+					WHERE PROD.ADMIN_SYS_TP_CD = code.value
+					AND PROD.LANG_TP_CD = Environment.UserProperties.langTpCd;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					-- не нашли, вставим по-английски и по-русски
+	
+					--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					SET Environment.UserProperties.TxAudit.Code = CAST(code.value AS INTEGER);
+
+					INSERT INTO Database.CDADMINSYSTP (LANG_TP_CD, ADMIN_SYS_TP_CD, NAME, DESCRIPTION, NATIVE_KEY_TOT)
+					VALUES (Environment.UserProperties.langTpCd, code.value, TRIM(name.value), TRIM(prodID.value), TRIM(CodeField.value));
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+		ELSEIF (Environment.tableName = 'CDCURRENCYTP') THEN
+			-- выберем еще код валюты
+			set isoCode = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'CURRENCY_CODE');
+			-- ИД записи
+			SET code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'CURRENCY_TP_CD');
+			-- наименование
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstNAME);
+
+			-- у валюты в справочнике уникальным является код ИСО, будем искать по нему, в качестве первичного ключа будем брать вычисляемое значение
+			SET rows = THE (SELECT Curr.name, Curr.CURRENCY_TP_CD FROM Database.CDCURRENCYTP AS Curr
+							WHERE Curr.CURRENCY_CODE = isoCode.value AND Curr.LANG_TP_CD = Environment.UserProperties.langTpCd);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= isoCode.value;
+
+			IF (rows.name IS NOT NULL) THEN
+				SET Environment.UserProperties.TxAudit.Code	= rows.CURRENCY_TP_CD;
+
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и код
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+
+					UPDATE Database.CDCURRENCYTP AS CURR SET NAME = TRIM(name.value), 
+						LAST_UPDATE_DT = currentTS
+					WHERE CURR.CURRENCY_CODE = isoCode.value
+					AND CURR.LANG_TP_CD = Environment.UserProperties.langTpCd;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+					SET Environment.UserProperties.TxAudit.Code = CAST(code.value AS INTEGER);
+
+					-- не нашли, вставим по-английски и по-русски
+					INSERT INTO Database.CDCURRENCYTP (LANG_TP_CD, CURRENCY_TP_CD, NAME, CURRENCY_CODE)
+					VALUES (Environment.UserProperties.langTpCd, code.value, TRIM(name.value), isoCode.value);
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+
+		ELSEIF (Environment.tableName = 'CDAGREEMENTTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('AGREEMENT_TP_CD');
+		ELSEIF (Environment.tableName = 'CDCONTRCOMPTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('CONTR_COMP_TP_CD');
+		ELSEIF (Environment.tableName = 'CDPRODTP') THEN
+			--ключ
+			SET code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'PROD_TP_CD');
+
+			-- ИД записи
+			DECLARE prodID ROW THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'DESCRIPTION');
+
+			-- наименование
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstNAME);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= prodID.value;
+
+			IF (prodID.value IS NOT NULL AND LENGTH(prodID.value) > 0) THEN
+				SET rows = THE (SELECT prod.name, prod.PROD_TP_CD FROM Database.CDPRODTP AS prod
+								WHERE prod.DESCRIPTION = prodID.value AND prod.LANG_TP_CD = Environment.UserProperties.langTpCd);
+	
+				IF (rows.name IS NOT NULL) THEN
+					SET Environment.UserProperties.TxAudit.Code	= rows.PROD_TP_CD;
+					IF Environment.UserProperties.LoadMode <> 1 THEN
+						-- надо обновить наименование и код
+						SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+						UPDATE Database.CDPRODTP AS PROD
+						SET	NAME = TRIM(name.value),
+							LAST_UPDATE_DT = currentTS
+						WHERE PROD.DESCRIPTION = prodID.value
+						AND PROD.LANG_TP_CD = Environment.UserProperties.langTpCd;
+	
+						--Зафиксируем статус загрузки значения
+						PROPAGATE TO TERMINAL 1;
+					END IF;
+				ELSE
+					IF Environment.UserProperties.LoadMode <> 2 THEN
+						-- не нашли, вставим по-английски и по-русски
+	
+						--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+						SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+	
+						DECLARE Id INTEGER COALESCE(InputRoot.XMLNSC.record.Code, generateId());
+						SET Environment.UserProperties.TxAudit.Code = CAST(code.value AS INTEGER);
+	
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION)
+						VALUES (Environment.UserProperties.langTpCd, code.value, TRIM(name.value), prodID.value);
+	
+						--Зафиксируем статус загрузки значения
+						PROPAGATE TO TERMINAL 1;
+					END IF;
+				END IF;
+			ELSE
+				SET rows = THE (SELECT prod.name FROM Database.CDPRODTP AS prod
+								WHERE prod.PROD_TP_CD = code.value
+								AND prod.LANG_TP_CD = Environment.UserProperties.langTpCd);
+	
+				IF (rows.name IS NOT NULL) THEN
+					SET Environment.UserProperties.TxAudit.Code	= rows.PROD_TP_CD;
+					IF Environment.UserProperties.LoadMode <> 1 THEN
+						-- надо обновить наименование и код
+						SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+						UPDATE Database.CDPRODTP AS PROD
+						SET	NAME = TRIM(name.value),
+							LAST_UPDATE_DT = currentTS
+						WHERE PROD.LANG_TP_CD = Environment.UserProperties.langTpCd
+						AND PROD.PROD_TP_CD = code.value;
+	
+						--Зафиксируем статус загрузки значения
+						PROPAGATE TO TERMINAL 1;
+					END IF;
+				ELSE
+					IF Environment.UserProperties.LoadMode <> 2 THEN
+						-- не нашли, вставим по-английски и по-русски
+	
+						--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+						SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+	
+						DECLARE Id INTEGER COALESCE(InputRoot.XMLNSC.record.Code, generateId());
+						SET Environment.UserProperties.TxAudit.Code = CAST(code.value AS INTEGER);
+	
+						INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION)
+						VALUES (Environment.UserProperties.langTpCd, code.value, TRIM(name.value), prodID.value);
+	
+						--Зафиксируем статус загрузки значения
+						PROPAGATE TO TERMINAL 1;
+					END IF;
+				END IF;
+			END IF;
+		ELSEIF (Environment.tableName = 'CDSBSUBDIVISIONTP') THEN
+			-- ИД записи
+			SET code = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = 'SB_SUBDIVISION_TP_CD');
+			-- наименование
+			SET name = THE (SELECT cd.value
+			FROM InputRoot.XMLNSC.record.field[] AS cd
+			WHERE cd.name = ConstNAME);
+
+			SET rows = THE (SELECT sub.name FROM Database.CDSBSUBDIVISIONTP AS sub
+							WHERE sub.SB_SUBDIVISION_TP_CD = code.value AND sub.LANG_TP_CD = Environment.UserProperties.langTpCd);
+
+			SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+			SET Environment.UserProperties.TxAudit.Value	= '';
+			SET Environment.UserProperties.TxAudit.Code		= code.value;
+
+			IF (rows.name IS NOT NULL) THEN
+				IF Environment.UserProperties.LoadMode <> 1 THEN
+					-- надо обновить наименование и проставить дату последнего обновления
+					SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+					UPDATE Database.CDSBSUBDIVISIONTP AS sub SET NAME = TRIM(name.value)
+						, LAST_UPDATE_DT = currentTS
+					WHERE sub.SB_SUBDIVISION_TP_CD = code.value
+					AND sub.LANG_TP_CD = Environment.UserProperties.langTpCd;
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			ELSE
+				IF Environment.UserProperties.LoadMode <> 2 THEN
+					-- не нашли, вставим по-английски и по-русски
+					SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+	
+					INSERT INTO Database.CDSBSUBDIVISIONTP (LANG_TP_CD, SB_SUBDIVISION_TP_CD, NAME)
+					VALUES (Environment.UserProperties.langTpCd, code.value, TRIM(name.value));
+
+					--Зафиксируем статус загрузки значения
+					PROPAGATE TO TERMINAL 1;
+				END IF;
+			END IF;
+
+		ELSEIF (Environment.tableName = 'CDAGREEMENTSTTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('AGREEMENT_ST_TP_CD');
+		ELSEIF (Environment.tableName = 'CDCONTRACTROLETP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('CONTR_ROLE_TP_CD');
+		ELSEIF (Environment.tableName = 'CDSBCREDITRISKTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('TP_CD');
+		ELSEIF (Environment.tableName = 'CDSBCREDITCAPACITYTP') THEN
+			SET Environment.Variables.record = InputRoot.XMLNSC.record;
+			CALL CommonTableMerge('TP_CD');
+		END IF;
+
+--		DELETE FIELD rows;
+--		DELETE FIELD code;
+--		DELETE FIELD name;
+--		DELETE FIELD isoCode;
+--		DELETE FIELD CodeField;
+--		DELETE FIELD DocField;
+
+		DELETE FIELD Environment.Variables.record;
+		DELETE FIELD Environment.Variables.currentTS;
+		
+		RETURN FALSE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CommonTableMerge(IN Key CHARACTER) BEGIN
+		-- выберем код
+		DECLARE code ROW THE (SELECT cd.value
+		FROM Environment.Variables.record.field[] AS cd
+		WHERE cd.name = Key);
+		-- наименование
+		DECLARE name ROW THE (SELECT cd.value
+		FROM Environment.Variables.record.field[] AS cd
+		WHERE cd.name = ConstNAME);
+
+		DECLARE qry CHARACTER 'SELECT name FROM ' || Environment.tableName || ' WHERE ' || Key || ' = ? AND LANG_TP_CD = ?';
+		DECLARE rows ROW;
+		SET rows.Data[] = PASSTHRU(qry, code.value, Environment.UserProperties.langTpCd);
+
+		SET Environment.UserProperties.TxAudit.Name		= TRIM(name.value);
+		SET Environment.UserProperties.TxAudit.Value	= code.value;
+		SET Environment.UserProperties.TxAudit.Code		= code.value;
+
+		IF EXISTS(rows.Data[]) THEN
+			IF Environment.UserProperties.LoadMode <> 1 THEN
+				-- надо обновить наименование и код
+				SET Environment.UserProperties.TxAudit.IsInsert = FALSE;
+
+				SET qry = 'UPDATE ' || Environment.tableName || ' SET NAME = ?, LAST_UPDATE_DT = ? where ' || Key || ' = ? AND LANG_TP_CD = ?';
+				PASSTHRU(qry, TRIM(name.value), Environment.Variables.currentTS, code.value, Environment.UserProperties.langTpCd);
+
+				--Зафиксируем статус загрузки значения
+				PROPAGATE TO TERMINAL 1;
+			END IF;
+		ELSE
+			IF Environment.UserProperties.LoadMode <> 2 THEN
+				--Сохраняем значения на случай, если при добавлении возникнет ошибка дубликации данных
+				SET Environment.UserProperties.TxAudit.IsInsert = TRUE;
+
+				-- не нашли, вставим по-английски и по-русски
+				SET qry = 'INSERT INTO ' || Environment.tableName || ' (LANG_TP_CD, ' || Key || ', NAME) VALUES (?, ?, ?)';
+				PASSTHRU(qry, Environment.UserProperties.langTpCd, code.value, TRIM(name.value));
+
+				--Зафиксируем статус загрузки значения
+				PROPAGATE TO TERMINAL 1;
+			END IF;
+		END IF;
+	END;
+END MODULE;
+
+
+CREATE PROCEDURE OutMsgToCleanCache (IN OutputRoot REFERENCE, IN ListName CHARACTER ) BEGIN
+	SET OutputRoot.MQRFH2 = NULL;
+	DECLARE tempName CHARACTER;
+	SET tempName = ListName;
+	SET OutputRoot.MQMD.MsgType	= MQMT_DATAGRAM;
+	SET OutputRoot.MQMD.Format	= MQFMT_STRING;
+	CREATE LASTCHILD OF OutputRoot DOMAIN(XMLNSC_DOMAIN) NAME XMLNSC_DOMAIN;
+	SET OutputRoot.XMLNSC.DWLAdminService.(XMLNSC.NamespaceDecl)xmlns:xsi = 'http://www.w3.org/2001/XMLSchema-instance';
+	SET OutputRoot.XMLNSC.DWLAdminService.RequestControl.requestID = '100012'; 
+	SET OutputRoot.XMLNSC.DWLAdminService.RequestControl.DWLControl.requesterName = 'request1';
+	SET OutputRoot.XMLNSC.DWLAdminService.RequestControl.DWLControl.requesterLanguage = '100';
+	SET OutputRoot.XMLNSC.DWLAdminService.DWLInquiry.InquiryType = 'reloadAllCodeTypes';
+	SET OutputRoot.XMLNSC.DWLAdminService.DWLInquiry.InquiryParam.methodParam.(XMLNSC.Attribute)name ='CodeTableName';
+	SET OutputRoot.XMLNSC.DWLAdminService.DWLInquiry.InquiryParam.methodParam = tempName;
+END;
+
+CREATE COMPUTE MODULE NSICommon_InsertRecord
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+
+		IF	Environment.UserProperties.TxAudit.IsInsert = TRUE THEN
+			--попытка добавления дубликата - генерируем новый ИД записи
+
+			IF (Environment.tableName = ConstCURRENCY) THEN
+				--попытка добавления дубликата - генерируем новый ИД записи
+				SET Environment.UserProperties.TxAudit.Code = CAST(THE (SELECT MAX(T.CURRENCY_TP_CD) FROM Database.CDCURRENCYTP AS T) AS INTEGER) + 1;
+
+				INSERT INTO Database.CDCURRENCYTP (LANG_TP_CD, CURRENCY_TP_CD, NAME, CURRENCY_CODE )
+					VALUES (RUSSIAN_LANG, Environment.UserProperties.TxAudit.Code, TRIM(Environment.UserProperties.TxAudit.Name), Environment.UserProperties.TxAudit.Value);
+				INSERT INTO Database.CDCURRENCYTP (LANG_TP_CD, CURRENCY_TP_CD, NAME, CURRENCY_CODE )
+					VALUES (ENGLISH_LANG, Environment.UserProperties.TxAudit.Code, TRIM(Environment.UserProperties.TxAudit.Name), Environment.UserProperties.TxAudit.Value);
+			ELSEIF (Environment.tableName = ConstOKSM_NEW) THEN
+				SET Environment.UserProperties.TxAudit.Code = CAST(THE (SELECT MAX(T.COUNTRY_TP_CD) FROM Database.CDCOUNTRYTP AS T) AS INTEGER) + 1;
+
+				INSERT INTO Database.CDCOUNTRYTP (LANG_TP_CD, COUNTRY_TP_CD, NAME, ISO_CODE )
+					VALUES (RUSSIAN_LANG, Environment.UserProperties.TxAudit.Code, TRIM(Environment.UserProperties.TxAudit.Name), Environment.UserProperties.TxAudit.Value);
+				INSERT INTO Database.CDCOUNTRYTP (LANG_TP_CD, COUNTRY_TP_CD, NAME, ISO_CODE )
+					VALUES (ENGLISH_LANG, Environment.UserProperties.TxAudit.Code, TRIM(Environment.UserProperties.TxAudit.Name), Environment.UserProperties.TxAudit.Value);
+			ELSEIF (Environment.tableName = Constqvb) THEN
+				SET Environment.UserProperties.TxAudit.Code = CAST(THE (SELECT MAX(T.PROD_TP_CD) FROM Database.CDPRODTP AS T) AS INTEGER) + 1;
+
+				INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION)
+					VALUES (RUSSIAN_LANG, Environment.UserProperties.TxAudit.Code, TRIM(Environment.UserProperties.TxAudit.Name), Environment.UserProperties.TxAudit.Value);
+				INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION)
+					VALUES (ENGLISH_LANG, Environment.UserProperties.TxAudit.Code, TRIM(Environment.UserProperties.TxAudit.Name), Environment.UserProperties.TxAudit.Value);
+			ELSEIF (Environment.tableName = ConstCRED_TYPE) THEN
+				SET Environment.UserProperties.TxAudit.Code = CAST(THE (SELECT MAX(T.PROD_TP_CD) FROM Database.CDPRODTP AS T) AS INTEGER) + 1;
+
+				INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION)
+					VALUES (RUSSIAN_LANG, Environment.UserProperties.TxAudit.Code, TRIM(Environment.UserProperties.TxAudit.Name), ConstCRED_TYPEWithDot || Environment.UserProperties.TxAudit.Value);
+				INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION)
+					VALUES (ENGLISH_LANG, Environment.UserProperties.TxAudit.Code, TRIM(Environment.UserProperties.TxAudit.Name), ConstCRED_TYPEWithDot || Environment.UserProperties.TxAudit.Value);
+			ELSEIF (Environment.tableName = ConstCARD_MDM) THEN
+				SET Environment.UserProperties.TxAudit.Code = CAST(THE (SELECT MAX(T.PROD_TP_CD) FROM Database.CDPRODTP AS T) AS INTEGER) + 1;
+
+				INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION)
+					VALUES (RUSSIAN_LANG, Environment.UserProperties.TxAudit.Code, TRIM(Environment.UserProperties.TxAudit.Name), Environment.UserProperties.TxAudit.Value);
+				INSERT INTO Database.CDPRODTP (LANG_TP_CD, PROD_TP_CD, NAME, DESCRIPTION)
+					VALUES (ENGLISH_LANG, Environment.UserProperties.TxAudit.Code, TRIM(Environment.UserProperties.TxAudit.Name), Environment.UserProperties.TxAudit.Value);
+			END IF;
+		END IF;
+
+		--Зафиксируем статус загрузки значения
+		SET OutputRoot.MQRFH2.usr.TxAudit	= Environment.UserProperties.TxAudit;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE NSICommon_SetErrorText
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+--		CALL CopyMessageHeaders();
+/*
+		SET OutputRoot = InputRoot;
+		SET OutputRoot.XMLNSC = NULL;
+
+		IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE LASTCHILD OF OutputRoot DOMAIN(MQRFH2_DOMAIN) NAME MQRFH2_DOMAIN;
+		END IF;
+
+		SET OutputRoot.MQRFH2.usr.TxAudit.Error	= ru.croc.sbrf.mdm.common.GetLastExceptionText(InputExceptionList, TRUE);
+*/
+		SET Environment.UserProperties.TxAudit.Error = GetLastExceptionText(InputExceptionList, TRUE);
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+CREATE FUNCTION generateId() RETURNS INTEGER
+	LANGUAGE JAVA 
+	EXTERNAL NAME "ru.croc.sbrf.adapters.nsi.IdGenerator.generateId";

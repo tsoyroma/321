@@ -1,0 +1,421 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.aml.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+------------------------------------------------
+-- Обработка полученного ответа
+------------------------------------------------
+CREATE COMPUTE MODULE SOAPResponseForAML_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- извлечем ответ из аггрегированного сообщения
+		SET OutputRoot = InputRoot.ComIbmAggregateReplyBody.REQUEST;
+		-- ссылка на исходный запрос
+		DECLARE OrigMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+
+		-- сохраним пользовательские свойства исходного запроса в LocalEnvironment
+		SET Environment.UserProperties = OrigMsg.UserProperties;
+		-- сохраним идентификатор ответа для SOAP-запроса
+		SET Environment.UserProperties.SOAPReplyIdentifier	= InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.ReplyIdentifier;
+
+		SET OutputRoot.Properties.ReplyIdentifier			= CAST(Environment.UserProperties.SOAPReplyIdentifier AS BLOB);
+		-- Проставляем SOAP-идентификатор ответа
+		SET OutputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier = CAST(Environment.UserProperties.SOAPReplyIdentifier AS BLOB);
+
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = FIELDNAME(OutputRoot.XMLNSC.*:*[<]);
+
+		-- Сохраняем исходный код ошибки и его описание
+		SET Environment.UserProperties.ServerStatusDesc = OutputRoot.XMLNSC.*[<].Status.ServerStatusDesc;
+		SET Environment.UserProperties.StatusDesc = OutputRoot.XMLNSC.*[<].Status.StatusDesc;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Подготовка ответа веб-сервиса
+ **/
+CREATE COMPUTE MODULE SOAPResponseForAML_PrepareResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot.MQMD = NULL;
+		SET OutputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier = CAST(Environment.UserProperties.ReplyIdentifier AS BLOB);
+
+		DECLARE data BLOB ASBITSTREAM(InputRoot.XMLNSC CCSID 1208);
+		DECLARE dataChar CHARACTER CAST(data AS CHARACTER CCSID 1208);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		--отвечаем веб-сервисом
+		SET OutputRoot.XMLNSC.aml_ws_ns:xmlMsgResponse.(XMLNSC.NamespaceDecl)xmlns = aml_ws_ns;
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.aml_ws_ns:xmlMsgResponse NAMESPACE aml_ws_ns NAME 'response' VALUE dataChar;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Ответ на запрос карточки ФЛ
+ **/
+CREATE COMPUTE MODULE SOAPResponseForAML_ConvertMDO2AML_CLIENTCARD
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:*[<];
+		DECLARE idExtRNN CHARACTER;
+		DECLARE idExtIIN CHARACTER;
+		DECLARE idExtMABPK CHARACTER;
+		FOR idExt AS inRef.PersonInfo.PersonIdExt[] DO
+			IF idExt.Key = 'IIN' THEN
+				SET idExtIIN = idExt.Value;
+			ELSEIF idExt.Key = 'MABPK' THEN
+				SET idExtMABPK = idExt.Value;
+			ELSEIF idExt.Key = 'RNN' THEN
+				SET idExtRNN = idExt.Value;
+			END IF;
+		END FOR;
+		
+		DECLARE phoneHome CHARACTER;
+		DECLARE phoneDay CHARACTER;
+		DECLARE phoneMobile CHARACTER;
+		DECLARE phoneWork CHARACTER;
+		DECLARE phoneFax CHARACTER;
+		FOR phone AS inRef.PersonInfo.Phones.Phone[] DO
+			IF phone.PhoneType = 'Home' THEN
+				SET phoneHome = phone.PhoneNum;
+			ELSEIF phone.PhoneType = 'DayPhone' THEN
+				SET phoneDay = phone.PhoneNum;
+			ELSEIF phone.PhoneType = 'Mobile' THEN
+				SET phoneMobile = phone.PhoneNum;
+			ELSEIF phone.PhoneType = 'Work' THEN
+				SET phoneWork = phone.PhoneNum;
+			ELSEIF phone.PhoneType = 'DayFax' THEN
+				SET phoneFax = phone.PhoneNum;
+			END IF;
+		END FOR;
+		
+		DECLARE idCardType INTEGER NULL;
+		DECLARE cardRef REFERENCE TO outRef;
+		FOR idCard AS inRef.PersonInfo.inds:IdentityCards.inds:IdentityCard[] DO
+			DECLARE currId INTEGER recodeIdTypeToAML(FIELDVALUE(idCard.inds:IdType));
+			IF idCardType IS NULL OR idCardType > currId THEN
+				MOVE cardRef TO idCard;
+				SET idCardType   = currId;
+			END IF;
+		END FOR;
+		
+		DECLARE addressPrimary CHARACTER NULL;
+		DECLARE addressHome CHARACTER NULL;
+		DECLARE addrPrimaryRef REFERENCE TO outRef;
+		DECLARE addrHomeRef REFERENCE TO outRef;
+		FOR postAddr AS inRef.PersonInfo.inds:ContactInfo.ifxca:PostAddr[] DO
+			IF postAddr.ifxca:AddrType = 'Primary' THEN
+				MOVE addrPrimaryRef TO postAddr;
+				SET addressPrimary  = COALESCE(postAddr.ifxca:Country,'') || ',' || 
+									  COALESCE(postAddr.ifxca:Area,'') || ',' || 
+									  COALESCE(postAddr.ifxca:StateProv,'') || ',' || 
+									  COALESCE(postAddr.ifxca:City,'') || ',' || 
+									  COALESCE(postAddr.ifxca:Street,'') || ',' || 
+									  COALESCE(postAddr.ifxca:House,'') || ',' || 
+									  COALESCE(postAddr.ifxca:Flat,'') || ',' || 
+									  COALESCE(postAddr.ifxca:PostalCode,'');
+			ELSEIF postAddr.ifxca:AddrType = 'Home' THEN
+				MOVE addrHomeRef TO postAddr;
+				SET addressHome	    = COALESCE(postAddr.ifxca:Country,'') || ',' || 
+									  COALESCE(postAddr.ifxca:Area,'') || ',' || 
+									  COALESCE(postAddr.ifxca:StateProv,'') || ',' || 
+									  COALESCE(postAddr.ifxca:City,'') || ',' || 
+									  COALESCE(postAddr.ifxca:Street,'') || ',' || 
+									  COALESCE(postAddr.ifxca:House,'') || ',' || 
+									  COALESCE(postAddr.ifxca:Flat,'') || ',' || 
+									  COALESCE(postAddr.ifxca:PostalCode,'');
+			END IF;
+		END FOR;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'CLIENTCARDS';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.CLIENTCARDS AS outRef NAME 'CLIENTCARD';
+		SET outRef.RqUID					= inRef.RqUID;
+		SET outRef.RqTm						= inRef.RqTm;
+		--SET outRef.CLIENTID					= idExtIIN;
+		SET outRef.BSCLIENTID				= idExtMABPK;
+		SET outRef.MEMBERURNAME				= COALESCE(inRef.PersonInfo.inds:PersonName.inds:LastName,'') || ' ' || 
+											  COALESCE(inRef.PersonInfo.inds:PersonName.inds:FirstName,'') || ' ' || 
+											  COALESCE(inRef.PersonInfo.inds:PersonName.inds:MiddleName,'');
+		SET outRef.MEMBERLASTNAME			= COALESCE(inRef.PersonInfo.inds:PersonName.inds:LastName,'');
+		SET outRef.MEMBERFIRSTNAME			= COALESCE(inRef.PersonInfo.inds:PersonName.inds:FirstName,'');
+		SET outRef.MEMBERMIDDLENAME			= COALESCE(inRef.PersonInfo.inds:PersonName.inds:MiddleName,'');
+		SET outRef.MEMBERURDIRLASTNAME		= '';
+		SET outRef.MEMBERURDIRFIRSTNAME		= '';
+		SET outRef.MEMBERURDIRMIDDLENAME	= '';
+		SET outRef.MEMBERTYPEFORM			= '';
+		SET outRef.MEMBERTYPE				= '2';
+		SET outRef.BANKCLIENT				= '2';
+		SET outRef.MEMBERRESCOUNTRYCODE		= AbcToNumCountry(FIELDVALUE(inRef.PersonInfo.inds:Citizenship));
+		SET outRef.MEMBERTAXCODE			= COALESCE(idExtRNN,'');
+		SET outRef.MEMBEROKED				= '';
+		SET outRef.MEMBEROKPO				= '';
+		SET outRef.MEMBERMAINCODE			= idExtIIN;
+		SET outRef.MEMBERPHONE				= COALESCE(phoneHome,phoneDay,phoneMobile,phoneWork,phoneFax);
+		SET outRef.MEMBEREMAIL				= COALESCE(inRef.PersonInfo.EMails.EMail.EMailAddr, ' ');		
+		SET outRef.MEMBERFOREIGNEXTRA		= '';
+		SET outRef.MEMBERURFIRSTHEADNAME	= '';
+		SET outRef.MEMBERACBIRTHDATE		= convertToAMLDate(COALESCE(FIELDVALUE(inRef.PersonInfo.inds:BirthDt), ''));
+		SET outRef.MEMBERACBIRTHPLACE		= FIELDVALUE(inRef.PersonInfo.inds:BirthPlace);
+		
+		SET outRef.MEMBERACDOCTYPECODE		= COALESCE(idCardType,'');
+		SET outRef.MEMBERACDOCSERIES		= '';
+		SET outRef.MEMBERACDOCNUMBER		= COALESCE(FIELDVALUE(cardRef.inds:IdNum),'');
+		SET outRef.MEMBERACDOCWHOM			= COALESCE(FIELDVALUE(cardRef.inds:IssuedBy),'');			
+		SET outRef.MEMBERACDOCISSUEDATE		= convertToAMLDate(COALESCE(FIELDVALUE(cardRef.inds:IssueDt),''));
+	
+		SET outRef.MEMBERREGFULLADDRESS		= COALESCE(addressPrimary,'');
+		SET outRef.MEMBERREGCOUNTRYCODE		= AbcToNumCountry(COALESCE(FIELDVALUE(addrPrimaryRef.ifxca:Country),''));
+		SET outRef.MEMBERREGAREA			= COALESCE(FIELDVALUE(addrPrimaryRef.ifxca:Area),'');
+		SET outRef.MEMBERREGREGION			= COALESCE(FIELDVALUE(addrPrimaryRef.ifxca:StateProv),'');
+		SET outRef.MEMBERREGCITY			= COALESCE(FIELDVALUE(addrPrimaryRef.ifxca:City),'');
+		SET outRef.MEMBERREGSTREET			= COALESCE(FIELDVALUE(addrPrimaryRef.ifxca:Street),'');
+		SET outRef.MEMBERREGHOUSE			= COALESCE(FIELDVALUE(addrPrimaryRef.ifxca:House),'');
+		SET outRef.MEMBERREGOFFICE			= COALESCE(FIELDVALUE(addrPrimaryRef.ifxca:Flat),'');
+		SET outRef.MEMBERREGPOSTCODE		= COALESCE(FIELDVALUE(addrPrimaryRef.ifxca:PostalCode),'');
+
+		SET outRef.MEMBERSEATFULLADDRESS	= COALESCE(addressHome,'');
+		SET outRef.MEMBERSEATCOUNTRYCODE	= AbcToNumCountry(COALESCE(FIELDVALUE(addrHomeRef.ifxca:Country),''));
+		SET outRef.MEMBERSEATAREA			= COALESCE(FIELDVALUE(addrHomeRef.ifxca:Area),'');
+		SET outRef.MEMBERSEATREGION			= COALESCE(FIELDVALUE(addrHomeRef.ifxca:StateProv),'');
+		SET outRef.MEMBERSEATCITY			= COALESCE(FIELDVALUE(addrHomeRef.ifxca:City),'');
+		SET outRef.MEMBERSEATSTREET			= COALESCE(FIELDVALUE(addrHomeRef.ifxca:Street),'');
+		SET outRef.MEMBERSEATHOUSE			= COALESCE(FIELDVALUE(addrHomeRef.ifxca:House),'');
+		SET outRef.MEMBERSEATOFFICE			= COALESCE(FIELDVALUE(addrHomeRef.ifxca:Flat),'');
+		SET outRef.MEMBERSEATPOSTCODE		= COALESCE(FIELDVALUE(addrHomeRef.ifxca:PostalCode),'');
+		
+		SET outRef.BRANCH					= FIELDVALUE(inRef.PersonInfo.FirstContactBankInfo.banks:BranchId);
+		SET outRef.ESECTOR					= '';
+		SET outRef.EMPCOUNT					= '';
+		SET outRef.EMPBANK					= '';
+		SET outRef.SUSPICIOUSBOOL			= '';
+		SET outRef.MEMBERCOMMENTS			= '';
+		CREATE LASTCHILD OF outRef NAME 'FOUNDERS';
+		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+/**
+ * Ответ на запрос карточки ЮЛ. CLIENTCARD -> KZGetLegalInfoByAttrRs
+ **/
+CREATE COMPUTE MODULE SOAPResponseForAML_ConvertMDO2AML_CLIENTCARD_ORG
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot,OutputRoot);
+		DECLARE outRef REFERENCE TO OutputRoot;
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:*[<].OrgInfo;
+		DECLARE idExtRNN CHARACTER;
+		DECLARE idExtIIN CHARACTER;
+		DECLARE idExtMABPK CHARACTER;
+		DECLARE idExtOKED CHARACTER;
+		DECLARE idExtOKPO CHARACTER;
+		DECLARE idExtBIN CHARACTER;
+		
+		FOR idExt AS inRef.OrgIdExt[] DO
+			IF idExt.Key = 'IIN' THEN
+				SET idExtIIN = idExt.Value;
+			ELSEIF idExt.Key = 'MABPK' THEN
+				SET idExtMABPK = idExt.Value;
+			ELSEIF idExt.Key = 'RNN' THEN
+				SET idExtRNN = idExt.Value;
+			ELSEIF idExt.Key = 'OKED' THEN
+				SET idExtOKED = idExt.Value;
+			ELSEIF idExt.Key = 'OKPO' THEN
+				SET idExtOKPO = idExt.Value;
+			ELSEIF idExt.Key = 'BIN' THEN
+				SET idExtBIN = idExt.Value;
+			END IF;
+		END FOR;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'CLIENTCARDS';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.CLIENTCARDS AS outRef NAME 'CLIENTCARD';
+		SET outRef.RqUID					= inRef.RqUID;
+		SET outRef.RqTm						= inRef.RqTm;
+		--SET outRef.CLIENTID					= idExtIIN;
+		SET outRef.BSCLIENTID				= idExtMABPK;
+		
+		SET outRef.MEMBERURNAME				= inRef.*:Name;
+		
+		DECLARE chiefFound BOOLEAN FALSE;
+		DECLARE chiefName CHARACTER '';
+		DECLARE clientType CHARACTER THE(SELECT ITEM attr.Value FROM inRef.ServiceAttr[] AS attr WHERE attr.Key='CLIENTTYPE');
+		
+		FOR person AS inRef.OrgAttr.KeyPerson[] DO 
+			IF person.PositionKey='CHIEF' THEN
+				IF clientType='3' THEN
+					SET outRef.MEMBERLASTNAME 			= person.PersonInfo.*:PersonName.*:LastName;
+					SET outRef.MEMBERFIRSTNAME			= person.PersonInfo.*:PersonName.*:FirstName;
+					SET outRef.MEMBERMIDDLENAME			= person.PersonInfo.*:PersonName.*:MiddleName;
+					SEt chiefName = COALESCE(person.PersonInfo.*:PersonName.*:LastName,'') || ' ' || 
+									COALESCE(person.PersonInfo.*:PersonName.*:FirstName,'') || ' ' || 
+									COALESCE(person.PersonInfo.*:PersonName.*:MiddleName,''); 
+									
+					SET outRef.MEMBERURDIRLASTNAME 		= '';
+					SET outRef.MEMBERURDIRFIRSTNAME		= '';
+					SET outRef.MEMBERURDIRMIDDLENAME	= '';
+					SET chiefFound = TRUE;
+				END IF;
+				IF clientType='1' THEN
+					SET outRef.MEMBERLASTNAME 			= '';
+					SET outRef.MEMBERFIRSTNAME			= '';
+					SET outRef.MEMBERMIDDLENAME			= '';		
+					
+					SET outRef.MEMBERURDIRLASTNAME		= person.PersonInfo.*:PersonName.*:LastName;
+					SET outRef.MEMBERURDIRFIRSTNAME		= person.PersonInfo.*:PersonName.*:FirstName;
+					SET outRef.MEMBERURDIRMIDDLENAME	= person.PersonInfo.*:PersonName.*:MiddleName;
+					SEt chiefName = COALESCE(person.PersonInfo.*:PersonName.*:LastName,'') || ' ' || 
+									COALESCE(person.PersonInfo.*:PersonName.*:FirstName,'') || ' ' || 
+									COALESCE(person.PersonInfo.*:PersonName.*:MiddleName,''); 
+					SET chiefFound = TRUE;
+				END IF;
+			END IF;
+		END FOR;
+		
+		
+		IF chiefFound=FALSE THEN
+			SET outRef.MEMBERLASTNAME 			= '';
+			SET outRef.MEMBERFIRSTNAME			= '';
+			SET outRef.MEMBERMIDDLENAME			= '';		
+		
+			SET outRef.MEMBERURDIRLASTNAME 		= '';
+			SET outRef.MEMBERURDIRFIRSTNAME		= '';
+			SET outRef.MEMBERURDIRMIDDLENAME	= '';
+		END IF;
+		
+		SET outRef.MEMBERTYPEFORM 			= inRef.OrgAttr.Form;
+		SET outRef.MEMBERTYPE	 			= clientType;
+		SET outRef.BANKCLIENT 				= recodeBooleanToAML(inRef.IsClient);
+		SET outRef.MEMBERRESCOUNTRYCODE		= inRef.OrgAttr.Country;		
+		SET outRef.MEMBERTAXCODE			= COALESCE(idExtRNN,'');
+		
+		IF clientType='1' THEN
+			SET outRef.MEMBEROKED				= idExtOKED;
+			SET outRef.MEMBEROKPO				= idExtOKPO;
+		ELSE 
+			SET outRef.MEMBEROKED				= '';
+			SET outRef.MEMBEROKPO				= '';		
+		END IF;
+		
+		SET outRef.MEMBERMAINCODE			= idExtIIN; --idExtBIN;
+		SET outRef.MEMBERPHONE				= THE(SELECT ITEM phone.PhoneNum FROM inRef.Phones.Phone[] AS phone WHERE phone.PhoneType='Work');
+		SET outRef.MEMBEREMAIL				= COALESCE(inRef.EMails.EMail.EMailAddr, ' ');
+		SET outRef.MEMBERFOREIGNEXTRA		= '';
+		
+		IF clientType='1' THEN
+			SET outRef.MEMBERURFIRSTHEADNAME	= chiefName;
+		ELSE 
+			SET outRef.MEMBERURFIRSTHEADNAME	= '';
+		END IF;
+		
+		IF clientType='3' THEN
+			IF FIELDVALUE(inRef.*:EstablishDt) <> '' THEN
+				SET outRef.MEMBERACBIRTHDATE	= CAST(CAST(FIELDVALUE(inRef.*:EstablishDt) AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'dd.MM.yyyy');
+			ELSE 
+				SET outRef.MEMBERACBIRTHDATE	= '';
+			END IF;
+			SET outRef.MEMBERACBIRTHPLACE		= inRef.OrgAttr.DocRegPlace;
+		ELSE 
+			SET outRef.MEMBERACBIRTHDATE		= '';
+			SET outRef.MEMBERACBIRTHPLACE		= '';
+		END IF;
+			
+		
+		DECLARE ipFound BOOLEAN FALSE;
+		IF clientType='3' THEN
+			FOR person AS inRef.OrgAttr.KeyPerson[] DO 
+				IF person.PositionKey='IP' THEN
+					SET outRef.MEMBERACDOCTYPECODE 		= COALESCE(recodeIdTypeToAML(person.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdType),'');
+					SET outRef.MEMBERACDOCSERIES		= '';
+					SET outRef.MEMBERACDOCNUMBER		= COALESCE(FIELDVALUE(person.PersonInfo.*:IdentityCards.*:IdentityCard.*:IdNum),'');
+					SET outRef.MEMBERACDOCWHOM			= COALESCE(FIELDVALUE(person.PersonInfo.*:IdentityCards.*:IdentityCard.*:IssuedBy),'');
+					DECLARE issueDate CHARACTER FIELDVALUE(person.PersonInfo.*:IdentityCards.*:IdentityCard.*:IssueDt);
+					IF issueDate <> '' THEN 
+						SET outRef.MEMBERACDOCISSUEDATE	= CAST(CAST(issueDate AS DATE FORMAT 'yyyy-MM-dd') AS CHARACTER FORMAT 'dd.MM.yyyy');
+					ELSE 
+						SET outRef.MEMBERACDOCISSUEDATE	= '';
+					END IF;
+					
+					SET ipFound = TRUE;
+				END IF;
+			END FOR;
+		END IF;
+		IF ipFound=FALSE THEN 
+			SET outRef.MEMBERACDOCTYPECODE 		= '';
+			SET outRef.MEMBERACDOCSERIES		= '';
+			SET outRef.MEMBERACDOCNUMBER		= '';
+			SET outRef.MEMBERACDOCWHOM			= '';
+			SET outRef.MEMBERACDOCISSUEDATE		= '';
+		END IF; 
+		
+		DECLARE regAddrFound BOOLEAN FALSE;
+		FOR addr AS inRef.*:CompositeContactInfo.*:ContactInfo.*:PostAddr[] DO
+			IF addr.*:AddrType = 'RegAddress' THEN
+				SET outRef.MEMBERREGFULLADDRESS     = FIELDVALUE(addr.*:Addr1);
+				SET outRef.MEMBERREGCOUNTRYCODE     = FIELDVALUE(addr.*:Country);
+				SET outRef.MEMBERREGAREA		    = FIELDVALUE(addr.*:StateProv);
+				SET outRef.MEMBERREGREGION		    = FIELDVALUE(addr.*:StateProv);
+				SET outRef.MEMBERREGCITY		    = FIELDVALUE(addr.*:City);
+				SET outRef.MEMBERREGSTREET		    = FIELDVALUE(addr.*:Street);
+				SET outRef.MEMBERREGHOUSE		    = FIELDVALUE(addr.*:House);
+				SET outRef.MEMBERREGOFFICE		    = FIELDVALUE(addr.*:Office);
+				SET outRef.MEMBERREGPOSTCODE	    = FIELDVALUE(addr.*:PostalCode);
+				SET regAddrFound = TRUE;
+			END IF;
+		END FOR;
+		
+		IF regAddrFound=FALSE THEN 
+			SET outRef.MEMBERREGFULLADDRESS     = '';
+			SET outRef.MEMBERREGCOUNTRYCODE     = '';
+			SET outRef.MEMBERREGAREA		    = '';
+			SET outRef.MEMBERREGREGION		    = '';
+			SET outRef.MEMBERREGCITY		    = '';
+			SET outRef.MEMBERREGSTREET		    = '';
+			SET outRef.MEMBERREGHOUSE		    = '';
+			SET outRef.MEMBERREGOFFICE		    = '';
+			SET outRef.MEMBERREGPOSTCODE	    = '';
+		END IF; 
+		
+		FOR addr AS inRef.*:CompositeContactInfo.*:ContactInfo.*:PostAddr[] DO
+			IF addr.*:AddrType = 'ActualAddress' THEN
+				SET outRef.MEMBERSEATFULLADDRESS    = FIELDVALUE(addr.*:Addr1);
+				SET outRef.MEMBERSEATCOUNTRYCODE    = FIELDVALUE(addr.*:Country);
+				SET outRef.MEMBERSEATAREA		    = FIELDVALUE(addr.*:StateProv);
+				SET outRef.MEMBERSEATREGION		    = FIELDVALUE(addr.*:StateProv);
+				SET outRef.MEMBERSEATCITY		    = FIELDVALUE(addr.*:City);
+				SET outRef.MEMBERSEATSTREET		    = FIELDVALUE(addr.*:Street);
+				SET outRef.MEMBERSEATHOUSE		    = FIELDVALUE(addr.*:House);
+				SET outRef.MEMBERSEATOFFICE		    = FIELDVALUE(addr.*:Office);
+				SET outRef.MEMBERSEATPOSTCODE	    = FIELDVALUE(addr.*:PostalCode);
+			END IF;
+		END FOR;
+		
+		SET outRef.BRANCH 					= FIELDVALUE(inRef.FirstContactBankInfo.*:BranchId);
+		SET outRef.ESECTOR 					= inRef.OrgAttr.EcSector;
+		SET outRef.EMPCOUNT					= FIELDVALUE(inRef.*:NumEmployees);
+		SET outRef.EMPBANK 					= '';
+		SET outRef.SUSPICIOUSBOOL			= inRef.OrgAttr.RiskRating;
+		SET outRef.MEMBERCOMMENTS 			= '';
+		
+		CREATE FIELD outRef.FOUNDERS;
+		DECLARE outFounder REFERENCE TO outRef;
+		FOR founder AS inRef.OrgAttr.Founders.Founder[] DO 
+			CREATE LASTCHILD OF outRef.FOUNDERS AS outFounder NAME 'FOUNDER';
+			SET outFounder.FOUNDERURNAME			= founder.FullName;
+			SET outFounder.FOUNDERURLASTNAME		= founder.LastName;
+			SET outFounder.FOUNDERURFIRSTNAME		= founder.FirstName;
+			SET outFounder.FOUNDERURMIDDLENAME		= founder.MiddleName;
+			SET outFounder.FOUNDERURRESCOUNTRYCODE	= founder.Country;
+			SET outFounder.FOUNDERTYPEFORM			= founder.Form;
+			SET outFounder.FOUNDERTYPE				= founder.FounderType;
+		END FOR;
+		
+		RETURN TRUE;
+	END;
+END MODULE;

@@ -1,0 +1,62 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.integra.esql
+
+-- Константа для пространства имен, в котором объявлены методы веб-сервиса, которые предоставляет КСШ для СБОЛ
+DECLARE sbol_ws_ns NAMESPACE 'http://sberbank.kz/processing';
+-- Код общей (неспецифицированной) ошибки для HTTP-адаптера
+DECLARE CommonSBOLErrorCode CONSTANT CHARACTER '-110';
+-- Код общего описания для ошибки HTTP-адаптера
+DECLARE CommonSBOLErrorDesc CONSTANT CHARACTER 'Error has been occured on ESB';
+
+
+CREATE FUNCTION ConvertToIntegra(IN uid CHARACTER) RETURNS CHARACTER
+BEGIN
+	
+	DECLARE first CHARACTER;
+	DECLARE second1 CHARACTER;
+	DECLARE third CHARACTER;
+	DECLARE fourth CHARACTER;
+	DECLARE fifth CHARACTER;
+	
+	SET first = SUBSTRING(uid FROM 1 FOR 8);
+	SET second1 = SUBSTRING(uid FROM 9 FOR 4);
+	SET third = SUBSTRING(uid FROM 13 FOR 4);
+	SET fourth = SUBSTRING(uid FROM 17 FOR 4);
+	SET fifth = SUBSTRING(uid FROM 21 FOR 12);
+	
+	DECLARE general CHARACTER;
+	
+	SET general = first || '-' || second1 || '-' || third || '-' || fourth || '-' || fifth;
+	
+	RETURN general;
+	
+END;
+
+CREATE PROCEDURE parseNameBS(IN name CHARACTER, OUT output CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.parseNameBs";
+
+CREATE PROCEDURE getNameBS(IN name CHARACTER, OUT output CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.getNameBs";
+
+CREATE FUNCTION convertNameBs(IN param CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE param
+		WHEN 'NameService' THEN 'groupName'
+		WHEN 'ServiceID' THEN 'Id'
+		WHEN 'minTariff' THEN 'MinTariffValue'
+		WHEN 'midTariff' THEN 'MidTariffValue'
+		WHEN 'maxTariff' THEN 'MaxTariffValue'
+		WHEN 'minTariffThresh' THEN 'MinTariffThreshold'
+		WHEN 'midTariffThresh'	THEN 'MidTariffThreshold'
+		WHEN 'prevCount' THEN 'PrevCount'
+		WHEN 'lastCount' THEN 'LastCount'
+		WHEN 'prevDate' THEN 'PrevCountDate'
+		WHEN 'lastDate' THEN 'LastCountDate'
+		WHEN 'payCount' THEN 'PayCounts'
+		WHEN 'countSum'	THEN 'FixSum'
+		WHEN 'delta' THEN 'DebtInfo'
+		WHEN 'paySum' THEN 'PaySum'							 
+		ELSE param
+	END;
+END;

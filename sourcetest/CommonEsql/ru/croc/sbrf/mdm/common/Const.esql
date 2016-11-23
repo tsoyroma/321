@@ -1,0 +1,21 @@
+BROKER SCHEMA ru.croc.sbrf.mdm.common
+
+-- Константа: "без валюты"
+DECLARE TransactionsWithoutCurrency CONSTANT CHARACTER '615';
+
+-- Константа: направление перекодировки - в МДМ
+DECLARE Direction2MDM CONSTANT CHARACTER 'tomdm';
+-- Константа: направление перекодировки - из МДМ
+DECLARE DirectionFromMDM CONSTANT CHARACTER 'frommdm';
+
+-- Константы: Тип кода
+DECLARE ClassifierTypeOKFS CONSTANT CHARACTER 'KFS';					-- Типы форм собственности
+DECLARE ClassifierTypeSBRFIndustry CONSTANT CHARACTER 'SBRFIndustry';	-- Отрасли
+DECLARE ClassifierTypeKOPF CONSTANT CHARACTER 'KOPF';					-- Типы организационно-правовых форм
+
+-- формат даты в МДМ
+DECLARE MDMDateFormat CONSTANT CHARACTER 'yyyy-MM-dd';
+-- формат даты/времени в МДМ
+DECLARE MDMDateTimeFormatIn CONSTANT CHARACTER 'yyyy-MM-dd HH:mm:ss.SSSSSS';
+-- формат даты/времени из МДМ
+DECLARE MDMDateTimeFormatOut CONSTANT CHARACTER 'yyyy-MM-dd''T''HH:mm:ss.SSSSSSZZZ';

@@ -1,0 +1,129 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.bodate.esql
+
+PATH ru.croc.sbrf.bp.common.esql;
+
+-- Внешняя переменная для указания версии продукта
+DECLARE ProductKey EXTERNAL CHARACTER 'UNKNOWN';
+
+/**
+ * Определение дальнейшего маршрута на основе параметра ProductKey и данных сообщения
+ **/
+CREATE COMPUTE MODULE GetBackOfficeDateRequest_FindRoute
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		DECLARE labelName CHARACTER 'NEWPRAGMA';
+		IF ProductKey = '1' AND FIELDVALUE(InputRoot.XMLNSC.KZGetBackOfficeDateRq.CardAcctId.*:ProductType) = '1' THEN
+			SET labelName = 'EPK';
+		END IF;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		SET Environment.UserProperties.Source.MQMD 			= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 		= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties	= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 			= CAST(ASBITSTREAM(InputRoot.XMLNSC CCSID 1208) AS CHARACTER CCSID 1208);
+		
+		RETURN TRUE;
+	END;	
+			
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Формирование запроса для ЕПК (KZGetMDMPersonInfoByAttrRq)
+ **/
+CREATE COMPUTE MODULE GetBackOfficeDateRequest_CreateRequestToEPK
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetMDMPersonInfoByAttrRq';			
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		
+		SET outRef.RqUID									= inRef.RqUID;
+		SET outRef.RqTm										= inRef.RqTm;
+		SET outRef.OperUID									= '';
+		SET outRef.SPName									= inRef.SPName;
+		SET outRef.BankInfo									= '';
+		
+		DECLARE keyIIN CHARACTER '';
+		DECLARE keyCIF CHARACTER '';
+		
+		FOR prt AS inRef.LoanInfo.Participants.Participant[] DO
+			IF prt.PartType = '1' THEN
+				FOR idExt AS prt.PersonInfo.PersonIdExt[] DO 
+					IF idExt.Key = 'CIF' THEN
+						SET keyCIF = idExt.Value;
+					ELSEIF idExt.Key = 'IIN' THEN 
+						SET keyIIN = idExt.Value;
+					END IF;
+				END FOR;
+			END IF;
+		END FOR;
+		
+		CREATE LASTCHILD OF outRef NAME 'PersonInfo';
+		DECLARE idExt REFERENCE TO outRef;		
+		CREATE LASTCHILD OF outRef.PersonInfo AS idExt NAME 'PersonIdExt';		
+		SET idExt.Key									= 'IIN';
+		SET idExt.Value									= keyIIN;
+		CREATE LASTCHILD OF outRef.PersonInfo AS idExt NAME 'PersonIdExt';		
+		SET idExt.Key									= 'CIF';
+		SET idExt.Value									= keyCIF;
+		
+		
+		RETURN TRUE;
+	END;
+		
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+END MODULE;
+
+/**
+ * Заполнение заголовков для маршрутизации в ЕПК
+ **/ 
+CREATE COMPUTE MODULE GetBackOfficeDateRequest_FillMqRfh_EPK
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot 						= InputRoot;
+		IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+		SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+		SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:epk';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Заполнение заголовков для маршрутизации в МАБПК
+ **/ 
+CREATE COMPUTE MODULE GetBackOfficeDateRequest_FillMqRfh_NewPragma
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot 						= InputRoot;
+		IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+		SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+		SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:newpragma';
+		RETURN TRUE;
+	END;
+END MODULE;

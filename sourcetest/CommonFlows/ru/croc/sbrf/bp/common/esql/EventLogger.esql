@@ -1,0 +1,278 @@
+BROKER SCHEMA ru.croc.sbrf.bp.common.esql
+
+DECLARE EVENT_INPUT_WS_NS CONSTANT CHARACTER 'http://croc.ru/sbrf/bp/EventMsg';
+DECLARE event_in_ws_ns NAMESPACE EVENT_INPUT_WS_NS;
+DECLARE IsIgnoreCopyToOperLog EXTERNAL BOOLEAN FALSE;
+DECLARE BackoutMessageLifeTime EXTERNAL CHARACTER '864000';
+
+-- Название парсера, который будем использовать (MQRFH2/MQRFH2C)
+-- MQRFH2C - если на MQInput -> Parser Options стоит галочка 
+-- Use MQRFH2C compact parser for MQRFH2 header
+DECLARE MQRFHParser EXTERNAL CHARACTER 'MQRFH2C';
+
+----------------------------------
+--
+-- Функция для вызова хранимой процедуры для записи данных в БД
+--
+----------------------------------
+CREATE COMPUTE MODULE EventLogger_CallWriteEvent
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- Создадим ссылку на тело входного сообщения
+		DECLARE oEvent REFERENCE TO InputRoot.MRM;
+
+		DECLARE isCopy BOOLEAN FALSE;
+		-- Скопируем сообщение.
+		IF oEvent.event_in_ws_ns:IsCopy = TRUE THEN
+			SET isCopy = TRUE;
+		END IF;
+		IF oEvent.event_in_ws_ns:IsCopyToOperLog = TRUE
+			AND IsIgnoreCopyToOperLog = FALSE
+			AND isCopy = FALSE THEN
+			SET OutputRoot = InputRoot;
+			SET OutputRoot.MRM.event_in_ws_ns:IsCopy = TRUE;
+			PROPAGATE TO TERMINAL 'out4'
+			ENVIRONMENT InputLocalEnvironment
+			MESSAGE OutputRoot
+			EXCEPTION InputExceptionList
+			FINALIZE NONE DELETE NONE;
+			SET OutputRoot = NULL;
+		END IF;
+		-- Форматируем данные к виду '2006-10-07T12:06:56.568+01:00'
+		-- Делаем вызов хранимой процедуры
+		CALL ru.croc.sbrf.bp.common.esql.WRITE_EVENT(CAST(oEvent.event_in_ws_ns:EventDate AS CHARACTER FORMAT 'I'),
+		oEvent.event_in_ws_ns:RqUID,
+		TRIM(oEvent.event_in_ws_ns:ProcStatus),
+		oEvent.event_in_ws_ns:ErrorText,
+		IsUNKNOWN(TRIM(oEvent.event_in_ws_ns:EventSource)),
+		IsUNKNOWN(TRIM(oEvent.event_in_ws_ns:EventReciever)),
+		IsUNKNOWN(TRIM(oEvent.event_in_ws_ns:Operation)),
+		IsUNKNOWN(TRIM(oEvent.event_in_ws_ns:OperationName)),
+		IsUNKNOWN(TRIM(oEvent.event_in_ws_ns:SourceQueue)),
+		IsUNKNOWN(TRIM(oEvent.event_in_ws_ns:SourceQM)),
+		IsUNKNOWN(TRIM(oEvent.event_in_ws_ns:TargetQueue)),
+		IsUNKNOWN(TRIM(oEvent.event_in_ws_ns:TargetQM)),
+		IsUNKNOWN(TRIM(oEvent.event_in_ws_ns:ReplyQueue)),
+		IsUNKNOWN(TRIM(oEvent.event_in_ws_ns:ReplyQM)),
+		oEvent.event_in_ws_ns:EventMsg);
+
+
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Функция для вызова хранимой процедуры для записи данных в БД 
+ * Модифицированная 28.02.2012 под новый формат логов с MQRFH2.usr заголовками
+ **/
+CREATE COMPUTE MODULE EventLoggerMod_CallWriteEvent
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+		-- Создаем ссылку на MQRFH2C.usr заголовок
+		DECLARE usr REFERENCE TO InputRoot.{MQRFHParser}.usr;
+
+		DECLARE IsCopy BOOLEAN FALSE;
+		-- Скопируем сообщение.
+		IF usr.IsCopy = TRUE THEN
+			SET IsCopy = TRUE;
+		END IF;
+		IF usr.IsCopyToOperLog = TRUE AND
+		   IsIgnoreCopyToOperLog = FALSE AND
+		   IsCopy = FALSE 
+		THEN
+			SET OutputRoot = InputRoot;
+			SET OutputRoot.{MQRFHParser}.usr.IsCopy = TRUE;
+			PROPAGATE TO TERMINAL 'out4'
+			ENVIRONMENT InputLocalEnvironment
+			MESSAGE OutputRoot
+			EXCEPTION InputExceptionList
+			FINALIZE NONE DELETE NONE;
+			SET OutputRoot = NULL;
+		END IF;
+
+		-- Парсим в строку входящее сообщение
+		DECLARE inMsgStr CHARACTER CAST(InputRoot.BLOB.BLOB AS CHARACTER CCSID InputRoot.MQMD.CodedCharSetId ENCODING InputRoot.MQMD.Encoding);
+
+		-- Форматируем дату к виду '2006-10-07T12:06:56.568+01:00'
+		-- Делаем вызов хранимой процедуры
+		CALL ru.croc.sbrf.bp.common.esql.WRITE_EVENT(CAST(usr.EventDate AS CHARACTER FORMAT 'I'),
+		usr.RqUID,
+		TRIM(usr.ProcStatus),
+		usr.ErrorText,
+		IsUNKNOWN(TRIM(usr.EventSource)),
+		IsUNKNOWN(TRIM(usr.EventReciever)),
+		IsUNKNOWN(TRIM(usr.Operation)),
+		IsUNKNOWN(TRIM(usr.OperationName)),
+		IsUNKNOWN(TRIM(usr.SourceQueue)),
+		IsUNKNOWN(TRIM(usr.SourceQM)),
+		IsUNKNOWN(TRIM(usr.TargetQueue)),
+		IsUNKNOWN(TRIM(usr.TargetQM)),
+		IsUNKNOWN(TRIM(usr.ReplyQueue)),
+		IsUNKNOWN(TRIM(usr.ReplyQM)),
+		inMsgStr);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+------------------------------------------------------------
+--
+-- Проверка значения для переданного параметра на существование и на пустое значение
+-- Если пусто или не существует, то возвращаем UNKNOWN
+--
+------------------------------------------------------------
+CREATE FUNCTION IsUNKNOWN(IN val CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF val is NULL or TRIM(val) = '' THEN
+		RETURN 'UNKNOWN';
+	ELSE
+		RETURN val;
+	END IF;
+END;
+----------------------------------
+--
+-- Хранимая процедура для логирования сообщения в базу данных
+-- pdate - дата и время логирования
+-- prquid - идентификатор сообщения
+-- pprocstatus - статус сообщения (SUCCESS,TIMEOUT,ERROR)
+-- perrortext - сообщение об ошибке
+-- peventsrc - источник сообщения
+-- peventrcv - получатель сообщения
+-- poperation - описание операции
+-- poperationname - название операции: OperationId + [OperationTypeId]
+-- psourcequeue - имя очереди, из которой получено сообщение
+-- psourceqm - имя текущего менеджера
+-- ptargetqueue - имя очереди, в которую надо отправить сообщение
+-- ptargetqm - имя менеджера,куда отправляем сообщение
+-- preplyqueue - имя очереди, где ожидается ответ на текущее сообщение
+-- preplyqm - имя менеджера очередей, куда необходимо отправить ответное сообщение
+-- peventmsg - текст логируемого сообщения
+----------------------------------
+
+CREATE PROCEDURE WRITE_EVENT(
+IN pdate CHARACTER,
+IN prquid CHARACTER,
+IN pprocstatus CHARACTER,
+IN perrortext CHARACTER,
+IN peventsrc CHARACTER,
+IN peventrcv CHARACTER,
+IN poperation CHARACTER,
+IN poperationname CHARACTER,
+IN psourcequeue CHARACTER,
+IN psourceqm CHARACTER,
+IN ptargetqueue CHARACTER,
+IN ptargetqm CHARACTER,
+IN preplyqueue CHARACTER,
+IN preplyqm CHARACTER,
+IN peventmsg CHARACTER)
+LANGUAGE DATABASE
+EXTERNAL NAME "WRITE_EVENT";
+
+
+CREATE COMPUTE MODULE EventLogger_SetOptionsForBQ
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		SET OutputRoot.MQMD.Expiry = CAST(BackoutMessageLifeTime AS INTEGER);
+
+		DECLARE options INTEGER FolderBitStream;
+		DECLARE exceptionBlob BLOB;
+		CREATE LASTCHILD of Environment.XMLNSC DOMAIN('XMLNSC') Name 'ExceptionList';
+		SET Environment.XMLNSC.ExceptionList = InputExceptionList;
+		SET exceptionBlob = ASBITSTREAM(Environment.XMLNSC.ExceptionList OPTIONS options);
+		DECLARE sFullException CHAR CAST(exceptionBlob AS CHAR CCSID ESB_LOG_CCSID);
+		IF sFullException IS NULL THEN
+			SET sFullException = '';
+		END IF;
+		SET OutputLocalEnvironment.sFullException = RIGHT(sFullException,800);
+
+
+		IF EXISTS(InputRoot.MRM[]) THEN
+			SET OutputRoot.MRM.event_in_ws_ns:ErrorText = InputRoot.MRM.event_in_ws_ns:ErrorText || sFullException;
+			IF InputRoot.BLOB.BLOB IS NOT NULL THEN
+				SET OutputRoot.BLOB = NULL;
+			END IF;
+		ELSE
+			IF InputRoot.BLOB.BLOB IS NOT NULL THEN
+				PROPAGATE TO TERMINAL 'out3' ENVIRONMENT OutputLocalEnvironment;
+				SET Environment.XMLNSC = NULL;
+				SET OutputRoot.BLOB = NULL;
+				SET OutputRoot.BLOB.BLOB = InputRoot.BLOB.BLOB;
+			END IF;
+		END IF;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+/**
+ *	Процедура обработки исключительных ситуаций 
+ *  Модифицированная 01.03.2012 под новый формат логов с MQRFH2.usr заголовками
+ **/
+CREATE COMPUTE MODULE EventLoggerMod_SetOptionsForBQ
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+
+		-- Устанавливаем время жизни сообщений в backout-очереди
+		-- Задается в параметрах потока
+		SET OutputRoot.MQMD.Expiry = CAST(BackoutMessageLifeTime AS INTEGER);
+
+		-- Запишем описание исключения в заголовок сообщение и отправим в backout-очередь
+		SET OutputRoot.{MQRFHParser}.usr.EventLoggerException = CreateExceptionString(OutputLocalEnvironment,InputExceptionList);
+		
+		-- Берем последние 800 символов для записи в syslog
+		SET OutputLocalEnvironment.sFullException = RIGHT(OutputRoot.{MQRFHParser}.usr.EventLoggerException,800);
+
+		--Записываем содержимое ошибки в syslog
+		PROPAGATE TO TERMINAL 'out3' ENVIRONMENT OutputLocalEnvironment DELETE NONE;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+/**
+ *	Проверяем, что входящее сообщение имеет новый формат с MQRFH2.usr-заголовками
+ **/
+CREATE FILTER MODULE EventLoggerMod_IsNewFormat
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		IF Root.{MQRFHParser}.usr.RqUID IS NOT NULL THEN
+			RETURN TRUE;
+		ELSE
+			RETURN FALSE;
+		END IF;		
+	END;
+
+END MODULE;

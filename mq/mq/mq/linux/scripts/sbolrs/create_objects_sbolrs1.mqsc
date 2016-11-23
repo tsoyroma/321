@@ -1,0 +1,8 @@
+*канал соединение с сервером
+ALTER CHANNEL(ESB.GW.SVRCONN) +
+CHLTYPE(svrconn) +
+TRPTYPE(tcp) +
+SHARECNV(5) +
+MCAUSER('mqm')
+
+END

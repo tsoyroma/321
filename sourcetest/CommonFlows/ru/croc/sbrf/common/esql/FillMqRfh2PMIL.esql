@@ -1,0 +1,591 @@
+BROKER SCHEMA ru.croc.sbrf.common.esql
+
+-- Константа для БАРС
+DECLARE BarsSystemId EXTERNAL CHARACTER 'urn:sbrfsystems:99-bars';
+-- Константа для WAY4U
+DECLARE Way4uSystemId EXTERNAL CHARACTER 'urn:sbrfsystems:99-way';
+-- Константа для WAY4U (асинхронный адаптер)
+DECLARE Way4uAsyncSystemId EXTERNAL CHARACTER 'urn:sbrfsystems:99-way:async';
+-- Константа для ИПС
+DECLARE IpsSystemId EXTERNAL CHARACTER 'urn:sbrfsystems:99-ips';
+-- Константа для АС Стоп-Лист
+DECLARE SlistSystemId EXTERNAL CHARACTER 'urn:sbrfsystems:99-slist';
+-- Константа для адаптера МБК для обработки смс-сообщений
+DECLARE MBK2SystemId EXTERNAL CHARACTER 'urn:sbrfsystems:99-mbk:2';
+-- Константа для Депозитария
+DECLARE DepoSystemId EXTERNAL CHARACTER 'urn:sbrfsystems:99-depo';
+-- Константа для ERIB
+DECLARE EribSystemId EXTERNAL CHARACTER 'urn:sbrfsystems:99-erib';
+
+
+
+-- Константа для всех адаптеров
+DECLARE AdapterTypeId EXTERNAL CHARACTER 'urn:sbrftypes:esb:adapter';
+-- Константа для адаптеров по корпоративному сектору
+DECLARE LegalAdapterTypeId EXTERNAL CHARACTER 'urn:sbrftypes:esb:adapter:legal';
+-- Константа для адаптера вкладной системы
+DECLARE DepositAdapterTypeId EXTERNAL CHARACTER 'urn:sbrftypes:esb:adapter:deposit';
+-- Константа для адаптера биллинговой системы
+DECLARE BillingAdapterTypeId EXTERNAL CHARACTER 'urn:sbrftypes:esb:adapter:billing';
+-- Константа для адаптера МДМ (физ. лица)
+DECLARE MDMAdapterTypeId EXTERNAL CHARACTER 'urn:sbrftypes:esb:adapter:mdm';
+-- Константа для адаптера МДМ (юр. лица)
+DECLARE MDMOrgAdapterTypeId EXTERNAL CHARACTER 'urn:sbrftypes:esb:adapter:mdmorg';
+
+
+
+
+-- Константа для типа СБОЛ(интернет-банк) системы
+DECLARE IBSystemTypeId EXTERNAL CHARACTER 'urn:sbrftypes:system:internetbank';
+-- Константа для типа адаптера СБОЛ(интернет-банк) системы
+DECLARE IBAdapterTypeId EXTERNAL CHARACTER 'urn:sbrftypes:esb:adapter:internetbank';
+
+----------------------------------
+--
+-- Проставление заголовков ПМИЛ для модуля маршрутизации
+--
+----------------------------------
+CREATE COMPUTE MODULE Add_MQRFH2
+	CREATE FUNCTION Main () RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+
+
+		DECLARE RootTag CHARACTER;
+		SET RootTag = FIELDNAME(InputRoot.XMLNSC.*[<]);
+
+		-- В зависимости от формата входного сообщения ищем тег <SystemId> в разных местах			
+		-- Для операций, которые выполняются в WAY4 проставляем фиксированные значения SystemId = Way4uSystemId, TypeId = AdapterTypeId
+		CASE RootTag
+				--если CEDBO - проверка УДБО
+			WHEN 'CustInqRq' THEN
+
+				CREATE FIELD OutputRoot.MQRFH2.usr.BankId TYPE NameValue VALUE SUBSTRING(FIELDVALUE(InputRoot.XMLNSC.CustInqRq.BankInfo.RbTbBrchId) FROM 1 FOR 2);				
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE DepositAdapterTypeId;
+
+				--если TDD,TDC,TCD,TCC,TCP - переводы
+			WHEN 'XferAddRq' THEN		
+
+				DECLARE OperName CHARACTER;
+				SET OperName = FIELDVALUE(InputRoot.XMLNSC.XferAddRq.OperName);
+	
+				CASE OperName
+					WHEN 'TCD' THEN 
+						CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.XferAddRq.XferInfo.CardAcctIdFrom.SystemId);
+					WHEN 'TDD' THEN 
+						CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.XferAddRq.XferInfo.DepAcctIdFrom.SystemId);
+					WHEN 'TDI' THEN 
+						CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.XferAddRq.XferInfo.DepAcctIdFrom.SystemId);
+					WHEN 'TID' THEN 
+						CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.XferAddRq.XferInfo.DepAcctIdFrom.SystemId);						
+					WHEN 'TDDC' THEN 
+						CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.XferAddRq.XferInfo.DepAcctIdFrom.SystemId);
+					WHEN 'TDC' THEN 
+						CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.XferAddRq.XferInfo.DepAcctIdFrom.SystemId);
+					WHEN 'TDCC' THEN 
+						CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.XferAddRq.XferInfo.DepAcctIdFrom.SystemId);
+					WHEN 'TCP' THEN 
+						CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.XferAddRq.XferInfo.CardAcctIdFrom.SystemId);
+					WHEN 'TCC' THEN 
+						CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.XferAddRq.XferInfo.LoanAcctIdTo.SystemId);
+				END CASE;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если CRDWI
+			WHEN 'CardAcctDInqRq'  THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+			 	--если CREXT
+			WHEN 'CCAcctExtStmtInqRq'  THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если  GCL
+			WHEN 'CardAcctInqRq'  THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если CLC (прямая операции)
+			WHEN 'XferSyncRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если CLC (откат операции)
+			WHEN 'XferCanRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если CNCL (откат операции во вкладной системе)
+			WHEN 'XferCanDepRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.BankId TYPE NameValue VALUE SUBSTRING(FIELDVALUE(InputRoot.XMLNSC.XferCanDepRq.BankInfo.RbTbBrchId) FROM 1 FOR 2);				
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE DepositAdapterTypeId;
+
+				--если CAD (создание нового клиента для Про100)
+			WHEN 'CustAddRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;				
+
+				--если CWM (изменение кодового слова клиента для УЭК)
+			WHEN 'CtrlWordModRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;	
+				
+				--если BAA (создание нового счетового контракта и привязка карты для Про100)
+			WHEN 'BankAcctAddRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;				
+
+				-- если BAM (изменение номера счета, параметров выписки и мобильного банка карты и разблокировка карты для УЭК)
+			WHEN 'BankAcctModRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;				
+				
+				--если CRI (перевыпуск карты для Про100)
+			WHEN 'CardReissueRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;				
+
+				--если ACI (выпуск допкарты к основной карте существующего клиента для Про100)
+			WHEN 'AddCardIssueRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;				
+												
+				--если IIC
+			WHEN 'LoanInqRq' THEN 
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.LoanInqRq.LoanAcctId.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;				
+
+				--если PSC
+			WHEN 'LoanPaymentRq' THEN 
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.LoanPaymentRq.LoanAcctId.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;				
+
+				--если IICC
+			WHEN 'CardLoanInqRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.CardLoanInqRq.CardAcctId.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;				
+
+				--если IRB
+			WHEN 'AcctInqRq' THEN
+				IF EXISTS(InputRoot.XMLNSC.AcctInqRq.BankAcctId[]) THEN
+					CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.AcctInqRq.BankAcctId.SystemId;
+				ELSEIF EXISTS(InputRoot.XMLNSC.AcctInqRq.DepAcctId[]) THEN
+					CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.AcctInqRq.DepAcctId.SystemId;
+				ELSEIF EXISTS(InputRoot.XMLNSC.AcctInqRq.CardAcctId[]) THEN
+					CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				END IF;			
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если IRB (ФЛ)
+			WHEN 'PrivateAcctInqRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.PrivateAcctInqRq.DepAcctId.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если IRB (ЮЛ)
+			WHEN 'LegalAcctInqRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.LegalAcctInqRq.DepAcctId.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE LegalAdapterTypeId;
+
+				--если TDD (ФЛ)
+			WHEN 'PrivateXferAddRq' THEN
+				IF InputRoot.XMLNSC.PrivateXferAddRq.XferInfo.TxType = 'CHARGE' THEN
+					CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.PrivateXferAddRq.XferInfo.DepAcctIdTo.SystemId);
+				ELSEIF InputRoot.XMLNSC.PrivateXferAddRq.XferInfo.TxType = 'RECEIPT' THEN
+					CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.PrivateXferAddRq.XferInfo.DepAcctIdFrom.SystemId);
+				END IF;
+
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если TDD (ЮЛ)
+			WHEN 'LegalXferAddRq' THEN
+				IF InputRoot.XMLNSC.LegalXferAddRq.XferInfo.TxType = 'CHARGE' THEN
+					CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.LegalXferAddRq.XferInfo.DepAcctIdTo.SystemId);
+				ELSEIF InputRoot.XMLNSC.LegalXferAddRq.XferInfo.TxType = 'RECEIPT' THEN
+					CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.LegalXferAddRq.XferInfo.DepAcctIdFrom.SystemId);
+				END IF;
+
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE LegalAdapterTypeId;
+
+				-- если ACR (техническое резервирование номера счёта (ФЛ))
+			WHEN 'PrivateAcctIdReserveRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.PrivateAcctIdReserveRq.DepAcctId.SystemId);
+
+				-- если CDC (сторнирование операции зачисления-списания средств (по ФЛ)
+			WHEN 'PrivateXferCanDepRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.PrivateXferCanDepRq.OperState.SystemId);
+
+				-- если CDC (сторнирование операции зачисления-списания средств (по ЮЛ (ИП)))
+			WHEN 'LegalXferCanDepRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE LegalAdapterTypeId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.LegalXferCanDepRq.OperState.SystemId);
+
+				-- Запрос на резервирование средств на счёте ФЛ
+			WHEN 'PrivateCashReserveRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.PrivateCashReserveRq.DepAcctId.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- Отмена резервирования счёта ФЛ
+			WHEN 'PrivateCashCanReserveRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.PrivateCashCanReserveRq.DepAcctId.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если DAS
+			WHEN 'DepAcctStmtInqRq' THEN 
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.DepAcctStmtInqRq.DepAcctRec.DepAcctId.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если IAS
+			WHEN 'BankAcctStmtInqRq' THEN 
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.BankAcctStmtInqRq.BankAcctRec.BankAcctId.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если CAS
+			WHEN 'CCAcctStmtInqRq' THEN 
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- если APM (берем SystemId из каждого вида продукта (DepAcctId,CardAcctId,BankAcctId)
+			WHEN 'BankAcctPermissModRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE COALESCE(InputRoot.XMLNSC.BankAcctPermissModRq.BankAcctRec.DepAcctId.SystemId,
+																						  InputRoot.XMLNSC.BankAcctPermissModRq.BankAcctRec.BankAcctId.SystemId,
+																						  InputRoot.XMLNSC.BankAcctPermissModRq.BankAcctRec.CardAcctId.SystemId);
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;				
+
+			 	--если CRBLOCK
+			WHEN 'CardBlockRq'  THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если SCREP
+			WHEN 'BankAcctStmtImgInqRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE IpsSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;	
+
+				--если создание ДП (190-форм)
+			WHEN 'SvcAcctAddRq' THEN 
+				--Делаем маршрутизацию по коду ТБ и типу для вкладной системы (вкладная система в одном ТБ - единственная)
+				CREATE FIELD OutputRoot.MQRFH2.usr.BankId TYPE NameValue VALUE SUBSTRING(FIELDVALUE(InputRoot.XMLNSC.SvcAcctAddRq.BankInfo.RbTbBrchId) FROM 1 FOR 2);				
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE DepositAdapterTypeId;
+
+				--если запрос на получение выписки по ДП (190-форм)
+			WHEN 'SvcAcctStmtInqRq' THEN 
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.SvcAcctStmtInqRq.SvcAcct.SvcAcctId.SystemId;				
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если запрос на получение информации по ДП (190-форм)
+			WHEN 'SvcAcctAudRq' THEN 
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.SvcAcctAudRq.SvcAcct.SvcAcctId.SystemId;				
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если удаление ДП (190-форм)
+			WHEN 'SvcAcctDelRq' THEN 
+				--Делаем маршрутизацию по коду ТБ и типу для вкладной системы (вкладная система в одном ТБ - единственная)
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.SvcAcctDelRq.SvcAcct.SvcAcctId.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				--если запрос на открытие нового вклада и перевода на него средств с другого вклада
+			WHEN 'DepToNewDepAddRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.DepToNewDepAddRq.XferInfo.DepAcctIdFrom.SystemId);
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;						
+
+				--если запрос на открытие счета ОМС и перевода на него средств с другого вклада
+			WHEN 'DepToNewIMAAddRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.DepToNewIMAAddRq.XferInfo.DepAcctIdFrom.SystemId);
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;	
+				
+				--если запрос на открытие нового вклада и перевода на него средств с карты
+			WHEN 'CardToNewDepAddRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.CardToNewDepAddRq.XferInfo.CardAcctIdFrom.SystemId);
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;						
+
+				--если CSL (проверка клиента в АС Стоп-Лист)
+			WHEN 'CheckInStopListRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE SlistSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;				
+
+				-- если SMS - отправка смс-сообщения
+			WHEN 'SendSMSRq' THEN	
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE MBK2SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;				
+				
+				-- DEPO_REG регистрации клиента на обслуживание в Депозитарии
+			WHEN 'DepoClientRegRq'	THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE DepoSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;				
+				
+				-- DEPO_IS получение информации по счетам депо
+			WHEN 'DepoAccInfoRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE DepoSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- DEPO_DS получение информации по задолженности по счету депо
+			WHEN 'DepoDeptsInfoRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE DepoSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- DEPO_DDS получение детальной информации по задолженности по счету депо
+			WHEN 'DepoDeptDetInfoRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE DepoSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- DEPO_AC получение информации о содержании счета депо
+			WHEN 'DepoAccSecInfoRq' THEN 
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE DepoSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- GEN_NTS оповещения об приеме сообщения
+			WHEN 'MessageRecvRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE DepoSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- DEPO_AR для получения анкеты депонента
+			WHEN 'DepoArRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE DepoSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- DEPO_RNS подачи заявки на регистрацию новой ценной бумаги
+			WHEN 'DepoAccSecRegRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE DepoSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- DEPO_SRD подачи поручения на перевод/прием перевода ценных бумаг
+			WHEN 'DepoAccTranRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE DepoSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- GEN_REV для отзыва документа
+			WHEN 'DepoRevokeDocRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE DepoSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- GFLDEPO получение номеров счетов (GFL)
+			WHEN 'BankDepoAcctInqRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE DepoSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- GEN_DCN оповещения об изменения статуса документов
+			WHEN 'DocStateUpdateRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE EribSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;	
+						
+			-- DEPO_DIC получение информации об изменении справочника ценных бумаг
+			WHEN 'SecDicInfoRq' THEN	
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE EribSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;	
+
+				-- ACCINFO Запрос дополнительной информации по счету по его номеру (ОМС, вклады,карты) во вкладной системе
+			WHEN 'AcctInfoRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE COALESCE(InputRoot.XMLNSC.AcctInfoRq.DepAcctId.SystemId,InputRoot.XMLNSC.AcctInfoRq.BankAcctId.SystemId,InputRoot.XMLNSC.AcctInfoRq.CardAcctId.SystemId);				
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;			
+
+				-- ACCINFO Запрос дополнительной информации по ссудному счету по его номеру в кредитной системе
+			WHEN 'LoanInfoRq' THEN	
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.LoanInfoRq.LoanAcctId.SystemId;				
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;			
+
+				-- TBP_RI поиск информации о биллинговом поставщике услуг
+			WHEN 'BillingPayInqRq' THEN					
+				CREATE FIELD OutputRoot.MQRFH2.usr.BankId TYPE NameValue VALUE SUBSTRING(FIELDVALUE(InputRoot.XMLNSC.BillingPayInqRq.BankInfo.RbTbBrchId) FROM 1 FOR 2);				
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE BillingAdapterTypeId;
+
+				-- TBP_PR подготовка билингового платежа к отправке 				
+			WHEN 'BillingPayPrepRq' THEN								
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.BillingPayPrepRq.SystemId);
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;		
+
+				-- TBP_PAY проводка билингового платежа
+			WHEN 'BillingPayExecRq' THEN								
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.BillingPayExecRq.SystemId);
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;	
+
+				-- CRJ Запрос на проверку реквизитов в  ФП БАРС (из ИАСК в рамках интеграции БП+КФ)
+			WHEN 'CheckOrgRequisitesRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE BarsSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+				-- Запрос состояния операции в системе (используется для запроса состояния операции в ИАСКе в рамках интеграции БП+КФ)
+			WHEN 'XferInqRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.XferInqRq.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				
+				-- Запрос состояния операции в системе (используется для запроса состояния операции в ЦОД в рамках проекта ЕКБО)
+			WHEN 'PrivateXferInqRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.PrivateXferInqRq.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+
+			-- Операции ББМО
+				-- Регистрация заявления юридического лица
+			WHEN 'RegisterLegalPersonApplicationRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Получение информации по документам валютного контроля
+			WHEN 'GetExchangeControlDocumentInformationRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Оформление паспорта сделки
+			WHEN 'RegisterTransactionPassportRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Добавление документа валютного контроля
+			WHEN 'AddExchangeControlDocumentRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Регистрация заявления юридического лица на операции по счету
+			WHEN 'RegisterLegalPersonAccountOperationApplicationRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Получение справочных данных клиента
+			WHEN 'GetClientReferenceDataRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Изменение справочных данных клиента
+			WHEN 'UpdateClientReferenceDataRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Разрешение проведения расходных операций по счету
+			WHEN 'PermitAccountChargeOperationRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Передача заявления на обработку в ЦБДФ
+			WHEN 'SendApplicationForCBDFProcessingRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Передача результата обработки заявления физического лица
+			WHEN 'SendNaturalPersonApplicationProcessStageResultRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Передача URL задания обработки заявления
+			WHEN 'SendApplicationProcessingURLRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Регистрация заявления физического лица на компенсацию
+			WHEN 'RegisterNaturalPersonCompensationApplicationRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Передача сообщения об изменении состояния заявления физического лица
+			WHEN 'SendNaturalPersonApplicationStateChangeMessageRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Создание нового заявления физического лица на основе первоисточника
+			WHEN 'SendNaturalPersonApplicationCreationByOriginMessageRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Создание нового клиента направления РКО
+			WHEN 'CreateLegalContractClientRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Выполнение действия над договором
+			WHEN 'ExecEncashContractActionRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Запуск процесса обработки инцидента
+			WHEN 'StartATMReconciliationRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Запрос на передачу данных первичного документа
+			WHEN 'SendBasicDocumentInformationRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Запрос на передачу URL задания обработки документа
+			WHEN 'SendDocumentProcessingURLRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- Передача данных о  договоре в ФП РКО
+			WHEN 'SendRemoteBankingServicesContractInformationRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				
+				-- если SACS (изменение состояния счета в депозитной системе)
+			WHEN 'SetAccountStateRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.SetAccountStateRq.DepAcctId.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				-- если TDO (открытие бессрочного вклада без первоначального взноса)
+			WHEN 'NewDepAddRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.BankId TYPE NameValue VALUE SUBSTRING(FIELDVALUE(InputRoot.XMLNSC.NewDepAddRq.BankInfo.RbTbBrchId) FROM 1 FOR 2);				
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE DepositAdapterTypeId;				
+				-- если CLM (установка/изменение кредитного лимита карточного контракта для СПООБК)
+			WHEN 'CardContractCreditLimitModRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;					
+				-- если OTPR (изменение ограничения на печать и использование одноразовых паролей по карте)
+			WHEN 'OTPRestrictionModRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE Way4uSystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;			
+
+			WHEN 'OpenLegalAccountRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				--Открытие счета клиенту ЮЛ
+			WHEN 'RegisterPersonWithOpenSalaryAccountsRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				--Регистрация ФЛ и открытие счетов списком
+			WHEN 'BindingCardToAccountRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				--Привязка открытых банковских карт к открытым счетам клиента
+			WHEN 'CloseSalaryPersonAccountsRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				--Закрытие зарплатных счетов ФЛ
+			WHEN 'GetSalaryCardInfoRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				--Получение информации по карте
+			WHEN 'SendSalaryAgreementApplicationRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				--Передача заявки на заключение зарплатного договора
+			WHEN 'BindingCardToAccountStateRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				--Передача результата привязки открытых банковских карт к открытым счетам клиента
+			WHEN 'SendRegPersOpenAccStateRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				--Передача результата регистрации ФЛ и открытие счетов списком
+			WHEN 'ConcludeEDBORq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				--Подключение ФЛ к договору УДБО
+			WHEN 'ConcludeEDBOStateRq' THEN
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE InputRoot.XMLNSC.*[<].RecipientSystems.SystemId;
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;
+				--Передача результата подключения ФЛ к договору УДБО
+			WHEN 'CardToNewIMAAddRq' THEN
+				--если запрос на открытие ОМС с переводом на него средств с карты клиента
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.CardToNewIMAAddRq.XferInfo.CardAcctIdFrom.SystemId);
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;						
+			WHEN 'CardToIMAAddRq' THEN
+				--если запрос на покупку ОМ за счет средств на карте клиента
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.CardToIMAAddRq.XferInfo.CardAcctIdFrom.SystemId);
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;						
+			WHEN 'IMAToCardAddRq' THEN
+				--если запрос на продажу ОМ с зачислением средств на карту клиента
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.IMAToCardAddRq.XferInfo.IMAAcctIdFrom.SystemId);
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;						
+			WHEN 'XferOperStatusInfoRq' THEN
+				--если запрос на уточнение статуса операции из ЕРИБ
+				CREATE FIELD OutputRoot.MQRFH2.usr.SystemId TYPE NameValue VALUE FIELDVALUE(InputRoot.XMLNSC.XferOperStatusInfoRq.SystemId);
+				CREATE FIELD OutputRoot.MQRFH2.usr.TypeId TYPE NameValue VALUE AdapterTypeId;						
+		END CASE;
+
+		SET OutputRoot.XMLNSC=InputRoot.XMLNSC;
+
+		RETURN TRUE;
+	END;
+
+		CREATE PROCEDURE CopyMessageHeaders() BEGIN
+			DECLARE I INTEGER 1;
+			DECLARE J INTEGER;
+			SET J = CARDINALITY(InputRoot.*[]);
+			WHILE I < J DO
+				SET OutputRoot.*[I] = InputRoot.*[I];
+				SET I = I + 1;
+			END WHILE;
+		END;
+
+	END MODULE;

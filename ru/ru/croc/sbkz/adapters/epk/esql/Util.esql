@@ -1,0 +1,301 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.epk.esql
+
+/**
+ * Заполняет запрос в ЕПК стандартными значениями
+ **/
+CREATE PROCEDURE FillStandartEPKRq(
+		IN InputRoot REFERENCE, 
+		IN OutputRoot REFERENCE, 
+		IN serviceCode CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'PragmaEnvelope';
+	DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+	
+	SET outRoot.MessageUID = InputRoot.XMLNSC.*[<].RqUID;
+	SET outRoot.SystemCode = InputRoot.XMLNSC.*[<].SPName;
+	SET outRoot.ServiceCode = serviceCode;
+	SET outRoot.MessageDateTime = InputRoot.XMLNSC.*[<].RqTm;
+	SET outRoot.FilialCode = COALESCE(InputRoot.XMLNSC.*[<].BankInfo.*:RegionId, '00');
+END;
+
+
+/**
+ * Заполняет ответ из ЕПК стандартными значениями
+ **/
+CREATE PROCEDURE FillStandartMDORs(
+		IN InputRoot REFERENCE, 
+		IN OutputRoot REFERENCE, 
+		IN serviceCode CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF OutputRoot.XMLNSC NAME serviceCode;
+	DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:ifxca = ifxca;
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:banks = banks;
+	
+	SET outRoot.RqUID = InputRoot.XMLNSC.*[<].MessageUID;
+	SET outRoot.RqTm = InputRoot.XMLNSC.*[<].MessageDateTime;
+	SET outRoot.Status.ifxca:StatusCode = COALESCE(InputRoot.XMLNSC.*[<].ErrorData.ErrorCode, '0');
+	SET outRoot.Status.ifxca:Severity	= CASE WHEN outRoot.Status.ifxca:StatusCode = '0' THEN 'Info' ELSE 'Error' END;
+	SET outRoot.Status.ifxca:StatusDesc = InputRoot.XMLNSC.*[<].ErrorData.ErrorDesc;
+	IF NOT EXISTS(outRoot.Status.*:*[]) THEN
+		SET outRoot.Status = NULL;
+	END IF;
+END;
+
+
+/**
+ * Заполняет запрос из ЕПК стандартными значениями
+ **/
+CREATE PROCEDURE FillStandartMDORq(
+		IN InputRoot REFERENCE, 
+		IN OutputRoot REFERENCE, 
+		IN serviceCode CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+	CREATE LASTCHILD OF OutputRoot.XMLNSC NAME serviceCode;
+	DECLARE outRoot REFERENCE TO OutputRoot.XMLNSC.*[<];
+
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:inds 	= inds;
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:ifxca 	= ifxca;
+	SET outRoot.(XMLNSC.NamespaceDecl)xmlns:banks 	= banks;
+	
+	SET outRoot.RqUID 			= InputRoot.XMLNSC.*[<].MessageUID;
+	SET outRoot.RqTm 			= InputRoot.XMLNSC.*[<].MessageDateTime;
+	SET outRoot.SPName			= InputRoot.XMLNSC.*[<].SystemCode;
+END;
+
+
+
+CREATE FUNCTION isExchangeSystem(IN systemKey CHARACTER) RETURNS BOOLEAN
+BEGIN
+	RETURN CASE
+	WHEN systemKey IN ('Intervale', 'SBOL', 'CRMr', 'CRMc', 'Transact', 'TellMe', 'BSS', 'Tallyman', 'Hunter', 'MABPK', 'BGW','TSMMB','CAKD') THEN TRUE
+		ELSE FALSE
+	END;
+END;
+
+CREATE FUNCTION recodeDocumentTypeFromEPK(IN docType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE docType
+		WHEN 'Удост' THEN '1'
+		WHEN 'Паспорт' THEN '2'
+		WHEN 'ВидНаЖит' THEN '3'
+		WHEN 'Уд.лица б/г' THEN '4'
+		WHEN 'ДокНерез' THEN '5'
+		WHEN 'Свид.Рожд' THEN '6'
+		WHEN 'СлУдостовер' THEN '7'
+		WHEN 'УДВоВ' THEN '8'
+		WHEN 'УдостБжц' THEN '9'
+		ELSE docType
+	END;
+END;
+
+CREATE FUNCTION recodeDocumentTypeToEPK(IN docType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE docType
+		WHEN '1' THEN 'Удост'
+		WHEN '2' THEN 'Паспорт'
+		WHEN '3' THEN 'ВидНаЖит'
+		WHEN '4' THEN 'Уд.лица б/г'
+		WHEN '5' THEN 'ДокНерез'
+		WHEN '6' THEN 'Свид.Рожд'
+		WHEN '7' THEN 'СлУдостовер'
+		WHEN '8' THEN 'УДВоВ'
+		WHEN '9' THEN 'УдостБжц'
+		ELSE docType
+	END;
+END;
+
+CREATE FUNCTION recodeContactTypeFromEPK(IN contactType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE contactType
+		WHEN 'Дом' THEN 'Home'
+		WHEN 'ДомФакт' THEN 'DayPhone'
+		WHEN 'Рабоч' THEN 'Work'
+		WHEN 'Мобил' THEN 'Mobile'
+		WHEN 'Факс' THEN 'DayFax'
+		ELSE contactType
+	END;
+END;
+
+CREATE FUNCTION recodeOrgContactTypeFromEPK(IN contactType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE contactType
+		WHEN 'Дом' THEN 'Home'
+		WHEN 'ДомФакт' THEN 'DayPhone'
+		WHEN 'Рабоч' THEN 'Work'
+		WHEN 'Мобил' THEN 'Mobile'
+		WHEN 'Факс' THEN 'DayFax'
+		ELSE contactType
+	END;
+END;
+
+CREATE FUNCTION recodeContactTypeToEPK(IN contactType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE contactType
+		WHEN 'Home' THEN 'Дом'
+		WHEN 'DayPhone' THEN 'ДомФакт'
+		WHEN 'Work' THEN 'Рабоч'
+		WHEN 'Mobile' THEN 'Мобил'
+		WHEN 'DayFax' THEN 'Факс'
+		WHEN 'Mobile_add' THEN 'Мобил_Доп'	
+		ELSE contactType
+	END;
+END;
+
+CREATE FUNCTION recodeOrgContactTypeToEPK(IN contactType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE contactType
+		WHEN 'Home' THEN 'Дом'
+		WHEN 'Work' THEN 'Рабоч'
+		WHEN 'Mobile' THEN 'Мобил'
+		WHEN 'DayFax' THEN 'Факс'
+		ELSE contactType
+	END;
+END;
+
+CREATE FUNCTION recodeAddressTypeFromEPK(IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN 'Р' THEN 'Primary'
+		WHEN 'Ф' THEN 'Home'
+		WHEN 'П' THEN 'Secondary'
+		WHEN 'О' THEN 'Work'
+		ELSE addressType
+	END;
+END;
+
+CREATE FUNCTION recodeOrgAddressTypeFromEPK(IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN 'Р' THEN 'RegAddress'
+		WHEN 'Ф' THEN 'Home'
+		WHEN 'П' THEN 'PostAddress'
+		WHEN 'О' THEN 'Work'
+		ELSE addressType
+	END;
+END;
+
+CREATE FUNCTION recodeAddressTypeToEPK(IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN 'RegAddress' THEN 'Р'
+		WHEN 'Primary' THEN 'Р'
+		WHEN 'Home' THEN 'Ф'
+		WHEN 'Secondary' THEN 'П'
+		WHEN 'Work' THEN 'О'
+		ELSE addressType
+	END;
+END;
+
+CREATE FUNCTION recodeOrgAddressTypeToEPK(IN addressType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE addressType
+		WHEN 'RegAddress' THEN 'Р'
+		WHEN 'Home' THEN 'Ф'
+		WHEN 'PostAddress' THEN 'П'
+		WHEN 'Work' THEN 'О'
+		ELSE addressType
+	END;
+END;
+
+CREATE FUNCTION recodeMaritalStatusFromEPK(IN maritalStatus CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE maritalStatus
+		WHEN '1' THEN 'Single'
+		WHEN '2' THEN 'Married'
+		WHEN '3' THEN 'Widow'
+		WHEN '4' THEN 'Divorced'
+		ELSE maritalStatus
+	END;
+END;
+
+CREATE FUNCTION recodeMaritalStatusToEPK(IN maritalStatus CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE maritalStatus
+		WHEN 'Single' THEN '1'
+		WHEN 'Married' THEN '2'
+		WHEN 'Widow' THEN '3'
+		WHEN 'Divorced' THEN '4'
+		ELSE maritalStatus
+	END;
+END;
+
+CREATE FUNCTION recodeSubjectTypeFromEPK(IN subjectType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE subjectType
+		WHEN 'PERSON' THEN 'PERS'
+		WHEN 'ORGANIZATION' THEN 'ORG'
+		ELSE 'CRED'
+	END;
+END;
+
+CREATE FUNCTION recodeSubjectTypeToEPK(IN subjectType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE subjectType
+		WHEN 'PERS' THEN 'PERSON'
+		WHEN 'ORG' THEN 'ORGANIZATION'
+		ELSE '-'
+	END;
+END;
+
+CREATE FUNCTION recodeAcceptanceStatusFromEPK(IN accStatus CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE UPPER(accStatus)
+		WHEN 'Y' THEN '1'
+		WHEN 'N' THEN '2'
+		WHEN 'TRUE' THEN '1'
+		WHEN 'FALSE' THEN '2'
+		ELSE accStatus
+	END;
+END;
+
+CREATE FUNCTION recodeAcceptanceStatusToEPK(IN accStatus CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE accStatus
+		WHEN '1' THEN 'Y'
+		WHEN '2' THEN 'N'
+		ELSE accStatus
+	END;
+END;
+
+CREATE FUNCTION parseEPKLinkType(IN linkType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN SUBSTRING(linkType BEFORE '.');
+END;
+
+CREATE FUNCTION parseEPKLinkSubType(IN linkType CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN SUBSTRING(linkType AFTER '.');
+END;
+
+CREATE FUNCTION recodeBooleanFromEPK(IN str CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE UPPER(str)
+		WHEN 'TRUE' THEN '1'
+		WHEN 'FALSE' THEN '0'
+		ELSE str
+	END;
+END;
+
+CREATE FUNCTION recodeBooleanForEPK(IN str CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE UPPER(str)
+		WHEN '1' THEN 'true'
+		WHEN '0' THEN 'false'
+		ELSE str
+	END;
+END;
+
+CREATE FUNCTION IsResidentForEPK(IN str CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE str
+		WHEN '1' THEN 'Да'
+		WHEN '2' THEN 'Нет'
+		ELSE str
+	END;
+END;

@@ -1,0 +1,50 @@
+BROKER SCHEMA ru.croc.sbkz.mediation.billing.esql
+
+/**
+ * Копирование заголовков из InputRoot в OutputRoot.
+ * Осуществляется путем воссоздания всех доменов из InputRoot
+ * в OutputRoot. Функцию можно применять только на "чистый" OutputRoot,
+ * т.е. на тот, в котором еще не было никаких присвоений и не содержит никаких
+ * дочерних узлов.
+ **/
+CREATE PROCEDURE CopyMessageHeaders(IN inputRoot REFERENCE, IN outputRoot REFERENCE) BEGIN
+	DECLARE I INTEGER 1;
+	DECLARE J INTEGER;
+	DECLARE domainName CHARACTER;
+	
+	SET J = CARDINALITY(inputRoot.*[]);
+	WHILE I < J DO
+		SET domainName = FIELDNAME(inputRoot.*[I]);
+		IF domainName = 'Properties' THEN
+			SET outputRoot.*[I] = inputRoot.*[I]; 
+		ELSE
+			CREATE LASTCHILD OF outputRoot DOMAIN(domainName) NAME domainName;
+			SET outputRoot.*[<] = inputRoot.*[I];
+		END IF;
+		SET I = I + 1;
+	END WHILE;
+END;
+
+/**
+ * Копирование всего сообщения из InputRoot в OutputRoot.
+ * Осуществляется путем воссоздания всех доменов из InputRoot
+ * в OutputRoot. Функцию можно применять только на "чистый" OutputRoot,
+ * т.е. на тот, в котором еще не было никаких присвоений и не содержит никаких
+ * дочерних узлов.
+ **/
+CREATE PROCEDURE CopyWholeMessage(IN inputRoot REFERENCE, IN outputRoot REFERENCE) BEGIN
+	DECLARE I INTEGER 1;
+	DECLARE J INTEGER;
+	DECLARE domainName CHARACTER;
+	SET J = CARDINALITY(inputRoot.*[]);
+	WHILE I <= J DO
+		SET domainName = FIELDNAME(inputRoot.*[I]);
+		IF domainName = 'Properties' THEN
+			SET outputRoot.*[I] = inputRoot.*[I]; 
+		ELSE
+			CREATE LASTCHILD OF outputRoot DOMAIN(domainName) NAME domainName;
+			SET outputRoot.*[<] = inputRoot.*[I];
+		END IF;
+		SET I = I + 1;
+	END WHILE;
+END;

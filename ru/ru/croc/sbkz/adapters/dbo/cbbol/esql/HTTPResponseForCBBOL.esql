@@ -1,0 +1,132 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.dbo.cbbol.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils, ru.croc.sbkz.adapters.dbo.esql;
+
+
+CREATE COMPUTE MODULE HTTPResponseForCBBOL_AddOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL AddOrigHead(InputRoot, OutputRoot);
+
+		DECLARE Operation  CHARACTER FIELDVALUE(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.Operation);
+		
+		SET Environment.UserProperties            = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties;
+        SET Environment.UserProperties.Operation  =	Operation;
+		
+	    CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC.*:*[<] NAME 'OrigMess';
+		SET OutputRoot.XMLNSC.OrigMess = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		--SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier = CAST(Environment.UserProperties.HTTPRequestIdentifier AS BLOB);
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPResponseForCBBOL_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDVALUE(Environment.UserProperties.Operation);
+		DECLARE labelName CHARACTER;
+				
+		CASE Operation
+		WHEN 'STATEMENT_RQ' THEN
+ 			SET labelName = 'KZLegalGetAccountStatementRs';	
+ 		WHEN 'OpenAccount' THEN
+ 			SET labelName = 'OpenAccountRs';
+ 		WHEN 'OpenAccountDetailsRequest' THEN
+ 			SET labelName = 'OpenAccountRs';		
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in HTTPResponseForSBOLRS', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPResponseForCBBOL_Convert2MDO_STATEMENT
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN  
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillBSSStandardElements(InputRoot, OutputRoot, 'Statement', 'STATEMENT');
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalGetAccountStatementRs;
+		DECLARE stmt REFERENCE TO inRef.StatementInfo;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:Statement;
+		CALL CopyStatementFromMDO(stmt,outRef,FIELDVALUE(inRef.RqTm));		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPResponseForCBBOL_ClearMqHeaders
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+
+	    SET OutputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier = CAST(Environment.UserProperties.ReplyIdentifier AS BLOB);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE HTTPResponseForCBBOL_Convert2MDO_OpenAcct
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.AggrMsg.*[<].RESPONSE.PragmaEnvelope;
+		DECLARE outRef REFERENCE TO OutputRoot;
+		
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'OpenAccountDetails';
+		
+		--DECLARE accRef REFERENCE TO outRef;
+		--CREATE FIELD outRef.RequestData.OpenAccount AS accRef;
+		
+		
+		
+		SET outRef.(XMLNSC.Attribute)ID		 			= 	inRef.XMLNSC.PragmaEnvelope.MessageUID;
+		SET outRef.(XMLNSC.Attribute)DateTime 			= 	inRef.XMLNSC.PragmaEnvelope.MessageDateTime;
+		SET outRef.DocRef 			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:DocRef;
+		SET outRef.DocStatus		= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:DocStatus;
+		SET outRef.NoteFromBank 	= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:NoteFromBank;
+		SET outRef.AccountDetails.Account	 		= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:Account;
+		SET outRef.AccountDetails.ClientBIN			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:ClientBIN;
+		SET outRef.AccountDetails.AccountCurrency			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:AccountCurrency;
+		SET outRef.AccountDetails.OpenDate			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:FilialId;
+		SET outRef.AccountDetails.CloseDate			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:CloseDate;
+		SET outRef.ManagerAccount.ManagerName			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:ManagerAccount.*:ManagerName;
+		SET outRef.ManagerAccount.ManagerCode			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:ManagerAccount.*:ManagerCode;
+		SET outRef.AccountDetails.ContractNumber			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:ManagerAccount.*:ContractNumber;
+		
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPResponseForCBBOL_PrepareResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+
+		SET OutputRoot.MQMD = NULL;
+		SET OutputRoot.MQRFH2 = NULL;
+		
+		-- Проставляем HTTP-идентификатор ответа
+		SET OutputLocalEnvironment.Destination.HTTP.RequestIdentifier = CAST(Environment.UserProperties.HTTPRequestIdentifier AS BLOB);
+
+		RETURN TRUE;
+	END;
+END MODULE;

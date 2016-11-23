@@ -1,0 +1,837 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.transact.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+-- Внешние переменные для указания дат
+DECLARE CardInfoSplitPoint EXTERNAL CHARACTER 'UNKNOWN';
+DECLARE SalaryTurnoverSplitPoint EXTERNAL CHARACTER 'UNKNOWN';
+
+-- Маршрутизация потока в соответствии с операцией
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'BlackListRq' THEN
+			SET labelName = 'BlackListRq';
+		WHEN 'BlackListAmlRq' THEN
+			SET labelName = 'BlackListAmlRq';			
+		WHEN 'GetCardInfoRq' THEN
+			SET labelName = 'GetCardInfoRq';
+		WHEN 'GetDepInfoRq' THEN
+			SET labelName = 'GetDepInfoRq';
+		WHEN 'GetSalaryTurnoverRq' THEN
+			SET labelName = 'GetSalaryTurnoverRq';
+		WHEN 'CheckPersonIdRq' THEN
+			SET labelName = 'CheckPersonIdRq';
+		WHEN 'GetCreditHistoryRq' THEN
+			SET labelName = 'GetCreditHistoryRq';
+		WHEN 'GetPensionRq' THEN
+			SET labelName = 'GetPensionRq';
+		WHEN 'GetBackOfficeDateRq' THEN
+			SET labelName = 'GetBackOfficeDateRq';
+		WHEN 'GetScheduleEffRateRq' THEN
+			SET labelName = 'GetScheduleEffRateRq';
+		WHEN 'GetStatusLsboRq' THEN
+			SET labelName = 'GetStatusLsboRq'; 
+		WHEN 'GetPersonDataByIdRq' THEN
+			SET labelName = 'GetPersonDataByIdRq';
+		WHEN 'UpdatePersonDataToEpkRq' THEN
+			SET labelName = 'UpdatePersonDataToEpkRq';
+		WHEN 'SendSmsRq' THEN
+			SET labelName = 'SendSmsRq';
+		WHEN 'HunterOnlineMatchingRq' THEN
+			SET labelName = 'HunterOnlineMatchingRq';
+		WHEN 'HunterUpdateMetadataRq' THEN
+			SET labelName = 'HunterUpdateMetadataRq';
+		WHEN 'GetPensionInfoRq' THEN
+			SET labelName = 'GetPensionInfoRq';	
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format in RequestForESB(TSM)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+-- Заполнение параметров маршрутизации в MQRFH2 заголовке
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Проверка наличия клиента в чёрном списке": BlackListRq | BlackListAmlRq -> KZBlackListRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZBlackListRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		DECLARE msgType CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.{msgType};
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZBlackListRq;
+		
+		SET OutRq.PersonInfo.inds:PersonName.inds:LastName 		= InpRq.LastName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:FirstName 	= InpRq.FirstName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName 	= InpRq.MiddleName;
+		SET OutRq.PersonInfo.PersonIdType 						= InpRq.PersonIdType;
+		SET OutRq.PersonInfo.PersonId 							= InpRq.PersonId;
+		
+		IF msgType = 'BlackListAmlRq' THEN
+			SET OutRq.AMLOnly									= '1';
+			SET OutRq.ParentRqUID								= InpRq.ParentRqUID;
+		END IF;
+		
+		SET Environment.UserProperties.TransactOperation 		= msgType;
+		SET Environment.UserProperties.TSMUID					= InpRq.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение информации по карте": GetCardInfoRq -> KZGetCardInfoRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO2
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetCardInfoRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GetCardInfoRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetCardInfoRq;
+		
+		SET OutRq.CardAcctId.cards:ProdType			= '';
+		SET OutRq.CardAcctId.cards:ProductType		= '';
+		SET OutRq.CardAcctId.cards:CardType			= '';		
+		SET OutRq.CardAcctId.cards:CardNum 			= InpRq.CardNum;
+		
+		IF EXISTS(InpRq.IdEpk[]) THEN 
+			SET OutRq.CardAcctId.CardStart				= InpRq.DtOpenCrd;
+			SET OutRq.CardAcctId.CardEnd				= InpRq.DtPeriodCrd;
+			SET OutRq.PersonInfo.PersonIdExt.Key		= 'CIF';
+			SET OutRq.PersonInfo.PersonIdExt.Value		= InpRq.IdEpk;
+		END IF;
+		
+		IF EXISTS(InpRq.PersonIdType[]) THEN
+			SET OutRq.PersonInfo.PersonIdType 			= InpRq.PersonIdType;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение информации по депозиту": GetDepInfoRq -> KZGetDepInfoRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO3
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetDepInfoRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GetDepInfoRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetDepInfoRq;
+
+		SET OutRq.BankInfo.banks:RegionId	= RIGHT(InpRq.RegionId,2);
+		SET OutRq.DepAcctId.AcctId 			= InpRq.AcctId;
+		SET OutRq.PersonInfo.PersonIdType 	= InpRq.PersonIdType;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение информации по зарплатным оборотам": GetSalaryTurnoverRq -> KZGetSalaryTurnoverRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO4
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetSalaryTurnoverRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GetSalaryTurnoverRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetSalaryTurnoverRq;
+		
+		SET OutRq.CardAcctId.cards:ProdType				= '';
+		SET OutRq.CardAcctId.cards:ProductType			= '';
+		SET OutRq.CardAcctId.cards:CardType				= '';		
+		SET OutRq.CardAcctId.cards:CardNum 				= InpRq.CardNum;
+		
+		IF EXISTS(InpRq.IdEpk[]) THEN 
+			SET OutRq.CardAcctId.CardStart				= InpRq.DtOpenCrd;
+			SET OutRq.CardAcctId.CardEnd				= InpRq.DtPeriodCrd;
+			SET OutRq.PersonInfo.PersonIdExt.Key		= 'CIF';
+			SET OutRq.PersonInfo.PersonIdExt.Value		= InpRq.IdEpk;
+		END IF;
+		
+		IF EXISTS(InpRq.PersonIdType[]) THEN
+			SET OutRq.PersonInfo.PersonIdType 	= InpRq.PersonIdType;
+		END IF;
+		
+		SET Environment.UserProperties.TSMUID			= InpRq.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Проверка идентификатора клиента": CheckPersonIdRq -> KZCheckPersonIdRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO5
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZCheckPersonIdRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.CheckPersonIdRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZCheckPersonIdRq;
+		
+		SET OutRq.PersonInfo.inds:PersonName.inds:LastName 		= InpRq.LastName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:FirstName 	= InpRq.FirstName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName 	= InpRq.MiddleName;
+		SET OutRq.PersonInfo.PersonIdType 						= InpRq.PersonIdType;
+		SET OutRq.PersonInfo.PersonId 							= InpRq.PersonId;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Получение кредитной истории клиента": GetCreditHistoryRq -> KZGetCreditHistoryRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO6
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetCreditHistoryRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GetCreditHistoryRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetCreditHistoryRq;
+		
+		SET OutRq.ApplicationNumber 		= InpRq.ApplicationNumber;
+		SET OutRq.BKI 						= InpRq.BKI;
+		SET OutRq.PersonInfo.inds:PersonName.inds:LastName 		= InpRq.LastName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:FirstName 	= InpRq.FirstName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName 	= InpRq.MiddleName;
+		SET OutRq.PersonInfo.PersonIdType 	= InpRq.PersonIdType;
+		SET OutRq.PersonInfo.PersonId 		= InpRq.PersonId;
+		FOR oldName AS InpRq.OldLastName[] DO
+			CREATE LASTCHILD OF OutRq.PersonInfo NAME 'OldLastName';
+			SET OutRq.PersonInfo.OldLastName[<] VALUE = oldName;
+		END FOR;
+		
+		SET OutRq.DealMemberType 	= InpRq.PersonIdType;
+		
+		SET Environment.UserProperties.TSMUID				= InpRq.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в АБПК Прагма "Передача информации в Бэк-офис": GetBackOfficeDateRq -> KZGetBackOfficeDateRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO7
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetBackOfficeDateRq';		
+
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GetBackOfficeDateRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetBackOfficeDateRq;
+		SET OutRq.(XMLNSC.NamespaceDecl)xmlns:banks 			= banks;
+		SET OutRq.(XMLNSC.NamespaceDecl)xmlns:cards 			= cards;
+		
+		SET OutRq.BankInfo.banks:RegionId						= RIGHT(InpRq.RegionId,2);
+		SET OutRq.BankInfo.banks:AgencyId						= InpRq.AgencyId;
+
+		SET OutRq.TSMUID										= InpRq.TSMUID;
+		
+		SET OutRq.CardAcctId.cards:ProdType						= InpRq.Product;
+		SET OutRq.CardAcctId.cards:ProductType					= InpRq.ProductType;		
+		SET OutRq.CardAcctId.cards:CardType						= InpRq.CardVid;
+		SET OutRq.CardAcctId.cards:CardNum						= InpRq.CardNum;
+		SET OutRq.CardAcctId.cards:CurCode						= InpRq.AcctCur;		
+		SET OutRq.CardAcctId.SecWord							= InpRq.SecretWord;
+		SET OutRq.CardAcctId.CreditLimit						= InpRq.CreditLimit;
+		SET OutRq.CardAcctId.EmbossedName						= InpRq.EmbossedName;
+		SET OutRq.CardAcctId.EmbossedSurName					= InpRq.EmbossedSurName;		
+		SET OutRq.CardAcctId.SubProductType						= InpRq.SubProductType;
+		SET OutRq.CardAcctId.CardStart							= InpRq.DtOpenCrd;
+		SET OutRq.CardAcctId.CardEnd							= InpRq.DtPeriodCrd;
+		
+		DECLARE outDep REFERENCE TO OutRq;		
+		FOR dep AS InpRq.DepData[] DO
+			CREATE LASTCHILD OF OutRq AS outDep NAME 'DepData';
+			SET outDep.AcctId									= dep.AcctId;
+			SET outDep.PledgeSum								= dep.PledgeSum;
+		END FOR;
+		
+		SET OutRq.Processing									= InpRq.Processing;
+		SET OutRq.FlagKZ										= InpRq.FlagKZ;
+		SET OutRq.Extract										= InpRq."Extract";
+		SET OutRq.DSKey											= InpRq.DSKey;
+		SET OutRq.ManLogin										= InpRq.LoginManager;
+		SET OutRq.ManData										= InpRq.ManagersData;
+		
+		DECLARE amtRec REFERENCE TO OutRq;
+		DECLARE loan REFERENCE TO OutRq;
+		CREATE FIELD OutRq.LoanInfo AS loan;
+		CREATE FIELD loan.ExtAmountInfo;
+		CREATE LASTCHILD OF loan.ExtAmountInfo AS amtRec NAME 'ExtAmountRec';
+		SET amtRec.AmtType										= 'COMFORREG';
+		SET amtRec.Amount										= InpRq.ComisForRegistration;
+		CREATE LASTCHILD OF loan.ExtAmountInfo AS amtRec NAME 'ExtAmountRec';
+		SET amtRec.AmtType										= 'COMFORCASH';
+		SET amtRec.Amount										= InpRq.ComisForCash;
+		CREATE LASTCHILD OF loan.ExtAmountInfo AS amtRec NAME 'ExtAmountRec';
+		SET amtRec.AmtType										= 'COMFORCRED'; -- 26/05/2014 u00671
+		SET amtRec.Amount										= InpRq.ComisForCreditingAccount; -- Комиссия за зачисление кредитных средств на счета клиента
+		
+		SET loan.TermLoan										= InpRq.TermLoan;
+		SET loan.LoanRate										= InpRq.PrcRate;
+		SET loan.RepaymentType									= InpRq.RepaymentType;
+		SET loan.DocNumber										= InpRq.DocNumber;
+		SET loan.DocDate										= InpRq.DocDate;
+		SET loan.RejectionReason								= InpRq.RejectionReason;
+		SET loan.DecisionDocNumber								= InpRq.NumberDecision;
+		SET loan.DecisionDocDate								= InpRq.DtNumberDecision;
+		
+		CREATE LASTCHILD OF loan NAME 'Participants';
+		DECLARE participant REFERENCE TO OutRq;
+		DECLARE idExt REFERENCE TO OutRq;
+		FOR client AS InpRq.ClientInfo[] DO
+			CREATE LASTCHILD OF loan.Participants AS participant NAME 'Participant';
+			SET participant.PartType							= client.RoleClient;
+			SET participant.PersonInfo.inds:NameAddrType		= 'Customer';
+			SET participant.PersonInfo.inds:PersonName.inds:LastName	= client.LastName;
+			SET participant.PersonInfo.inds:PersonName.inds:FirstName	= client.FirstName;
+			SET participant.PersonInfo.inds:PersonName.inds:MiddleName	= client.MiddleName;
+			
+			CREATE LASTCHILD OF participant.PersonInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key												= 'CIF';
+			SET idExt.Value												= client.IdEpk;
+			CREATE LASTCHILD OF participant.PersonInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key												= 'IIN';
+			SET idExt.Value												= client.PersonId;
+			
+			SET participant.PersonInfo.ClientCategory					= client.ClientCategory;
+		END FOR;
+		
+		SET loan.LoanPurpose											= InpRq.CreditPurpose;
+		SET loan.Security												= InpRq.Security;
+		SET loan.SalesChannel											= InpRq.SalesChannel;
+		SET loan.paymentDay												= InpRq.paymentDay; -- ТЗ Куаныш
+		
+		SET Environment.UserProperties.TSMUID							= InpRq.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос в ГЦВП "Преобразование запроса Transact SM – КСШ": GetPensionRq -> KZGetPensionRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO8
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetPensionRq';		
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);
+		
+		DECLARE InpRq REFERENCE TO InputRoot.XMLNSC.GetPensionRq;
+		DECLARE OutRq REFERENCE TO OutputRoot.XMLNSC.KZGetPensionRq;
+		
+		SET OutRq.SIK 						= InpRq.SIK;
+		SET OutRq.PersonInfo.inds:PersonName.inds:LastName 		= InpRq.LastName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:FirstName 	= InpRq.FirstName;
+		SET OutRq.PersonInfo.inds:PersonName.inds:MiddleName 	= InpRq.MiddleName;
+		SET OutRq.PersonInfo.inds:BirthDt 	= InpRq.BirthDay;
+		SET OutRq.PersonInfo.PersonIdType 	= InpRq.PersonIdType;
+		SET OutRq.PersonInfo.PersonId 		= InpRq.PersonId;
+		SET OutRq.StartDate 				= InpRq.StartDate;
+		SET OutRq.EndDate 					= InpRq.EndDate;
+		SET OutRq.Type						= 'DS6';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в МАБПК "Получение эффективной ставки и графика погашения": GetScheduleEffRateRq -> KZGetScheduleEffRateRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO9
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetScheduleEffRateRq';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.GetScheduleEffRateRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZGetScheduleEffRateRq;
+		
+		SET outRef.RqUID					= inRef.RqUID;
+		SET outRef.RqTm						= inRef.RqTm;
+		SET outRef.TSMUID					= inRef.TSMUID;
+		SET outRef.LoanInfo.LoanAmount		= inRef.CreditSum;
+		SET outRef.LoanInfo.ComisTotal		= inRef.ComisTotal; -- Сумма единоразовых комиссий
+		SET outRef.LoanInfo.LoanCurr		= inRef.CreditCurrency;
+/* 26/05/2014 u00671
+		SET outRef.LoanInfo.ExtAmountInfo.ExtAmountRec[1].AmtType	= 'COMFORREG';
+		SET outRef.LoanInfo.ExtAmountInfo.ExtAmountRec[1].Amount	= inRef.ComisForRegistration;
+		SET outRef.LoanInfo.ExtAmountInfo.ExtAmountRec[2].AmtType	= 'COMFORCASH';
+		SET outRef.LoanInfo.ExtAmountInfo.ExtAmountRec[2].Amount	= inRef.ComisForCash;
+*/
+		SET outRef.LoanInfo.TermLoan		= inRef.TermLoan;
+		SET outRef.LoanInfo.LoanRate		= inRef.PrcRate;
+		SET outRef.LoanInfo.RepaymentType	= inRef.RepaymentType;
+		SET outRef.LoanInfo.IssueDate		= inRef.DtIssue;
+
+		SET outRef.LoanInfo.ExtDatesInfo.ExtDateRec[1].DateType		= 'FIRSTPAY';
+		SET outRef.LoanInfo.ExtDatesInfo.ExtDateRec[1].ExtDate		= inRef.DtFirstPayment;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Заполнение заголовков для маршрутизации в ГЦВП адаптер
+ **/
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usrGcvp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		-- Всегда одна система для запроса -- ГЦВП: urn:sbkzsystems:gcvp
+		SET systemId 	= 'urn:sbkzsystems:gcvpweb';
+		SET adapterType = 'urn:sbkztypes:esb:adapter';
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Константа для указания, что ищем адаптер системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	-- Идентификатор системы, в адаптер которой необходимо отправить запрос
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Определение направления потока, в зависимости от
+ * необходимости агрегации.
+ **/
+CREATE FILTER MODULE RequestForESB_IsUseAggregate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		IF Root.MQRFH2.usr.OperationId IN ('KZGetBackOfficeDateRq') THEN
+			RETURN FALSE;
+		ELSE
+			RETURN TRUE;
+		END IF;
+	END;
+END MODULE;
+
+/**
+ * Запрос в ЕПК "Проверка принадлежности ЛСБОО": GetStatusLsboRq -> KZGetClassifierRq
+ **/ 
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO_StatusLsbo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetClassifierRq';	
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.GetStatusLsboRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZGetClassifierRq;
+		
+		SET outRef.Date									= inRef.RqTm;
+		SET outRef.Closed								= '';
+		SET outRef.ClassifierInfo.Code					= 'affil_list';
+		SET outRef.ClassifierInfo.ParentCode			= '';
+		SET outRef.ClassifierInfo.DataRecord.Code		= inRef.Person.PersonId;
+		SET outRef.ClassifierInfo.DataRecord.ParentCode	= '';
+		SET outRef.ClassifierInfo.DataRecord.Name		= '';
+		SET outRef.ClassifierInfo.DataRecord.Value		= '';
+		
+		SET Environment.UserProperties.TSMUID				= inRef.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос "Проверка идентификатора клиента в ЕПК": GetPersonDataByIdRq -> KZCheckMDMPersonInfoRq
+ **/ 
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO_GetPersonData
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZCheckMDMPersonInfoRq';	
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.GetPersonDataByIdRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZCheckMDMPersonInfoRq;
+		DECLARE personInfo REFERENCE TO outRef;
+		
+		FOR person AS inRef.Person[] DO
+			CREATE LASTCHILD OF outRef AS personInfo NAME 'PersonInfo';
+			SET personInfo.inds:NameAddrType 		= 'Customer';
+			SET personInfo.PersonIdExt.Key	 		= 'IIN';
+			SET personInfo.PersonIdExt.Value 		= person.IIN;
+		END FOR;
+		
+		SET Environment.UserProperties.TSMUID				= inRef.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос "Обновление данных клиента в ЕПК": UpdatePersonDataToEpkRq -> KZSendMDMPrivateClientDataRq
+ **/ 
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO_UpdatePersonData
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSendMDMPrivateClientDataRq';	
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.UpdatePersonDataToEpkRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZSendMDMPrivateClientDataRq;
+		DECLARE personInfo REFERENCE TO outRef;
+		DECLARE contInfo REFERENCE TO outRef;
+		DECLARE outAddr REFERENCE TO outRef;
+		DECLARE outCont REFERENCE TO outRef;
+		DECLARE idCard REFERENCE TO outRef;
+		DECLARE idExt REFERENCE TO outRef;
+		DECLARE relPerson REFERENCE TO outRef;
+		
+		SET outRef.KodFilial	=	inRef.KodFilial; 
+		SET outRef.KodUdo		=	inRef.KodUdo;
+		
+		FOR person AS inRef.Person[] DO
+			CREATE LASTCHILD OF outRef AS personInfo NAME 'PersonInfo';
+			SET personInfo.inds:NameAddrType 					= 'Customer';
+			SET personInfo.inds:PersonName.inds:LastName		= person.Surname;
+			SET personInfo.inds:PersonName.inds:FirstName 		= person.Name;
+			SET personInfo.inds:PersonName.inds:MiddleName 		= person.FatherName;
+			
+			CREATE LASTCHILD OF personInfo AS contInfo NAMESPACE inds NAME 'ContactInfo';
+			FOR addr AS person.ClientAddr[] DO
+				CREATE LASTCHILD OF contInfo AS outAddr NAMESPACE ifxca NAME 'PostAddr';
+				SET outAddr.ifxca:Addr1				= addr.AddrFull; 
+				SET outAddr.ifxca:AddrType			= recodeAddressTypeFromTransact(addr.AddrType); 
+				SET outAddr.ifxca:Addr1				= addr.AddrFull; 				
+			END FOR;
+			
+			SET personInfo.inds:BirthDt 			= person.DateBirth;
+			SET personInfo.inds:Gender 				= recodeGenderFromTransact(person.Gender);
+			SET personInfo.inds:MaritalStatus 		= recodeMaritalStatusFromTransact(person.FamilySts);
+			SET personInfo.inds:BirthDt 			= person.DateBirth;
+			
+			CREATE FIELD personInfo.inds:IdentityCards.inds:IdentityCard AS idCard;
+			SET idCard.inds:IdType					= recodeIdTypeFromTransact(person.DocType);
+			SET idCard.inds:IdNum					= person.DocNum;
+			SET idCard.inds:IssueDt					= person.DocDateIssue;
+			SET idCard.inds:IssuedBy				= person.OrgName;
+			SET idCard.inds:ValidTo					= person.DocDateEnd;
+			
+			SET personInfo.inds:BirthPlace			= person.BirthPlace;
+			SET personInfo.inds:Resident			= person.Resident;
+			SET personInfo.inds:Citizenship			= person.CoutryCitizenship;
+			
+			CREATE LASTCHILD OF personInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key 							= 'IIN';
+			SET idExt.Value 						= person.IIN;
+			CREATE LASTCHILD OF personInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key 							= 'CIF';
+			SET idExt.Value 						= person.IdEPK;
+			CREATE LASTCHILD OF personInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key 							= 'Transact';
+			SET idExt.Value 						= person.IIN;
+			
+			CREATE FIELD personInfo.Phones;
+			FOR contact AS person.ClientContact[] DO 
+				IF contact.ContactType IN ('1', '2', '3', '4', '5') THEN
+					CREATE LASTCHILD OF personInfo.Phones AS outCont NAME 'Phone';
+					SET outCont.PhoneType			= recodePhoneTypeFromTransact(contact.ContactType);
+					SET outCont.PhoneNum			= contact.ContactData;
+				END IF;
+			END FOR;
+			
+			CREATE FIELD personInfo.EMails;
+			FOR contact AS person.ClientContact[] DO 
+				IF contact.ContactType IN ('6') THEN
+					CREATE LASTCHILD OF personInfo.EMails AS outCont NAME 'EMail';
+					SET outCont.EMailAddr			= contact.ContactData;
+				END IF;
+			END FOR;
+			
+			CREATE FIELD personInfo.RelPersons;
+			FOR clientTouch AS person.ClientTouch[] DO 
+				CREATE LASTCHILD OF personInfo.RelPersons AS relPerson NAME 'RelPerson';
+				SET relPerson.RelPersonId.Key 		= 'CIF';
+				SET relPerson.RelPersonId.Value		= clientTouch.TouchIdEPK;
+				SET relPerson.RelationshipType		= clientTouch.TouchType;
+			END FOR; 
+			
+			SET personInfo.IsForeignPP 				= recodeForeignIndFromTransact(person.IPDL);
+			SET personInfo.Segment	 				= recodeSegmentFromTransact(person.Segment);
+			SET personInfo.ClientJobTitle 			= person.WorkStat;
+			SET personInfo.ClientWorkPlace			= person.WorkPlace;
+			SET personInfo.CustCategory 			= person.Category;
+			
+		END FOR;
+		
+		SET Environment.UserProperties.TSMUID				= inRef.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ * Запрос в IMAP "Отправка СМС клиенту": SendSmsRq -> KZSendSMSRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO10
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSendSMSRq';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.SendSmsRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZSendSMSRq;
+		
+		SET outRef.RqUID					= inRef.RqUID;
+		SET outRef.RqTm						= inRef.RqTm;
+		SET outRef.OperUID					= inRef.TSMUID;
+		SET outRef.SPName					= 'T';
+		SET outRef.VersionId				= '1.3.0';
+		SET outRef.PhoneNumber				= inRef.TlfNmbr;
+		SET outRef.SMSText					= inRef.TxtMsg;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Маршрутизация в новую или старую прагму в зависимости от даты запроса
+ **/
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_card
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		DECLARE splitPoint DATE CAST(CardInfoSplitPoint AS DATE FORMAT 'yyyy-MM-dd');
+		DECLARE msgDate DATE CAST(SUBSTRING(InputRoot.XMLNSC.*[<].RqTm FROM 1 FOR 10) AS DATE FORMAT 'yyyy-MM-dd');
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		-- новая или старая прагма в зависимости от даты
+		IF msgDate < splitPoint THEN
+			SET systemId 	= 'urn:sbkzsystems:pragma';
+		ELSE 
+			SET systemId 	= 'urn:sbkzsystems:newpragma';
+		END IF;
+		SET adapterType = 'urn:sbkztypes:esb:adapter';
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Константа для указания, что ищем адаптер системы
+	 	SET OutputRoot.MQRFH2.usr.TypeId	= adapterType;
+	 	-- Идентификатор системы, в адаптер которой необходимо отправить запрос
+	 	SET OutputRoot.MQRFH2.usr.SystemId	= systemId;
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;	
+END MODULE;
+
+/**
+ * Маршрутизация в ПМИЛ или старую прагму в зависимости от даты запроса
+ **/
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr_salary
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+		
+		DECLARE splitPoint DATE CAST(SalaryTurnoverSplitPoint AS DATE FORMAT 'yyyy-MM-dd');
+		DECLARE msgDate DATE CAST(SUBSTRING(InputRoot.XMLNSC.*[<].RqTm FROM 1 FOR 10) AS DATE FORMAT 'yyyy-MM-dd');
+		
+		-- ПМИЛ или старая прагма в зависимости от даты
+		IF msgDate < splitPoint THEN
+			SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+			SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:newpragma';
+		ELSE 
+			-- Маршрутизация через OperationId в ПМИЛ
+	 		SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);				
+		END IF;
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;	
+END MODULE;
+
+/**
+ * Запрос "Проверка соответствия" (Online matching): HunterOnlineMatchingRq -> KZOnlineMatchingRq
+ **/ 
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO_OnlineMatching
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZOnlineMatchingRq';	
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.HunterOnlineMatchingRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZOnlineMatchingRq;
+		
+		SET outRef.batchXml								= inRef.batchXml;
+		SET outRef.controlXml							= inRef.controlXml;
+		
+		SET Environment.UserProperties.TSMUID				= inRef.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Запрос "Обновление метаданных": HunterUpdateMetadataRq -> KZUpdMetadataRq
+ **/
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO_UpdateMetadata
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZUpdMetadataRq';	
+		
+		CALL FillMDOStandartElementsRq(InputBody, OutputRoot.XMLNSC);	
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.HunterUpdateMetadataRq;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZUpdMetadataRq;
+		DECLARE dataRec REFERENCE TO outRef;
+		DECLARE idExt REFERENCE TO outRef;
+		DECLARE dataField REFERENCE TO outRef;
+		
+		FOR subm AS inRef.submissions.submission[] DO
+			CREATE LASTCHILD OF outRef AS dataRec NAME 'DataRec';
+			CREATE FIELD dataRec.PersonInfo;
+			CREATE LASTCHILD OF dataRec.PersonInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key 							= 'TRID';
+			SET idExt.Value							= subm.clientID;
+			CREATE LASTCHILD OF dataRec.PersonInfo AS idExt NAME 'PersonIdExt';
+			SET idExt.Key 							= 'ID';
+			SET idExt.Value							= subm.identifier;
+			FOR field AS subm.fields.field[] DO 
+				CREATE LASTCHILD OF dataRec AS dataField NAME 'DataField';
+				SET dataField.FieldName		 VALUE  = field.name;
+				SET dataField.FieldNewValue	        = field.new_value;
+			END FOR;
+		END FOR;
+		
+		SET Environment.UserProperties.TSMUID				= inRef.TSMUID;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertTransact2MDO_GetPensionInfo
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZPersonGetPensionInfoRq';	
+		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZPersonGetPensionInfoRq;
+		
+		SET outRef = inRef;
+				
+		RETURN TRUE;
+	END;
+END MODULE;
+

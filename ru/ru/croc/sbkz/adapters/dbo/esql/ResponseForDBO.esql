@@ -1,0 +1,503 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.dbo.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+-- Восстановление заголовка и тела исходного сообщения
+CREATE COMPUTE MODULE ResponseForDBO_AddOrigHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL AddOrigHead(InputRoot, OutputRoot);
+		CREATE FIRSTCHILD OF OutputRoot.XMLNSC NAME 'OrigMess';
+		SET OutputRoot.XMLNSC.OrigMess = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body;
+		RETURN TRUE;		
+	END;
+END MODULE;
+
+-- Перенаправление на нужную ветку в соответствии с маршрутизацией
+CREATE COMPUTE MODULE ResponseForDBO_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		
+	DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+	DECLARE labelName CHARACTER;
+	DECLARE OperationWay CHARACTER Environment.UserProperties.Operation;
+	CASE Operation
+		WHEN 'KZGetCurrencyRateRs' THEN
+			SET labelName = 'KZGetCurrencyRateRs';
+		WHEN 'KZLegalPayDocRs' THEN
+			SET labelName = 'KZLegalPayDocRs';
+		WHEN 'KZLegalCurrOperRs' THEN
+			SET labelName = 'KZLegalCurrOperRs'; 
+		WHEN 'KZLegalCanPayDocRs' THEN
+			SET labelName = 'KZLegalCanPayDocRs';
+		WHEN 'KZLegalGetPayDocStatusRs' THEN
+			SET labelName = 'KZLegalGetPayDocStatusRs';
+		WHEN 'KZLegalGetAccountStatementRs' THEN
+			SET labelName = 'KZLegalGetAccountStatementRs';
+		WHEN 'KZGetContractListRs' THEN
+			SET labelName = 'KZGetContractListRs';
+		WHEN 'KZDepositSyncRs' THEN
+			SET labelName = 'DEPOSIT';
+		WHEN 'KZDepositStatusRs' THEN
+			SET labelName = 'KZDepositStatusRs';
+		WHEN 'PragmaEnvelope' THEN
+			DECLARE ServiceCode CHARACTER FIELDVALUE(InputRoot.XMLNSC.*[<].ServiceCode);
+			CASE ServiceCode
+			WHEN 'SbbolOpenAcct' THEN
+ 				SET labelName = 'OpenAccountRs';
+			WHEN 'SbbolStatAcct' THEN
+				SET labelName = 'OpenAccountRs';
+			ElSE 
+				THROW USER EXCEPTION VALUES ('Unknown message format in ResponseForDBO', Operation);
+			END CASE;		
+				
+		WHEN 'UFXMsg' THEN
+			CASE OperationWay			
+				WHEN 'StatementCardRequest' THEN
+					SET labelName = 'StatementCardResponse';
+					ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown message format in ResponseForDBO', Operation);
+			END CASE;			
+		ELSE
+		-- Неизвестный тип сообщения
+		THROW USER EXCEPTION VALUES ('Unknown message format in ResponseForDBO', Operation);	 
+	END CASE;
+	
+	SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;	 
+	
+	RETURN TRUE;
+	
+	END;
+END MODULE;
+
+
+/*
+	Ответ на запрос экспорта курсов валют.
+*/
+CREATE COMPUTE MODULE ResponseForDBO_ConvertMDO2DBO_CurrRate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillBSSStandardElements(InputRoot, OutputRoot, 'CURRENCYRATES', 'CURRENCYRATES');
+		CALL CopyCurrRatesFromMDO(InputRoot.XMLNSC.KZGetCurrencyRateRs,OutputRoot.XMLNSC.*:CURRENCYRATES);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/*
+	Ответ на платежное поручение ЮЛ.
+*/
+CREATE COMPUTE MODULE ResponseForDBO_ConvertMDO2DBO_PayDoc
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE rsMessage CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		DECLARE rqMessage CHARACTER LEFT(rsMessage, LENGTH(rsMessage) - 2) || 'Rq';
+		
+		DECLARE status CHARACTER COALESCE(FIELDVALUE(InputRoot.XMLNSC.{rsMessage}.Status.ifxca:StatusCode), '');
+		DECLARE statusDesc CHARACTER COALESCE(FIELDVALUE(InputRoot.XMLNSC.{rsMessage}.Status.ifxca:StatusDesc), '');
+		DECLARE docId CHARACTER COALESCE(FIELDVALUE(InputRoot.XMLNSC.{rsMessage}.CreatedDocId), '');
+		
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);			
+		
+		IF status = '0' AND docId <> '' THEN
+			-- от МАБПК получен корректный ответ
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.{rqMessage}.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= 'Принят АБС'; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '17011';
+
+		ELSEIF status = '-400' THEN
+			-- операция завершилась таймаутом
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.{rqMessage}.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= 'Ошибка выгрузки'; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '15041';
+
+		ELSEIF status = '-105' THEN
+			-- операция завершилась таймаутом
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.{rqMessage}.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= 'Ошибка выгрузки'; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '15041';	
+
+		ELSE			
+			-- от МАБПК получена ошибка или отсутствует CreatedDocId
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.{rqMessage}.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= CASE WHEN statusDesc <> '' THEN 'Код ошибки МАБПК: ' || status || '; Описание ошибки МАБПК: ' || statusDesc 
+			ELSE 'Не заполнен CreatedDocId' END; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '17021';
+		END IF;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/**
+ *  Формирование ответов на запрос статуса. u00671 04/02/2014
+ **/
+CREATE COMPUTE MODULE ResponseForDBO_ConvertMDO2DBO_Status
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalGetPayDocStatusRs;	
+		
+		DECLARE status CHARACTER COALESCE(FIELDVALUE(inRef.Status.ifxca:StatusCode), '');
+		DECLARE statusDesc CHARACTER COALESCE(FIELDVALUE(inRef.Status.ifxca:StatusDesc), '');
+		
+		IF status = '-2' THEN --statusDesc = 'Не найдено ни одного документаиз запроса'
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.KZLegalGetPayDocStatusRq.Doc.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= 'Не обнаружен в АБС'; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '17071';
+			RETURN TRUE;
+		ELSEIF status = '-3' THEN
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.KZLegalGetPayDocStatusRq.Doc.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= 'Не обнаружен в АБС'; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '17071';
+			RETURN TRUE;
+		ELSEIF status = '-400' THEN
+			-- операция завершилась таймаутом
+			
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.KZLegalGetPayDocStatusRq.Doc.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= 'Ошибка выгрузки'; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '15041';
+			RETURN TRUE;
+		ELSEIF status NOT IN ('0', '') THEN
+			-- неопределенная ошибка
+			
+			CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+			CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');
+			DECLARE kvt REFERENCE TO OutputRoot.XMLNSC.*:KVT;
+			SET kvt.DOCTYPE 				= '';
+			SET kvt.DOCREF 					= FIELDVALUE(InputRoot.XMLNSC.OrigMess.KZLegalGetPayDocStatusRq.Doc.PayDocInfo.DocRef);
+			SET kvt.NOTEFROMBANK			= statusDesc; 
+			SET kvt.RECEIVEROFFICIALS		= '';
+			SET kvt.STATUS					= '17021'; 
+			RETURN TRUE;
+		ELSE 
+			FOR payDoc AS inRef.PayDocStatusInfo[] DO
+				SET OutputRoot = NULL;
+				CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+				CALL FillBSSStandardElements(InputRoot, OutputRoot, 'KVT', 'KVT');			
+				CALL CopyPayDocFromMDO(payDoc,OutputRoot.XMLNSC.*:KVT);	
+				PROPAGATE;
+			END FOR;	
+			RETURN FALSE;
+		END IF;
+	END;	
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForDBO_ConvertMDO2DBO_Statement
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN  
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		CALL FillBSSStandardElements(InputRoot, OutputRoot, 'Statement', 'STATEMENT');
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZLegalGetAccountStatementRs;
+		DECLARE stmt REFERENCE TO inRef.StatementInfo;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:Statement;
+		CALL CopyStatementFromMDO(stmt,outRef,FIELDVALUE(inRef.RqTm));		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+u07357 09.05.2015
+*/
+CREATE COMPUTE MODULE ResponseForBSS_ConvertMDO2BSS_KZGetContractListRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+ 		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		DECLARE outRq REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRq NAME 'CONTRACT_LIST';
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZGetContractListRs;	
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:CONTRACT_LIST;	
+		DECLARE conts REFERENCE TO outRef;		
+		DECLARE contl NAMESPACE 'CONTRACT_LIST';
+		DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';		
+
+		SET outRq.(XMLNSC.NamespaceDecl)xmlns:ns1 = contl;
+		SET outRq.(XMLNSC.NamespaceDecl)xmlns:xsi		= xsi;
+		SET outRq.(XMLNSC.Attribute)ID 					= InputRoot.XMLNSC.*:*[<].RqUID;
+		SET outRq.(XMLNSC.Attribute)DateTime 			= CAST(InputRoot.XMLNSC.*:*[<].RqTm AS DATE FORMAT XSD_DATE_TIME_FORMAT);	
+
+		FOR contrac AS inRef.Contract[] DO
+			CREATE LASTCHILD OF outRef AS conts NAME 'CONTRACT';
+			SET conts.BIN 			= contrac.BIN;		
+			SET conts.UNK  			= contrac.UNC;
+			SET conts.IntegrationID = contrac.IntegrationID;
+			SET conts.Id 			= contrac.Id;
+			SET conts.NUMBER 	 	= contrac.NUMBER;
+			SET conts.DATE 	 		= contrac.DATE; 
+			SET conts.AMOUNT  	 	= contrac.AMOUNT;
+			SET conts.CURRENCY   	= contrac.CURRENCY;
+		END FOR; 
+		
+	 	IF NOT EXISTS(inRef.Contract[]) THEN
+			CREATE LASTCHILD OF outRef AS conts NAME 'CONTRACT';
+			SET conts.BIN 			= Environment.UserProperties.BIN;		
+	 	END IF;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE ResponseForDBO_ConvertMDO2DBO_DEPOSIT
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+ 		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		DECLARE outRq REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRq NAME 'DEPOSIT';
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZDepositSyncRs.DepositSyncResult;	
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:DEPOSIT;	
+		DECLARE conts REFERENCE TO outRef;		
+		DECLARE contl NAMESPACE 'DEPOSIT';
+		DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';		
+
+		SET outRq.(XMLNSC.NamespaceDecl)xmlns:ns1       = contl;
+		SET outRq.(XMLNSC.NamespaceDecl)xmlns:xsi		= xsi;
+		SET outRq.(XMLNSC.Attribute)ID 					= InputRoot.XMLNSC.*:*[<].RqUID;
+		SET outRq.(XMLNSC.Attribute)DateTime 			= CAST(InputRoot.XMLNSC.*:*[<].RqTm AS DATE FORMAT XSD_DATE_TIME_FORMAT);
+
+		SET outRq.DOCREF 					= inRef.RsInfo.DOCREF;
+		SET outRq.NOTEFROMBANK  			= inRef.RsInfo.NOTEFROMBANK; 
+		SET outRq.STATUS					= inRef.RsInfo.STATUS;
+		
+		DECLARE ClientInfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS ClientInfo NAME 'CLIENTINFO';
+
+		SET ClientInfo.BIN 			= inRef.RsClientInfo.BIN;
+		SET ClientInfo.NAME 		= inRef.RsClientInfo.Name;
+		SET ClientInfo.KOD 			= inRef.RsClientInfo.KOD;
+		SET ClientInfo.TYPEOWNER	= inRef.RsClientInfo.TypeOwner;
+
+		DECLARE DepositInfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS DepositInfo NAME 'DEPOSITINFO';
+		SET DepositInfo.ACCOUNTDEPOSIT 			= inRef.RsDepositInfo.AccountDeposit;
+		SET DepositInfo.TYPEDEPOSIT 			= inRef.RsDepositInfo.TypeDeposit;
+		SET DepositInfo.CURRENCYDEPOSIT 		= inRef.RsDepositInfo.CurrencyDeposit;
+		SET DepositInfo.AMMOUNTDEPOSIT 			= inRef.RsDepositInfo.AmmountDeposit;
+		SET DepositInfo.PERIODDEPOSIT 			= inRef.RsDepositInfo.PeriodDeposit;
+		SET DepositInfo.DATEFROM 				= inRef.RsDepositInfo.DateFrom;
+		SET DepositInfo.DATETO 					= inRef.RsDepositInfo.DateTo;
+		SET DepositInfo.RATE 					= inRef.RsDepositInfo.Rate;
+		SET DepositInfo.EFFECTIVERATE 			= inRef.RsDepositInfo.EffectiveRate;
+		SET DepositInfo.MINIMUMBALANCE 			= inRef.RsDepositInfo.MinimumBalance;
+		SET DepositInfo.REFILLDEPOSIT 			= inRef.RsDepositInfo.RefillDeposit;
+		SET DepositInfo.WITHDRAWAL 				= inRef.RsDepositInfo.WithdrawAwail;
+		SET DepositInfo.KPN 					= inRef.RsDepositInfo.KPN;
+		SET DepositInfo.ACCOUNTCOMPENSATION 	= inRef.RsDepositInfo.AccountCompensation;
+		SET DepositInfo.INTERESTPAYMENT 		= inRef.RsDepositInfo.InterestPayment;
+		SET DepositInfo.BIK 					= inRef.RsDepositInfo.BIC;
+			
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForDBO_ConvertMDO2DBO_KZDepositStatusRs
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+ 		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		DECLARE outRq REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRq NAME 'DEPOSIT';
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.KZDepositStatusRs.DepositSyncResult;	
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:DEPOSIT;	
+		DECLARE conts REFERENCE TO outRef;		
+		DECLARE contl NAMESPACE 'DEPOSIT';
+		DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';		
+
+		SET outRq.(XMLNSC.NamespaceDecl)xmlns:ns1       = contl;
+		SET outRq.(XMLNSC.NamespaceDecl)xmlns:xsi		= xsi;
+		SET outRq.(XMLNSC.Attribute)ID 					= InputRoot.XMLNSC.*:*[<].RqUID;
+		SET outRq.(XMLNSC.Attribute)DateTime 			= CAST(InputRoot.XMLNSC.*:*[<].RqTm AS DATE FORMAT XSD_DATE_TIME_FORMAT);
+
+		SET outRq.DOCREF 					= inRef.RsInfo.DOCREF;
+		SET outRq.NOTEFROMBANK  			= inRef.RsInfo.NOTEFROMBANK; 
+		SET outRq.STATUS					= inRef.RsInfo.STATUS;
+		
+		DECLARE ClientInfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS ClientInfo NAME 'CLIENTINFO';
+
+		SET ClientInfo.BIN 			= inRef.RsClientInfo.BIN;
+		SET ClientInfo.NAME 		= inRef.RsClientInfo.Name;
+		SET ClientInfo.KOD 			= inRef.RsClientInfo.KOD;
+		SET ClientInfo.TYPEOWNER	= inRef.RsClientInfo.TypeOwner; 
+
+		DECLARE DepositInfo REFERENCE TO outRef;
+		CREATE LASTCHILD OF outRef AS DepositInfo NAME 'DEPOSITINFO';
+		SET DepositInfo.ACCOUNTDEPOSIT 			= inRef.RsDepositInfo.AccountDeposit;
+		SET DepositInfo.TYPEDEPOSIT 			= inRef.RsDepositInfo.TypeDeposit;
+		SET DepositInfo.CURRENCYDEPOSIT 		= inRef.RsDepositInfo.CurrencyDeposit;
+		SET DepositInfo.AMMOUNTDEPOSIT 			= inRef.RsDepositInfo.AmmountDeposit;
+		SET DepositInfo.PERIODDEPOSIT 			= inRef.RsDepositInfo.PeriodDeposit;
+		SET DepositInfo.DATEFROM 				= inRef.RsDepositInfo.DateFrom;
+		SET DepositInfo.DATETO 					= inRef.RsDepositInfo.DateTo;
+		SET DepositInfo.RATE 					= inRef.RsDepositInfo.Rate;
+		SET DepositInfo.EFFECTIVERATE 			= inRef.RsDepositInfo.EffectiveRate;
+		SET DepositInfo.MINIMUMBALANCE 			= inRef.RsDepositInfo.MinimumBalance;
+		SET DepositInfo.REFILLDEPOSIT 			= inRef.RsDepositInfo.RefillDeposit;
+		SET DepositInfo.WITHDRAWAL 				= inRef.RsDepositInfo.WithdrawAwail;
+		SET DepositInfo.KPN 					= inRef.RsDepositInfo.KPN;
+		SET DepositInfo.ACCOUNTCOMPENSATION 	= inRef.RsDepositInfo.AccountCompensation;
+		SET DepositInfo.INTERESTPAYMENT 		= inRef.RsDepositInfo.InterestPayment;
+		SET DepositInfo.BIK 					= inRef.RsDepositInfo.BIC;
+			
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForDBO_ConvertMDO2DBO_StatementCardResponse
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		
+		DECLARE outRq REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRq NAME 'StatementCardResponse';
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.UFXMsg.MsgData.Doc;	
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:StatementCardResponse;	
+		DECLARE conts REFERENCE TO outRef;		
+		DECLARE contl NAMESPACE 'StatementCardResponse';
+		DECLARE xsi NAMESPACE 'http://www.w3.org/2001/XMLSchema-instance';		
+
+		SET outRq.(XMLNSC.NamespaceDecl)xmlns:tns       = contl;
+		SET outRq.(XMLNSC.NamespaceDecl)xmlns:xsi		= xsi;
+		SET outRq.(XMLNSC.Attribute)ID 					= InputRoot.XMLNSC.*:*[<].MsgId;
+		SET outRq.(XMLNSC.Attribute)DateTime 			= Environment.UserProperties.RqTm;--CAST(InputRoot.XMLNSC.*:*[<].RqTm AS DATE FORMAT XSD_DATE_TIME_FORMAT);
+		
+		DECLARE outDet REFERENCE TO outRq;
+		CREATE LASTCHILD OF outRq AS outDet NAME 'DetailsResponse';
+		SET outDet.CodeResponse				= inRef.Status.RespCode;
+		SET outDet.CodeResponseDescription 	= inRef.Status.RespText;
+		SET outDet.ContractNumber			= inRef.Requestor.ContractNumber;		
+		
+		FOR inResDtl AS inRef.ResultDtls.Parm[] DO
+			IF inResDtl.ParmCode = 'DateFrom' THEN
+				SET outDet.DateFrom	= inResDtl.Value; 
+			END IF;
+			IF inResDtl.ParmCode = 'DateTo' THEN
+				SET outDet.DateTo	= inResDtl.Value; 
+			END IF;
+		END FOR;
+		
+		DECLARE outBal REFERENCE TO outRq;
+		CREATE LASTCHILD OF outRq AS outBal NAME 'Balances';
+		
+		FOR inBal AS inRef.DataRs.Balances.Balance[] DO
+			IF inBal.Name = 'Available' THEN			
+				SET outBal.AvailableBalance.Amount 		= inBal.Amount;
+				SET outBal.AvailableBalance.Currency	= inBal.Currency;
+			END IF;
+			IF inBal.Name = 'CR_LIMIT' THEN			
+				SET outBal.CreditLimit.Amount 		= inBal.Amount;
+				SET outBal.CreditLimit.Currency		= inBal.Currency;
+			END IF;
+			IF inBal.Name = 'BLOCKED' THEN			
+				SET outBal.Blocked.Amount 		= inBal.Amount;
+				SET outBal.Blocked.Currency		= inBal.Currency;
+			END IF;			
+			IF inBal.Name = 'BLOCKED' THEN			
+				SET outBal.Payment.Amount 		= inBal.Amount;
+				SET outBal.Payment.Currency		= inBal.Currency;
+			END IF;			
+		END FOR;
+		
+		DECLARE outStm REFERENCE TO outRq;
+		CREATE LASTCHILD OF outRq AS outStm NAME 'Statement';
+		IF EXISTS(inRef.DataRs.Stmt.AdditionalStmt.BeginBalance.Balance[]) THEN
+			SET outStm.BeginBalance.Amount 		= inRef.DataRs.Stmt.AdditionalStmt.BeginBalance.Balance.Amount;
+			SET outStm.BeginBalance.Currency 	= inRef.DataRs.Stmt.AdditionalStmt.BeginBalance.Balance.Currency;
+		ELSE
+			SET outStm.BeginBalance.Amount 		= '0.00';
+			SET outStm.BeginBalance.Currency	= inRef.DataRs.Balances.Balance.Currency;
+		END IF;
+		-- Необходимо доработать блок Operation
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForDBO_Convert2MDO_OpenAcct
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.AggrMsg.*[<].RESPONSE.PragmaEnvelope;
+		DECLARE outRef REFERENCE TO OutputRoot;
+		
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRef NAME 'OpenAccountDetails';
+		
+	
+		
+		
+	
+		SET outRef.(XMLNSC.Attribute)ID		 			= 	inRef.XMLNSC.PragmaEnvelope.MessageUID;
+		SET outRef.(XMLNSC.Attribute)DateTime 			= 	inRef.XMLNSC.PragmaEnvelope.MessageDateTime;
+		SET outRef.DocRef 			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:DocRef;
+		SET outRef.DocStatus		= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:DocStatus;
+		SET outRef.NoteFromBank 	= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:NoteFromBank;
+		SET outRef.AccountDetails.Account	 		= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:Account;
+		SET outRef.AccountDetails.ClientBIN			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:ClientBIN;
+		SET outRef.AccountDetails.AccountCurrency		= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:AccountCurrency;
+		SET outRef.AccountDetails.FilialId			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:FilialId;
+		SET outRef.AccountDetails.OpenDate			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:OpenDate;		
+		
+		IF  inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:CloseDate <> '0001-01-01'  THEN
+			SET outRef.AccountDetails.CloseDate			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:CloseDate;			--inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:CloseDate;
+		ELSE	
+		CREATE FIELD outRef.AccountDetails.CloseDate;
+		END IF;
+
+		SET outRef.AccountDetails.ManagerAccount.ManagerName			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:ManagerAccount.*:ManagerName;
+		SET outRef.AccountDetails.ManagerAccount.ManagerCode			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:ManagerAccount.*:ManagerCode;
+		SET outRef.AccountDetails.ContractNumber			= 	inRef.XMLNSC.*:PragmaEnvelope.*:ResponseData.*:OpenAccount_resp.*:OpenAccountDetails.*:AccountDetails.*:ManagerAccount.*:ContractNumber;
+		
+		
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="src" path=""/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="var" path="JCN_HOME/javacompute.jar"/>
+	<classpathentry kind="var" path="JCN_HOME/jplugin2.jar"/>
+	<classpathentry kind="lib" path="lib/ConfiguratorHash.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/CommonFlowsJava/lib/com.ibm.mq.axis2.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/CommonFlowsJava/lib/com.ibm.mq.commonservices.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/CommonFlowsJava/lib/com.ibm.mq.defaultconfig.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/CommonFlowsJava/lib/com.ibm.mq.headers.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/CommonFlowsJava/lib/com.ibm.mq.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/CommonFlowsJava/lib/com.ibm.mq.jmqi.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/CommonFlowsJava/lib/com.ibm.mq.jms.Nojndi.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/CommonFlowsJava/lib/com.ibm.mq.pcf.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/CommonFlowsJava/lib/com.ibm.mq.postcard.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/CommonFlowsJava/lib/com.ibm.mq.soap.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/CommonFlowsJava/lib/com.ibm.mq.tools.ras.jar"/>
+	<classpathentry kind="lib" path="C:/Исходники/TEST_27012016/CommonFlowsJava/lib/com.ibm.mqjms.jar"/>
+	<classpathentry kind="output" path=""/>
+</classpath>

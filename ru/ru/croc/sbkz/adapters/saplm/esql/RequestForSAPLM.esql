@@ -1,0 +1,76 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.saplm.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+DECLARE XSD_DATE_TIME_FORMAT CONSTANT CHARACTER 'IU';
+
+
+CREATE COMPUTE MODULE RequestFoSAPLM_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER Environment.UserProperties.Operation;
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'PutLimitRq' THEN
+			SET labelName = 'PutLimitRq';
+		WHEN 'PutBusinessPartnerRq' THEN
+			SET labelName = 'PutBusinessPartnerRq';
+		WHEN 'UpdateGSZRq' THEN
+			SET labelName = 'UpdateGSZRq';
+		WHEN 'UpdateProductDetailsRq' THEN
+			SET labelName = 'UpdateProductDetailsRq';			
+		WHEN 'PutCreditDealRq' THEN
+			SET labelName = 'PutCreditDealRq';			
+		WHEN 'SendRateRq' THEN
+			SET labelName = 'SendRateRq';		
+		WHEN 'GetMarkerDebtCapacityRq' THEN
+			SET labelName = 'GetMarkerDebtCapacityRq';		
+		WHEN 'KZExpCurrencyRateRq' THEN
+			SET labelName = 'KZExpCurrencyRateRq';
+		WHEN 'KZGetLimitRqFromCRMtoSAPLM' THEN
+			SET labelName = 'KZGetLimitRqFromCRMtoSAPLM';	
+		WHEN 'GetLimitRq' THEN
+			SET labelName = 'GetLimitRq';	
+		WHEN 'CreateLimitRq' THEN
+			SET labelName = 'CreateLimitRq';
+		WHEN 'UpdateLimitRq' THEN
+			SET labelName = 'UpdateLimitRq';
+		WHEN 'PutRelatedBorrowersGroupStructRq' THEN
+			SET labelName = 'PutRelatedBorrowersGroupStructRq';
+		WHEN 'UpdateFinTransactionRq' THEN
+			SET labelName = 'UpdateFinTransactionRq';
+		WHEN 'CalcMarkerDebtCapacityRq' THEN
+			SET labelName = 'CalcMarkerDebtCapacityRq';
+		WHEN 'SendMasterDataNf' THEN
+			SET labelName = 'SendMasterDataNf';
+		WHEN 'PutPositionRq' THEN
+			SET labelName = 'PutPositionRq';	
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown format XML in SAP(RequestForESB)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/*
+u07357 08.04.2015
+*/
+CREATE COMPUTE MODULE RequestForESB_Convert_GetLimitRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE InRq REFERENCE TO InputRoot.XMLNSC.KZGetLimitRqFromCRMtoSAPLM;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		DECLARE OutRq REFERENCE TO OutputRoot;		
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS OutRq NAME 'GetLimitRq';
+		SET OutRq = InRq;
+		RETURN TRUE;
+	END;
+END MODULE;

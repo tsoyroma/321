@@ -1,0 +1,457 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.sbolrs.esql
+
+PATH ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE RepeatSBOLRS_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<].*[<]);
+		DECLARE labelName CHARACTER;
+
+		---DECLARE varWAY4 CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<].*[<].WAY4);
+
+		DECLARE varYWAY4 CHARACTER;
+		DECLARE inXferAddRs REFERENCE TO InputRoot.XMLNSC.*:DoIFXRs.*:XferAddRs;
+		SET varYWAY4 = inXferAddRs.*:WAY4;
+		
+		CASE Operation
+		WHEN 'CardChangeSMSRs' THEN 
+			SET labelName = 'CardChangeSMSRq_add';
+		WHEN 'XferAddRs' THEN
+		    SET labelName = 'XferAddRq_QP';
+
+			CASE varYWAY4
+			WHEN '1' THEN
+		       SET labelName = 'XferAddRq_WAY1';
+			WHEN 'Debet' THEN
+		       SET labelName = 'XferAddRq_WAY_Debet';
+			WHEN 'Fin' THEN
+		       SET labelName = 'XferAddRq_WAY_Fin';
+			ELSE
+		       SET labelName = 'XferAddRq_QP';
+			END CASE;
+		ELSE
+			-- Неизвестный тип сообщения 	
+			THROW USER EXCEPTION VALUES ('Unknown format XML in RepeatSBOLRS(SBOL_RS)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RepeatSBOLRS_ConvertUFX2MDO_XferAddRq_QP
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRs.*:XferAddRs;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZPrivateMoneyTransferRq';		
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	'SBOLRS';
+
+------------------------------------------------------------------------------------------------
+
+		SET outRoot.BankInfo.banks:RegionId	= inRoot.*:RbTbBrchId;
+		
+		SET outRoot.(XMLNSC.NamespaceDecl)xmlns:inds = inds;
+
+		DECLARE attr REFERENCE TO outRoot;
+/*		 
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+		SET attr.AttrId 		= 'VERS';
+		SET attr.AttrValue 		= 'inRoot.(XMLNSC.Attribute)version';
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+		SET attr.AttrId 		= 'TAPP';
+		SET attr.AttrValue		= 'inRoot.*:Target.(XMLNSC.Attribute)app';
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+		SET attr.AttrId 		= 'TROLE';
+		SET attr.AttrValue 		= 'inRoot.*:Target.(XMLNSC.Attribute)role';
+		FOR parm AS inRoot.*:MsgData.*:Doc.*:DocRefSet.*:Parm[] DO
+			IF parm.*:ParmCode IN ('RRN', 'SRN', 'STAN', 'CPID') THEN
+				CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';
+				SET attr.AttrId			= 'parm.*:ParmCode';
+				SET attr.AttrValue 		= 'parm.*:Value';
+			END IF;
+		END FOR;
+*/		
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';		
+		SET attr.AttrId		= 'RRN';
+		SET attr.AttrValue  = inRoot.*:WAYRRN;
+
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';		
+		SET attr.AttrId		= 'SRN';
+		SET attr.AttrValue  = 'SBOLRS_' || inRoot.*:WAYRRN;
+
+		CREATE LASTCHILD OF outRoot AS attr NAME 'ServiceAttr';		
+		SET attr.AttrId		= 'STAN';
+		SET attr.AttrValue  = inRoot.*:AuthCode;
+
+		SET Environment.UserProperties.SenderReference = inRoot.*:WAYRRN || ',' || 'SBOLRS_' || inRoot.*:WAYRRN || ',' || inRoot.*:AuthCode;
+		
+		DECLARE xInfo REFERENCE TO outRoot;
+		CREATE LASTCHILD OF outRoot AS xInfo NAME 'XferInfo';
+		DECLARE acct REFERENCE TO outRoot;
+		CREATE LASTCHILD OF xInfo AS acct NAME 'AcctFrom';
+		SET acct.AcctId	=	inRoot.*:SenderReference;
+		
+		DECLARE extId REFERENCE TO outRoot;
+		CREATE LASTCHILD OF acct AS extId NAME 'ExtAcctId';
+		SET extId.Key 					= 'RBSN';
+		SET extId.Value 				= inRoot.*:WAYContractNumber;		
+		CREATE LASTCHILD OF acct AS extId NAME 'ExtAcctId';
+		SET extId.Key 					= 'MID';
+		SET extId.Value 				= 'W4C';		
+		
+/*
+		SET acct.ClientInfo.PersonInfo.inds:PersonName.inds:LastName		= inRoot.*:Name;
+		SET acct.ClientInfo.PersonInfo.PersonIdExt.Key 						= 'TAXID';
+		SET acct.ClientInfo.PersonInfo.PersonIdExt.Value 					= 'inRoot.*:MsgData.*:Doc.*:Originator.*:Client.*:ClientInfo.*:TaxpayerIdentifier';		
+*/		
+
+		CREATE LASTCHILD OF xInfo AS acct NAME 'AcctTo';		
+		SET acct.AcctId 													= inRoot.*:Account;
+		--SET acct.ClientInfo.PersonInfo.inds:PersonName.inds:LastName		= inRoot.*:Name;
+--		SET acct.ClientInfo.PersonInfo.PersonIdExt.Key 						= 'TAXID';
+--		SET acct.ClientInfo.PersonInfo.PersonIdExt.Value 					= inRoot.*:WAYContractNumber;		
+
+/*
+		CREATE LASTCHILD OF acct AS extId NAME 'ExtAcctId';
+		SET extId.Key 					= 'RBSN';
+		SET extId.Value 				= 'inRoot.*:MsgData.*:Doc.*:Destination.*:RBSNumber';		
+		CREATE LASTCHILD OF acct AS extId NAME 'ExtAcctId';
+		SET extId.Key 					= 'MID';
+		SET extId.Value 				= 'inRoot.*:OperName';	
+*/
+		SET xInfo.TransPurpose			= inRoot.*:Details;
+		--SET xInfo.TransDt				= 'inRoot.*:MsgData.*:Doc.*:Transaction.*:PhaseDate';
+		
+		SET xInfo.Amount				= inRoot.*:WAYAmount;
+		SET xInfo.AmtCur				= inRoot.*:WAYCurrency;
+/*				
+		DECLARE amt REFERENCE TO outRoot;
+		CREATE LASTCHILD OF xInfo AS amt NAME 'TransAddAmt';
+		SET amt.AmtType					= 'inRoot.*:MsgData.*:Doc.*:Transaction.*:Extra.*:Type';
+		SET amt.Amount					= 'inRoot.*:MsgData.*:Doc.*:Transaction.*:Extra.*:Amount';
+		SET amt.AmtCurr					= 'inRoot.*:MsgData.*:Doc.*:Transaction.*:Extra.*:Currency';
+		SET amt.AddInfo					= 'inRoot.*:MsgData.*:Doc.*:Transaction.*:Extra.*:Details';
+		
+		DECLARE bInfo REFERENCE TO outRoot;
+		CREATE LASTCHILD OF xInfo AS bInfo NAME 'BillingInfo';
+		SET bInfo.TransDt				= 'inRoot.*:MsgData.*:Doc.*:Billing.*:PhaseDate';
+		SET bInfo.Amount				= 'inRoot.*:MsgData.*:Doc.*:Billing.*:Amount';
+		SET bInfo.AmtCurr				= 'inRoot.*:MsgData.*:Doc.*:Billing.*:Currency';
+*/
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.ReplyIdentifier					= inRoot.*:SOAPReplyIdentifier;
+		SET Environment.UserProperties.OperUID							= inRoot.*:OperUID;
+
+		SET Environment.UserProperties.WAYOperName						= inRoot.*:WAYOperName;
+		SET Environment.UserProperties.WAYContractNumber	  			= inRoot.*:WAYContractNumber;
+		SET Environment.UserProperties.WAYDestinationContractNumber		= inRoot.*:WAYDestinationContractNumber;
+		SET Environment.UserProperties.WAYAmount						= inRoot.*:WAYAmount;
+		SET Environment.UserProperties.WAYCurrency						= inRoot.*:WAYCurrency;	
+		SET Environment.UserProperties.WAYRRN				          	= inRoot.*:WAYRRN;	
+		SET Environment.UserProperties.Purpouse				          	= inRoot.*:Purpouse;	
+
+		RETURN TRUE;
+	END;	
+END MODULE;
+
+
+CREATE COMPUTE MODULE HTTPRequestForESB_ConvertUFX2MDO_XferAddRq_WAY1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRs.*:XferAddRs;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWay4AccDebitAuthRq';		
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+		 
+		DECLARE id CHARACTER;
+		DECLARE days CHARACTER;
+		DECLARE service CHARACTER 'xferAddtcd';
+		
+		SET days = EXTRACT(DAY FROM CURRENT_DATE);
+					  
+		CALL hash(days,service,id);	
+		
+		DECLARE year_number CHARACTER;
+		DECLARE year_day CHARACTER;
+		
+		SET year_number = EXTRACT(DAYOFYEAR FROM CURRENT_DATE); 
+		SET year_day    = EXTRACT(YEAR FROM CURRENT_DATE);
+		
+		DECLARE lone_year CHARACTER SUBSTRING(year_day FROM 4 FOR 1); 	
+ 		 
+		SET outRoot.OperName					= inRoot.*:OperName;
+		SET outRoot.ContractNumber  			= inRoot.*:XferInfo.*:CardAcctIdFrom.*:CardNum;
+		SET outRoot.DestinationContractNumber	= inRoot.*:XferInfo.*:CardAcctIdTo.*:CardNum;
+		SET outRoot.Amount						= inRoot.*:XferInfo.*:CurAmt;
+		SET outRoot.Currency					= inRoot.*:XferInfo.*:AcctCur;	
+		SET outRoot.RRN				          	= 'SBOLRS' || '_' || lone_year || year_number || '84' || id;	
+		SET outRoot.Purpouse					= inRoot.*:Purpouse; --Details
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RepeatSBOLRS_ConvertUFX2MDO_XferAddRq_WAY1
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRs.*:XferAddRs;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWay4AccDebitAuthRq';		
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+/*		 
+		DECLARE id CHARACTER;
+		DECLARE days CHARACTER;
+		DECLARE service CHARACTER 'xferAddtcd-777';
+		
+		SET days = EXTRACT(DAY FROM CURRENT_DATE);
+					  
+		CALL hash(days,service,id);	
+		
+		DECLARE year_number CHARACTER;
+		DECLARE year_day CHARACTER;
+		
+		SET year_number = EXTRACT(DAYOFYEAR FROM CURRENT_DATE); 
+		SET year_day    = EXTRACT(YEAR FROM CURRENT_DATE);
+		
+		DECLARE lone_year CHARACTER SUBSTRING(year_day FROM 4 FOR 1); 	
+*/ 		 
+		SET outRoot.OperName					= inRoot.*:OperName;
+		SET outRoot.ContractNumber  			= inRoot.*:XferInfo.*:CardAcctIdFrom.*:CardNum;
+		SET outRoot.DestinationContractNumber	= inRoot.*:XferInfo.*:CardAcctIdTo.*:CardNum;
+		SET outRoot.Amount						= inRoot.*:XferInfo.*:CurAmt;
+		SET outRoot.Currency					= inRoot.*:XferInfo.*:AcctCur;	
+--		SET outRoot.RRN				          	= 'SBOLRS' || '_' || lone_year || year_number || '84' || id;	
+		SET outRoot.RRN				          	= inRoot.*:WAYRRN;	
+		SET outRoot.Purpouse					= inRoot.*:Purpouse; --Details
+		
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.ReplyIdentifier	= inRoot.*:SOAPReplyIdentifier;
+		SET Environment.UserProperties.OperUID			= inRoot.*:OperUID;
+		
+		SET Environment.UserProperties.OperName						= inRoot.*:WAYOperName;
+		SET Environment.UserProperties.ContractNumber	  			= inRoot.*:WAYContractNumber;
+		SET Environment.UserProperties.DestinationContractNumber	= inRoot.*:WAYDestinationContractNumber;
+		SET Environment.UserProperties.Amount						= inRoot.*:WAYAmount;
+		SET Environment.UserProperties.Currency						= inRoot.*:WAYCurrency;	
+		SET Environment.UserProperties.RRN				          	= inRoot.*:WAYRRN;	
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RepeatSBOLRS_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE RepeatSBOLRS_ConvertUFX2MDO_XferAddRq_WAY_Debet
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRs.*:XferAddRs;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWay4AccDebitAuthRevRq';		
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+/*		 
+		DECLARE id CHARACTER;
+		DECLARE days CHARACTER;
+		DECLARE service CHARACTER 'xferAddtcd';
+		
+		SET days = EXTRACT(DAY FROM CURRENT_DATE);
+					  
+		CALL hash(days,service,id);	
+		
+		DECLARE year_number CHARACTER;
+		DECLARE year_day CHARACTER;
+		
+		SET year_number = EXTRACT(DAYOFYEAR FROM CURRENT_DATE); 
+		SET year_day    = EXTRACT(YEAR FROM CURRENT_DATE);
+		
+		DECLARE lone_year CHARACTER SUBSTRING(year_day FROM 4 FOR 1); 	
+ */		 
+		SET outRoot.OperName					= inRoot.*:WAYOperName;
+		SET outRoot.ContractNumber  			= inRoot.*:WAYContractNumber;
+		SET outRoot.DestinationContractNumber	= inRoot.*:WAYDestinationContractNumber;
+		SET outRoot.Amount						= inRoot.*:WAYAmount;
+		SET outRoot.Currency					= inRoot.*:WAYCurrency;	
+		SET outRoot.RRN				          	= inRoot.*:WAYRRN;	
+		SET outRoot.Purpouse					= inRoot.*:Purpouse; --Details
+		
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.ReplyIdentifier	= inRoot.*:SOAPReplyIdentifier;
+		SET Environment.UserProperties.OperUID			= inRoot.*:OperUID;
+
+		SET Environment.UserProperties.SenderReference  = inRoot.*:WAYSenderReference;
+		
+		SET Environment.UserProperties.Status.StatusCode       =  inRoot.*:Status.*:StatusCode;
+		SET Environment.UserProperties.Status.StatusDesc       =  inRoot.*:Status.*:StatusDesc;
+		SET Environment.UserProperties.Status.ServerStatusDesc =  inRoot.*:Status.*:ServerStatusDesc;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RepeatSBOLRS_ConvertUFX2MDO_XferAddRq_WAY_Fin
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRs.*:XferAddRs;
+		
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZWay4AccDebitFinAdvRq';		
+		
+		SET outRoot.RqUID	=	inRoot.*:RqUID;
+		SET outRoot.RqTm	=	inRoot.*:RqTm;
+		SET outRoot.OperUID	=	inRoot.*:OperUID;
+		SET outRoot.SPName	=	inRoot.*:SPName;
+/*
+		DECLARE id CHARACTER;
+		DECLARE days CHARACTER;
+		DECLARE service CHARACTER 'xferAddtcd';
+		
+		SET days = EXTRACT(DAY FROM CURRENT_DATE);
+					  
+		CALL hash(days,service,id);	
+		
+		DECLARE year_number CHARACTER;
+		DECLARE year_day CHARACTER;
+		
+		SET year_number = EXTRACT(DAYOFYEAR FROM CURRENT_DATE); 
+		SET year_day    = EXTRACT(YEAR FROM CURRENT_DATE);
+		
+		DECLARE lone_year CHARACTER SUBSTRING(year_day FROM 4 FOR 1); 	
+*/ 		 
+		SET outRoot.OperName					= inRoot.*:WAYOperName;
+		SET outRoot.ContractNumber  			= inRoot.*:WAYContractNumber;
+		SET outRoot.DestinationContractNumber	= inRoot.*:WAYDestinationContractNumber;
+		SET outRoot.Amount						= inRoot.*:WAYAmount;
+		SET outRoot.Currency					= inRoot.*:WAYCurrency;	
+		SET outRoot.RRN				          	= inRoot.*:WAYRRN;
+		SET outRoot.Purpouse					= inRoot.*:Purpouse; --Details	
+		
+		-- сохраним исходные данные запроса для использования при формировании ответа
+		SET Environment.UserProperties.ReplyIdentifier	= inRoot.*:SOAPReplyIdentifier;
+		SET Environment.UserProperties.OperUID			= inRoot.*:OperUID;
+		
+		SET Environment.UserProperties.SenderReference  = inRoot.*:WAYSenderReference;
+		
+		SET Environment.UserProperties.Status.StatusCode       =  inRoot.*:Status.*:StatusCode;
+		SET Environment.UserProperties.Status.StatusDesc       =  inRoot.*:Status.*:StatusDesc;
+		SET Environment.UserProperties.Status.ServerStatusDesc =  inRoot.*:Status.*:ServerStatusDesc;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RepeatSBOLRS_ConvertUFX2MDO_CardChangeSMSRq_add
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.*:DoIFXRs.*:CardChangeSMSRs;
+		DECLARE outRoot REFERENCE TO OutputRoot;
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS outRoot NAME 'KZCardChangeAddSMSRq';
+
+		SET outRoot.RqUID							= inRoot.*:RqUID;
+		SET outRoot.RqTm							= inRoot.*:RqTm;
+		SET outRoot.OperUID							= inRoot.*:OperUID;
+		SET outRoot.SPName							= 'BP_ERIB';
+		SET outRoot.RegNumber		      		    = inRoot.*:OperUID;
+		SET outRoot.ClientNumber		      		= inRoot.*:CustId.*:CustPermId;
+		SET outRoot.BankInfo.RbTbBrchId				= inRoot.*:BankInfo.*:RbTbBrchId;
+		SET outRoot.CardAcctId.SystemId				= inRoot.*:CardAcctId.*:SystemId;
+		SET outRoot.CardAcctId.CardNum				= inRoot.*:CardAcctId.*:CardNum;
+		SET outRoot.CardAcctId.AddrSMS				= inRoot.*:CardAcctId.*:AddrSMS;
+		SET outRoot.CardAcctId.BankInfo.RbTbBrchId	= inRoot.*:CardAcctId.*:BankInfo.*:RbTbBrchId;
+		
+		SET Environment.UserProperties.OperUID    	= inRoot.*:OperUID;
+		SET Environment.UserProperties.ReplyIdentifier	= inRoot.*:SOAPReplyIdentifier;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE RepeatSBOLRS_FillMqRfh2usr_change
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyWholeMessage(InputRoot, OutputRoot);
+		
+		-- Определяем идентификатор системы, в который надо отправить запрос
+		DECLARE systemId, adapterType CHARACTER;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+END MODULE;

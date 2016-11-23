@@ -1,0 +1,104 @@
+BROKER SCHEMA ru.croc.sbrf.bp.common.esql
+
+DECLARE FileEventReceiverProp EXTERNAL CHARACTER 'ESB';
+DECLARE CONST_UNKNOWN CONSTANT CHARACTER 'UNKNOWN';
+
+
+CREATE COMPUTE MODULE FileErrorHandlerSubflow_SetParams
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+
+		SET Environment.UserProperties.FileCollection = InputRoot.Collection;
+		DECLARE zipRef REFERENCE TO Environment.UserProperties.FileCollection.ZipIn.XMLNSC.FileUpload;
+
+		-- Записать файл источник
+		DECLARE sEventSource CHARACTER COALESCE(zipRef.FullPath, CONST_UNKNOWN);
+
+		-- Записать систему-получателя в sEventReciever
+		DECLARE sEventReciever CHARACTER FileEventReceiverProp;
+
+		-- Записать операцию в sProcessStatus
+		DECLARE sProcessStatus CHAR 'SUCCESS';	
+		IF zipRef.ProcStatus IS NOT NULL THEN
+			SET sProcessStatus = zipRef.ProcStatus;	
+		END IF;
+
+		-- Заполнение информации среды
+		SET Environment.ErrParams.QueueName = CONST_UNKNOWN;
+		SET Environment.ErrParams.EventSource = sEventSource;
+		SET Environment.ErrParams.EventReciever = sEventReciever;
+		SET Environment.ErrParams.ProcStatus = sProcessStatus;
+		SET Environment.ErrParams.Operation = CONST_UNKNOWN;
+		SET Environment.ErrParams.RqUID = COALESCE(zipRef.RqUID, CONST_UNKNOWN);
+
+		-- Сохранение параметров сообщения
+		SET Environment.UserProperties.RqUID = Environment.ErrParams.RqUID;
+		SET Environment.UserProperties.OperUID = CONST_UNKNOWN;
+		SET Environment.UserProperties.SPName = COALESCE(zipRef.SPName, CONST_UNKNOWN);
+		SET Environment.UserProperties.Service = CONST_UNKNOWN;
+		SET Environment.UserProperties.Operation = CONST_UNKNOWN;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE FileErrorHandlerSubflow_CreateEventMsg
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET Environment.ErrParams.ProcStatus = 'ERROR';
+
+		--Формирование запроса
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD.Format = MQFMT_STRING;
+
+		-- Создание домена XML
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+
+		-- Получение текста исключения
+		SET OutputRoot.XMLNSC.ExceptionList = InputExceptionList;
+		DECLARE ExceptionBLOB BLOB ASBITSTREAM(OutputRoot.XMLNSC.ExceptionList);
+		DECLARE sFullException CHAR CAST(ExceptionBLOB AS CHAR CCSID 1208);
+		SET OutputRoot.XMLNSC.ExceptionList = NULL;
+		IF sFullException IS NULL THEN
+			SET sFullException = '';
+		END IF;
+		
+		-- Получение исходного сообщения
+		DECLARE sEventMsg CHAR '';
+		
+		--Параметры сообщения
+		DECLARE propRef REFERENCE TO InputRoot.MQMD;
+		
+		DECLARE inCCSID INT 866;
+		DECLARE inEncoding INT 546;
+		DECLARE msgBitStream BLOB ASBITSTREAM(Environment.UserProperties.FileCollection, inEncoding, inCCSID);
+		SET sEventMsg = CAST(msgBitStream AS CHAR CCSID inCCSID);
+		
+		-- Формирование сообщения для логирования
+		DECLARE tns NAMESPACE 'http://croc.ru/sbrf/bp/EventMsg';
+
+		SET OutputRoot.XMLNSC.tns:Event.(XMLNSC.NamespaceDecl)xmlns:tns = 'http://croc.ru/sbrf/bp/EventMsg'; 
+		DECLARE oEvent REFERENCE TO OutputRoot.XMLNSC.tns:Event;
+		SET oEvent.tns:EventDate = CAST(CURRENT_GMTTIMESTAMP AS CHARACTER FORMAT 'dd.MM.yyyy HH:mm:ss.SSSSSS');
+		SET oEvent.tns:EventSource = CheckStr(COALESCE(Environment.ErrParams.EventSource,EventSourceProp));
+		SET oEvent.tns:EventReciever = CheckStr(COALESCE(Environment.ErrParams.EventReciever,EventReceiverProp));
+		SET oEvent.tns:Operation = CheckStr(Environment.ErrParams.Operation);
+		SET oEvent.tns:QueueName = CheckStr(Environment.ErrParams.QueueName);
+		SET oEvent.tns:ProcStatus = CheckStr(Environment.ErrParams.ProcStatus);
+		SET oEvent.tns:EventMsg = sEventMsg;
+		SET oEvent.tns:ErrorText = sFullException;
+		SET oEvent.tns:RqUID = COALESCE(Environment.ErrParams.RqUID, Environment.UserProperties.RqUID, 'UNKNOWN');
+
+		RETURN TRUE;
+	END;
+
+	CREATE FUNCTION CheckStr(IN str CHARACTER) RETURNS CHARACTER BEGIN
+		RETURN CASE WHEN str IS NULL OR str = '' THEN 'UNKNOWN' ELSE str END;
+	END;
+END MODULE;
+

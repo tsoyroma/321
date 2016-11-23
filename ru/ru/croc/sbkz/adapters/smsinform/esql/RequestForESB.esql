@@ -1,0 +1,278 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.smsinform.esql
+
+PATH ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE RequestForESB_Automatic_SMSMQ
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CREATE NEXTSIBLING OF OutputRoot.Properties DOMAIN 'MQMD';
+		SET OutputRoot.MQMD.Version = MQMD_CURRENT_VERSION;
+		CREATE LASTCHILD OF OutputRoot DOMAIN 'XMLNSC';
+
+		DECLARE id CHARACTER;
+		DECLARE I INTEGER 0;
+		DECLARE fileId 			CHARACTER;
+
+        -- TEST очереди ---------------------------------------------------------------------------------------------------------
+		SET id = '0';
+		CALL getQueueCount('ESB.PRAGMA.TEST.REQUEST',id); 
+		IF CAST(id AS DECIMAL) >= 5 THEN
+		   CALL SMS_id('ESB.PRAGMA.TEST.REQUEST', '1', fileId);
+		ELSEIF CAST(id AS DECIMAL) < 5 THEN
+		   CALL SMS_id('ESB.PRAGMA.TEST.REQUEST', '0', fileId);
+		END IF;		
+
+		IF CAST(id AS DECIMAL) >= 5 AND CAST(fileId AS DECIMAL) = 0 THEN
+		   SET I = I + 1;
+		   SET OutputRoot.XMLNSC.CurrentDepth.PRAGMA_TEST_REQUEST = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].ID      = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].FNAME   = 'ESB.PRAGMA.TEST.REQUEST';
+		END IF;		
+		
+		SET id = '0';
+		CALL getQueueCount('ESB.LKA.REQUEST',id);
+		IF CAST(id AS DECIMAL) >= 5 THEN
+		   CALL SMS_id('ESB.LKA.REQUEST', '1', fileId);
+		ELSEIF CAST(id AS DECIMAL) < 5 THEN
+		   CALL SMS_id('ESB.LKA.REQUEST', '0', fileId);
+		END IF;		
+
+		IF CAST(id AS DECIMAL) >= 5 AND CAST(fileId AS DECIMAL) = 0 THEN
+		   SET I = I + 1;
+		   SET OutputRoot.XMLNSC.CurrentDepth.LKA_REQUEST = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].ID    = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].FNAME = 'ESB.LKA.REQUEST';
+		END IF;		
+        -- TEST очереди ---------------------------------------------------------------------------------------------------------
+
+		SET id = '0';
+		CALL getQueueCount('ESB.BSS.IN',id);
+		IF CAST(id AS DECIMAL) >= 5000 THEN
+		   CALL SMS_id('ESB.BSS.IN', '1', fileId);
+		ELSEIF CAST(id AS DECIMAL) < 5000 THEN
+		   CALL SMS_id('ESB.BSS.IN', '0', fileId);
+		END IF;		
+
+		IF CAST(id AS DECIMAL) >= 5000 AND CAST(fileId AS DECIMAL) = 0 THEN
+		   SET I = I + 1;
+		   SET OutputRoot.XMLNSC.CurrentDepth.BSS_IN  			= id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].ID    = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].FNAME = 'ESB.BSS.IN';
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].LNAME = 'Очередь Интерент Офиса';
+		END IF;
+				
+		SET id = '0';
+		CALL getQueueCount('ESB.DBO.IN',id);
+		IF CAST(id AS DECIMAL) >= 5000 THEN
+		   CALL SMS_id('ESB.DBO.IN', '1', fileId);
+		ELSEIF CAST(id AS DECIMAL) < 5000 THEN
+		   CALL SMS_id('ESB.DBO.IN', '0', fileId);
+		END IF;		
+
+		IF CAST(id AS DECIMAL) >= 5000 AND CAST(fileId AS DECIMAL) = 0 THEN
+		   SET I = I + 1;
+		   SET OutputRoot.XMLNSC.CurrentDepth.DBO_IN 			= id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].ID    = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].FNAME = 'ESB.DBO.IN';
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].LNAME = 'Очередь Интерент Офиса';
+		END IF;
+				
+		SET id = '0';
+		CALL getQueueCount('ESB.IPT.AGGR.OUT',id);
+		IF CAST(id AS DECIMAL) >= 5000 THEN
+		   CALL SMS_id('ESB.IPT.AGGR.OUT', '1', fileId);
+		ELSEIF CAST(id AS DECIMAL) < 5000 THEN
+		   CALL SMS_id('ESB.IPT.AGGR.OUT', '0', fileId);
+		END IF;		
+
+		IF CAST(id AS DECIMAL) >= 5000 AND CAST(fileId AS DECIMAL) = 0 THEN
+		   SET I = I + 1;
+		   SET OutputRoot.XMLNSC.CurrentDepth.IPT_AGGR_OUT 		= id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].ID    = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].FNAME = 'ESB.IPT.AGGR.OUT';
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].LNAME = 'Очередь ИПТ';
+		END IF;
+				
+		SET id = '0';
+		CALL getQueueCount('ESB.SBOLRS.AGGR.OUT',id);
+		IF CAST(id AS DECIMAL) >= 5000 THEN
+		   CALL SMS_id('ESB.SBOLRS.AGGR.OUT', '1', fileId);
+		ELSEIF CAST(id AS DECIMAL) < 5000 THEN
+		   CALL SMS_id('ESB.SBOLRS.AGGR.OUT', '0', fileId);
+		END IF;		
+
+		IF CAST(id AS DECIMAL) >= 5000 AND CAST(fileId AS DECIMAL) = 0 THEN
+		   SET I = I + 1;
+		   SET OutputRoot.XMLNSC.CurrentDepth.SBOLRS_AGGR_OUT 	= id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].ID    = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].FNAME = 'ESB.SBOLRS.AGGR.OUT';
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].LNAME = 'Очередь Сбербанк Онлайн';
+		END IF;
+				
+		SET id = '0';
+		CALL getQueueCount('ESB.SAPERP.AGGR.OUT',id);
+		IF CAST(id AS DECIMAL) >= 5000 THEN
+		   CALL SMS_id('ESB.SAPERP.AGGR.OUT', '1', fileId);
+		ELSEIF CAST(id AS DECIMAL) < 5000 THEN
+		   CALL SMS_id('ESB.SAPERP.AGGR.OUT', '0', fileId);
+		END IF;
+		
+		IF CAST(id AS DECIMAL) >= 5000 AND CAST(fileId AS DECIMAL) = 0 THEN
+		   SET I = I + 1;
+		   SET OutputRoot.XMLNSC.CurrentDepth.SAPERP_AGGR_OUT 	= id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].ID    = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].FNAME = 'ESB.SAPERP.AGGR.OUT';
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].LNAME = 'Очередь SAP(Фин.деп)';
+		END IF;
+				
+        -- очереди QP --------------------------------------------------------------------------------
+		SET id = '0';
+		CALL getQueueCount('ESB.PRAGMANEW.REQUEST',id);
+		IF CAST(id AS DECIMAL) >= 5000 THEN
+		   CALL SMS_id('ESB.PRAGMANEW.REQUEST', '1', fileId);
+		ELSEIF CAST(id AS DECIMAL) < 5000 THEN
+		   CALL SMS_id('ESB.PRAGMANEW.REQUEST', '0', fileId);
+		END IF;		
+
+		IF CAST(id AS DECIMAL) >= 5000 AND CAST(fileId AS DECIMAL) = 0 THEN
+		   SET I = I + 1;
+		   SET OutputRoot.XMLNSC.CurrentDepth.PRAGMANEW_REQUEST = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].ID    = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].FNAME = 'ESB.PRAGMANEW.REQUEST';
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].LNAME = 'Очередь АБИС Qpragma';
+		END IF;
+				
+		SET id = '0';
+		CALL getQueueCount('ESB.PRAGMANEW.RESPONSE',id);
+		IF CAST(id AS DECIMAL) >= 5000 THEN
+		   CALL SMS_id('ESB.PRAGMANEW.RESPONSE', '1', fileId);
+		ELSEIF CAST(id AS DECIMAL) < 5000 THEN
+		   CALL SMS_id('ESB.PRAGMANEW.RESPONSE', '0', fileId);
+		END IF;		
+
+		IF CAST(id AS DECIMAL) >= 5000 AND CAST(fileId AS DECIMAL) = 0 THEN
+		   SET I = I + 1;
+		   SET OutputRoot.XMLNSC.CurrentDepth.PRAGMANEW_RESPONSE = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].ID     = id;
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].FNAME  = 'ESB.PRAGMANEW.RESPONSE';
+		   SET OutputRoot.XMLNSC.CurrentDepth.CurDepth[I].LNAME  = 'Очередь АБИС Qpragma';
+		END IF;		
+        -- очереди QP --------------------------------------------------------------------------------
+
+		IF CARDINALITY(OutputRoot.XMLNSC.CurrentDepth.*[]) > 0 THEN --- если нет накоплений на очередях, то SMS не отправлять 
+		   RETURN TRUE;
+		ELSE 
+		   RETURN FALSE;
+		END IF;		
+	END;
+END MODULE;
+
+
+CREATE PROCEDURE getQueueCount(IN nameQ CHARACTER, OUT output CHARACTER)
+LANGUAGE JAVA
+EXTERNAL NAME "ru.croc.sbrf.common.flow.HashGenerator.getQueueCount";
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertIMAP
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZSendSMSRq';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.CurrentDepth;
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZSendSMSRq;
+		
+		SET outRef.RqUID					= GenerateRqUID();
+		SET outRef.RqTm						= CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd''T''HH:mm:ss');
+		SET outRef.OperUID					= CAST(ru.croc.sbrf.bp.common.esql.getLocalTS() AS CHAR FORMAT 'ddMMyyHHmmssSSS');
+		SET outRef.SPName					= 'KSH';
+		SET outRef.VersionId				= '1.3.0';
+		SET outRef.PhoneNumber				= '00000000000'; 
+		/* Все очереди в одном сообщении
+		SET outRef.SMSText					= 'Присутсвуют накопления на Кластере КСШ на следующих очередях :' ||
+											  'ESB.PRAGMA.TEST.REQUEST:' || COALESCE(inRef.PRAGMA_TEST_REQUEST,'0') ||
+											  '; ESB.LKA.REQUEST:' || COALESCE(inRef.LKA_REQUEST,'0') ||
+											  '; ESB.BSS.IN:' || COALESCE(inRef.BSS_IN,'0') ||
+											  '; ESB.DBO.IN:' || COALESCE(inRef.DBO_IN,'0') ||
+											  '; ESB.IPT.AGGR.OUT:' || COALESCE(inRef.IPT_AGGR_OUT,'0') ||
+											  '; ESB.SBOLRS.AGGR.OUT:' || COALESCE(inRef.SBOLRS_AGGR_OUT,'0') ||
+											  '; ESB.SAPERP.AGGR.OUT:' || COALESCE(inRef.SAPERP_AGGR_OUT,'0') ||		
+											  '; ESB.PRAGMANEW.REQUEST:' || COALESCE(inRef.PRAGMANEW_REQUEST,'0') ||
+											  '; ESB.PRAGMANEW.RESPONSE:' || COALESCE(inRef.PRAGMANEW_RESPONSE,'0'); 
+									          */		
+											  
+		SET inRef.PhoneNumber[1] = '77778073300'; -- Исаков
+		--SET inRef.PhoneNumber[2] = '77017335696'; -- Левин
+		--SET inRef.PhoneNumber[3] = '77089116862'; -- Джапенов
+
+--		SET inRef.PhoneNumber[2] = '77051008614'; -- Ешков
+--		SET inRef.PhoneNumber[3] = '77077576931'; -- Натахин
+--		SET inRef.PhoneNumber[3] = '77772699768-5'; -- Белинский
+
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		DECLARE K INTEGER 1;
+		DECLARE N INTEGER;
+		SET J = CARDINALITY(inRef.PhoneNumber[]);
+		SET N = CARDINALITY(inRef.CurDepth[]);
+
+		WHILE I <= J DO -- отправка SMS всем заинтересованным лицам 
+			
+		    SET K = 1;
+			WHILE K <= N DO -- по одной SMS-ке на каждую очередь
+				
+				SET outRef.OperUID		= outRef.OperUID || CAST(I AS CHAR);
+				SET outRef.PhoneNumber	= inRef.PhoneNumber[I];
+				SET outRef.SMSText  	= 'Присутсвуют накопления на Кластере КСШ на очереди:' || inRef.CurDepth[K].FNAME || '-' || inRef.CurDepth[K].ID || '(' || inRef.CurDepth[K].LNAME || ')';
+				--SET outRef.SMSTextID	  = inRef.CurDepth[K].ID;    -- TEST
+				--SET outRef.SMSTextFNAME = inRef.CurDepth[K].FNAME; -- TEST
+
+			    SET K = K + 1;
+		 		PROPAGATE TO TERMINAL 'out' DELETE NONE;
+			END WHILE;
+
+			SET I = I + 1;
+			
+		END WHILE;
+
+ 		RETURN FALSE;
+	END;
+END MODULE;
+
+
+CREATE FUNCTION GenerateRqUID() RETURNS CHARACTER BEGIN
+	DECLARE prefixPart CHARACTER 'SMSINFO';
+	DECLARE timeStampPart CHARACTER CAST(ru.croc.sbrf.bp.common.esql.getLocalTS() AS CHAR FORMAT 'ddMMyyHHmmssSSS');
+	DECLARE randPart CHARACTER SUBSTRING( CAST( (FLOOR(POWER(10, 10) + RAND()*POWER(10, 10))) AS CHARACTER FORMAT '0') FROM 2 );
+		
+	RETURN prefixPart || timeStampPart || randPart;
+END;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+	 	-- Маршрутизация через OperationId в ПМИЛ
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		
+		SET Environment.UserProperties.Operation = FIELDNAME(OutputRoot.XMLNSC.*[<]);
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE PROCEDURE SMS_id(
+		IN 	rq_queue		CHARACTER,
+		IN 	rq_value		CHARACTER,
+		OUT file_id 		CHARACTER
+	)
+LANGUAGE DATABASE
+EXTERNAL NAME "sbkz.smsinform";
+

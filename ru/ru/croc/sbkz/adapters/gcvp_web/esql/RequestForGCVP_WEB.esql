@@ -1,0 +1,223 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.gcvp_web.esql
+
+PATH ru.croc.sbkz.utils, ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE RequestForGCVP_WEB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		CASE Operation
+		WHEN 'KZGetPensionRq' THEN
+			SET labelName = 'KZGetPensionRq';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in GCVP(RequestForGCVP_WEB)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForGCVP_WEB_SaveOrigMess
+ 	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+	 	
+		CALL CopyEntireMessage();
+		
+		SET Environment.UserProperties.Source.MQMD 		= InputRoot.MQMD;
+		SET Environment.UserProperties.Source.MQRFH2 	= InputRoot.MQRFH2;
+		SET Environment.UserProperties.Source.Properties= InputRoot.Properties;
+		SET Environment.UserProperties.Source.Body 		= InputBody;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE RequestForGCVP_WEB_SaveSOAPHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		SET Environment.UserProperties.SOAPHeaderData 	= InputRoot.XMLNSC.*:*[<].SOAPHeaderData;
+		
+		CALL CopyEntireMessage();
+		
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE RequestForGCVP_WEB_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		-- Возвращаем свойства исходного сообщения
+		SET OutputRoot.Properties					= Environment.UserProperties.Source.Properties;
+		SET OutputRoot.Properties.ReplyIdentifier	= NULL;
+		SET OutputRoot.Properties.ExpirationTime	= NULL;
+		
+		-- Восстанавливаем все заголовки
+		CREATE LASTCHILD OF OutputRoot DOMAIN('MQMD') NAME 'MQMD';
+		SET OutputRoot.MQMD				= Environment.UserProperties.Source.MQMD;
+
+		-- Восстанавливаем идентификатор ответного сообщения из ECHO 
+		SET OutputRoot.MQMD.CorrelId	= CAST(Environment.UserProperties.Source.MQMD.MsgId AS BLOB);
+		SET OutputRoot.MQMD.MsgType		= MQMT_REPLY;
+		SET OutputRoot.MQMD.Format 		= MQFMT_STRING;
+		
+		CALL ru.croc.sbrf.bp.common.esql.SetCommonMQReplyHeaders(OutputRoot);
+		
+		--Адресат ответного сообщения
+		CALL ru.croc.sbrf.bp.common.esql.SetMQReplyDestination(Environment.UserProperties.Source, OutputLocalEnvironment);
+		
+		SET OutputRoot.XMLNSC = InputRoot.XMLNSC;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+
+CREATE COMPUTE MODULE RequestForGCVP_WEB_ConvertToGCVP
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);		 
+		DECLARE inRoot REFERENCE TO InputRoot.XMLNSC.KZGetPensionRq;		
+		DECLARE outRoot REFERENCE TO OutputRoot; 
+		DECLARE mainRoot REFERENCE TO OutputRoot;
+		DECLARE arg REFERENCE TO OutputRoot;
+			
+		DECLARE TNS CONSTANT CHARACTER 'http://ws.billing.gcvp.kz/';
+		DECLARE tns NAMESPACE TNS;
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS mainRoot NAME 'request'; --NAMESPACE tns NAME 'getDeductionShortInfo';
+		--CREATE LASTCHILD OF mainRoot AS arg NAME 'arg0';
+		
+		/*SET arg.documentIssueDate 	= '2009-04-01'; --  пока для теста. нужно уточнить где берется
+		SET arg.documentNumber		= '023616808';
+		
+		SET arg.person.birthDate 	= inRoot.PersonInfo.*:BirthDt;
+		SET arg.person.fatherName 	= inRoot.PersonInfo.*:PersonName.*:MiddleName;
+		SET arg.person.iin			= inRoot.PersonInfo.PersonId;	
+		SET arg.person.name			= inRoot.PersonInfo.*:PersonName.*:FirstName;
+		SET arg.person.surname  	= inRoot.PersonInfo.*:PersonName.*:LastName;
+		
+		SET arg.requestNumber = inRoot.RqUID;
+		SET arg.requestType = 2;*/
+		
+		SET Environment.UserPropertires.Source = inRoot;
+		
+		SET mainRoot.type		    = inRoot.Type;
+		SET mainRoot.requestNumber  = inRoot.RqUID;
+		SET mainRoot.iin			= inRoot.PersonInfo.PersonId;
+		SET mainRoot.surname		= TRIM(UPPER(inRoot.PersonInfo.*:PersonName.*:LastName));
+		SET mainRoot.name			= TRIM(UPPER(inRoot.PersonInfo.*:PersonName.*:FirstName));
+		SET mainRoot.fatherName		= TRIM(UPPER(inRoot.PersonInfo.*:PersonName.*:MiddleName));
+		SET mainRoot.birthDate 		= REPLACE(inRoot.PersonInfo.*:BirthDt,'-','');
+		
+		SET mainRoot.documentNumber = '00000000';
+		SET mainRoot.documentDate   = '00000000';
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForGCVP_WEB_ConvertList2MDO
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetPensionRs';		
+
+		DECLARE OutRs REFERENCE TO OutputRoot.XMLNSC.KZGetPensionRs;
+		DECLARE InRs  REFERENCE TO InputRoot.XMLNSC.*[<];
+		
+		SET OutRs.RqUID = Environment.UserProperties.RqUID;
+		SET OutRs.RqTm = Environment.UserProperties.RqTm;
+		SET OutRs.TSMUID = Environment.UserProperties.Source.Body.KZGetPensionRq.TSMUID;
+		
+		IF EXISTS(InRs.responseCode[]) AND InRs.responseCode <> 'FOUND' THEN
+			
+			SET OutRs.Status.ifxca:StatusCode = '-1';
+			SET OutRs.Status.ifxca:StatusDesc = COALESCE(InRs.responseCode,InRs.responseText);
+			SET OutRs.PersonInfo.PersonIdType = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.PersonIdType;
+			SET OutRs.PersonInfo.PersonId 	  = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.PersonId;
+			SET OutRs.AvgSum 				  = '0'; 
+			
+			SET OutRs.FirstRecord.requestNumber     = Environment.UserProperties.RqUID;
+			SET OutRs.FirstRecord.IIN               = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.PersonId;
+			SET OutRs.FirstRecord.surName           = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.*:PersonName.*:LastName;
+			SET OutRs.FirstRecord.firstName         = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.*:PersonName.*:FirstName;
+			SET OutRs.FirstRecord.middleName        = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.*:PersonName.*:MiddleName;
+			SET OutRs.FirstRecord.birthDate         = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.*:BirthDt;
+			SET OutRs.FirstRecord.status            = '0';
+			SET OutRs.FirstRecord.enumNum           = COALESCE(InRs.enumCount,'0');--enumNum; - 16.09.2015 u07357
+			SET OutRs.FirstRecord.avgOVPSumm        = COALESCE(InRs.averageSum,'0');
+			
+		ELSE
+			
+			SET OutRs.Status.ifxca:StatusCode = '0';
+			SET OutRs.Status.ifxca:StatusDesc = InRs.responseCode;
+			SET OutRs.PersonInfo.PersonIdType = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.PersonIdType;
+			SET OutRs.PersonInfo.PersonId 	  = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.PersonId;
+			SET OutRs.AvgSum = COALESCE(InRs.averageSum,'0');
+			
+			FOR pensData AS InRs.deductions[] DO
+			CREATE LASTCHILD OF OutRs NAME 'PensionRecord';
+			IF pensData.senderBIN <> '' THEN
+				SET OutRs.PensionRecord[<].PersonInfo.PersonIdType = '2';
+				SET OutRs.PensionRecord[<].PersonInfo.PersonId = pensData.bin;
+			ELSE
+				SET OutRs.PensionRecord[<].PersonInfo.PersonIdType = '2';
+				SET OutRs.PensionRecord[<].PersonInfo.PersonId = pensData.bin;
+			END IF;
+			
+			SET OutRs.PensionRecord[<].DatePmt           = pensData.date;
+			SET OutRs.PensionRecord[<].OrgInfo.orgs:Name = pensData.name;
+			SET OutRs.PensionRecord[<].SumMon            = pensData.amount;
+			
+			END FOR;
+			
+			SET OutRs.FirstRecord.requestNumber     = Environment.UserProperties.RqUID;
+			SET OutRs.FirstRecord.IIN               = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.PersonId;
+			SET OutRs.FirstRecord.surName           = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.*:PersonName.*:LastName;
+			SET OutRs.FirstRecord.firstName         = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.*:PersonName.*:FirstName;
+			SET OutRs.FirstRecord.middleName        = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.*:PersonName.*:MiddleName;
+			SET OutRs.FirstRecord.birthDate         = Environment.UserProperties.Source.Body.KZGetPensionRq.PersonInfo.*:BirthDt;
+			SET OutRs.FirstRecord.status            = '0';
+			SET OutRs.FirstRecord.enumNum           = InRs.enumCount;--enumNum; - 16.09.2015 u07357
+			--SET OutRs.FirstRecord.avgOVPSumm        = InRs.averageSum;
+			
+			SET OutRs.param1id = Environment.UserProperties.Source.Body.KZGetPensionRq.param1id;
+			SET OutRs.param2iin = Environment.UserProperties.Source.Body.KZGetPensionRq.param2iin;
+		END IF;
+		
+		
+
+		/*FOR FirstData AS InputRoot.MRM.firstLine[] DO
+			CREATE LASTCHILD OF OutRs NAME 'FirstRecord';*/
+			
+			
+		/*END FOR;*/
+		
+		RETURN TRUE;
+	END;
+END MODULE;

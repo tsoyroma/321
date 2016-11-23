@@ -1,0 +1,105 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.talliman.esql
+
+PATH ru.croc.sbkz.utils;
+
+/**
+ * Определение типа сообщения
+ **/
+CREATE COMPUTE MODULE RequestForTalliman_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'KZExpCurrencyRateRq' THEN
+			SET labelName = 'KZExpCurrencyRateRq';
+		WHEN 'KZExpBranchesRq' THEN
+			SET labelName = 'KZExpBranchesRq';
+		
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown message format', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/**
+ * Экспорт курсов валют из МАБПК
+ **/
+CREATE COMPUTE MODULE RequestForTalliman_ConvertMDO2Talliman_CurrRate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		CALL FillStandardTallimanBSSStyleRq(InputRoot, OutputRoot, 'CURRENCYRATES');
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:CURRENCYRATES;
+		DECLARE curElm REFERENCE TO outRef;
+		FOR curRate AS inRef.CurrRateData.CurrRate[] DO
+			CREATE LASTCHILD OF outRef AS curElm NAME 'RATE';
+			SET curElm.BASECURRCODE 		= curRate.BaseCurrCode;
+			SET curElm.CURRCODE 			= curRate.CurrCode;
+			SET curElm.DATETIMERATEBEG 		= curRate.StartDt;
+			IF LENGTH(FIELDVALUE(curRate.EndDt))>0 THEN
+				SET curElm.DATETIMERATEEND 		= FIELDVALUE(curRate.EndDt);
+			END IF;
+			SET curElm.RATE 				= curRate.RateValue;
+			SET curElm.RATEBUY 				= curRate.RateBuy;
+			SET curElm.RATESELL 			= curRate.RateSell;
+			SET curElm.RATETYPE 			= curRate.RateType;
+			SET curElm.SCALE 				= curRate.Scale;
+		END FOR;	
+		RETURN TRUE;
+	END;	
+END MODULE;
+
+/**
+ * Экспорт подразделений из МАБПК
+ **/
+CREATE COMPUTE MODULE RequestForTalliman_ConvertMDO2Talliman_BranchExp
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);	
+		CALL FillStandardTallimanRq(InputRoot, OutputRoot, 'TbLoad');
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		CREATE LASTCHILD OF OutputRoot.XMLNSC.*:TbLoad NAMESPACE tns NAME 'TerbanksList';		
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*:TbLoad.*:TerbanksList;
+		DECLARE outBank REFERENCE TO outRef;
+		
+		SET outRef.(XMLNSC.Attribute)ListSize 			= CARDINALITY(inRef.BranchesInfo.BankInfoExt[]);
+		FOR inBank AS inRef.BranchesInfo.BankInfoExt[] DO 
+			CREATE LASTCHILD OF outRef AS outBank NAMESPACE tns NAME 'TerbankRecord'; 
+			SET outBank.tns:REGNCODE					= inBank.banks:BranchId;
+			SET outBank.tns:OFFCODE						= '';			
+			SET outBank.tns:NEWNUM						= inBank.banks:BankId_SWIFT;			
+			SET outBank.tns:PRIZ						= '';
+			SET outBank.tns:CL_CODE						= COALESCE(inBank.banks:BranchId,'') || COALESCE(inBank.ParentId,'');
+			SET outBank.tns:AD_CITY						= '';			
+			SET outBank.tns:CL_NAME						= inBank.banks:Name;
+			SET outBank.tns:ASSIGNEE					= '';
+			SET outBank.tns:OTDNUM						= '';
+			SET outBank.tns:AMFR						= '';
+			SET outBank.tns:PMFR						= '';
+			SET outBank.tns:NEWNUMMFR					= '';			
+			SET outBank.tns:PARENT_CODE					= inBank.ParentId;
+			SET outBank.tns:TNP							= '';
+			SET outBank.tns:AD_INDEX					= '';
+			SET outBank.tns:AD_HOUSE					= '';
+			SET outBank.tns:TELEPHONE					= THE(SELECT ITEM phone.PhoneNum FROM inBank.Phones.Phone[] AS phone WHERE phone.PhoneType='Work');
+			SET outBank.tns:BESP						= '';
+			SET outBank.tns:SWIFT						= '';
+			SET outBank.tns:FL_SWIFT					= '';
+			SET outBank.tns:CODE						= '';
+			SET outBank.tns:OKATO						= '';
+			SET outBank.tns:MMT							= '1.0';
+			SET outBank.tns:KPP							= '';
+			SET outBank.tns:OKPO						= '';
+			SET outBank.tns:FL_REESTR					= '';
+		END FOR;
+		RETURN TRUE;
+	END;
+END MODULE;

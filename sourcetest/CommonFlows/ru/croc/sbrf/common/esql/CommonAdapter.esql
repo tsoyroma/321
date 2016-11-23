@@ -1,0 +1,125 @@
+BROKER SCHEMA ru.croc.sbrf.common.esql
+
+PATH ru.croc.sbrf.mdm.common, ru.croc.sbrf.bp.common.esql;
+
+CREATE COMPUTE MODULE CommonAdapter_EncodeToMDM
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+
+		DECLARE sysId CHARACTER getSysId(OutputRoot.XMLNSC.IFX.*[<].SPName);
+		DECLARE operationRef REFERENCE TO OutputRoot.XMLNSC.IFX.*[<].*[<];
+		DECLARE operationName CHARACTER FIELDNAME(operationRef);
+
+		CASE operationName
+		WHEN 'CustAddRq' THEN
+			CALL recodeCustInfo(sysId, TRUE, operationRef.CustInfo);
+		WHEN 'CustModRq' THEN
+			CALL recodeCustInfo(sysId, TRUE, operationRef.CustInfo);
+		WHEN 'CustInqRq' THEN
+			CALL recodeCustInfo(sysId, TRUE, operationRef.CustInfo);
+		WHEN 'AgreemtInqRq' THEN
+			CALL recodeAgreemtInfo(sysId, TRUE, operationRef.AgreemtInfo);
+		WHEN 'AgreemtAddRq' THEN
+			CALL recodeAgreemtInfo(sysId, TRUE, operationRef.AgreemtInfo);
+		WHEN 'AgreemtModRq' THEN
+			CALL recodeAgreemtInfo(sysId, TRUE, operationRef.AgreemtInfo);
+		END CASE;
+	
+		--Устанавливаем проритет сообщений для операций создания/модификации клиентов/продуктов
+		IF operationName IN ('CustAddRq','CustModRq','AgreemtAddRq','AgreemtModRq') THEN
+			SET OutputRoot.MQMD.Priority = 1;
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE CommonAdapterRS_Decode_from_MDM
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+
+		DECLARE SPName CHARACTER OutputRoot.XMLNSC.IFX.*[<].SPName;
+		DECLARE sysId CHARACTER NULL;
+		IF SPName IS NOT NULL THEN
+			SET sysId = getSysId(SPName);
+		END IF;
+
+		DECLARE operationRef REFERENCE TO OutputRoot.XMLNSC.IFX.*[<].*[<];
+		DECLARE operationName CHARACTER NULL;
+
+		IF CARDINALITY(operationRef.*[]) > 0 THEN
+			SET operationName = FIELDNAME(operationRef);
+
+			CASE operationName
+			WHEN 'CustAddRs' THEN
+				CALL recodeCustRec(sysId, FALSE, operationRef.CustRec);
+			WHEN 'CustAddNf' THEN
+				CALL recodeCustRec(sysId, FALSE, operationRef.CustRec);				
+			WHEN 'CustModRs' THEN
+				CALL recodeCustRec(sysId, FALSE, operationRef.CustRec);
+			WHEN 'CustModNf' THEN
+				CALL recodeCustRec(sysId, FALSE, operationRef.CustRec);
+			WHEN 'CustInqRs' THEN
+				FOR cr AS operationRef.CustRec[] DO
+					CALL recodeCustRec(sysId, FALSE, cr);
+				END FOR;
+			WHEN 'CustByAgreemtInqRs' THEN
+				CALL recodeCustRec(sysId, FALSE, operationRef.CustAgreemtLink.CustRec);
+			WHEN 'AgreemtInqRs' THEN
+				FOR air AS operationRef.AgreemtInfo[] DO
+					CALL recodeAgreemtInfo(sysId, FALSE, air);
+				END FOR;
+			WHEN 'AgreemtAddRs' THEN
+				CALL recodeAgreemtInfo(sysId, FALSE, operationRef.AgreemtInfo);
+			WHEN 'AgreemtAddNf' THEN
+				CALL recodeAgreemtInfo(sysId, FALSE, operationRef.AgreemtInfo);				
+			WHEN 'AgreemtModRs' THEN
+				CALL recodeAgreemtInfo(sysId, FALSE, operationRef.AgreemtInfo);
+			WHEN 'AgreemtModNf' THEN
+				CALL recodeAgreemtInfo(sysId, FALSE, operationRef.AgreemtInfo);				
+			END CASE;
+		END IF;
+
+		IF (EXISTS(OutputRoot.MQMD[])) THEN
+			PROPAGATE TO TERMINAL 'out1';
+		ELSE
+			--отвечаем веб-сервисом
+			PROPAGATE TO TERMINAL 'out';
+		END IF;
+
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE CommonAdapterRS_Restore_Headers
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL SetResponseProperties(InputRoot, OutputRoot);
+
+		SET Environment.systemCode = InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.Body.IFX.BankSvcRq.SPName;
+
+		IF InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.ReplyIdentifier IS NULL THEN
+			-- Если сообщение пришло через DP
+			CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+			SET OutputRoot.Properties.ReplyIdentifier = OutputRoot.MQMD.CorrelId;
+
+			-- Надо будет отправить в DP через MQ
+			SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName	=
+				InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.MQMD.ReplyToQ;
+		ELSE
+			-- Сообщение-запрос пришло от веб-сервиса на брокере
+			-- Восстанавливаем идентификатор сообщения из ECHO (сохранили ранее в запросе)
+			SET OutputLocalEnvironment.Destination.SOAP.Reply.ReplyIdentifier	=
+				CAST(InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess.UserProperties.ReplyIdentifier AS BLOB);
+
+		END IF;
+
+		-- Присваиваем ответ
+		SET OutputRoot.XMLNSC=InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC;
+
+		RETURN TRUE;
+	END;
+END MODULE;

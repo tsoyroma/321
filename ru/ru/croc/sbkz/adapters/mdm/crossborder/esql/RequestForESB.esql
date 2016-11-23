@@ -1,0 +1,92 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.mdm.crossborder.esql
+PATH ru.croc.sbkz.utils; 
+
+CREATE COMPUTE MODULE RequestForESB_PrepareHeaders
+CREATE FUNCTION Main() RETURNS BOOLEAN 
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*:*[<]);
+		DECLARE labelName CHARACTER;
+		DECLARE mdm     CHARACTER '0';
+		
+		CASE Operation
+		WHEN 'CustOrgModRs' THEN
+			SET labelName = 'CustOrgModRs';
+			SET mdm     = '1';
+		WHEN 'RequestUpdateRelatedPrivateClientRs' THEN
+			SET labelName = 'CustOrgModRs';
+			SET mdm     = '1';
+		WHEN 'RequestUpdateRelatedPrivateClientRs' THEN
+			SET labelName = 'CustOrgDelRs';
+			SET mdm     = '1';	
+			
+		WHEN 'Message_DB_UCModRq' THEN
+			SET labelName = 'Message_DB_UCModRq';
+			SET mdm     = '3';
+		WHEN 'Message_DB_UCAppRq' THEN
+			SET labelName = 'Message_DB_UCAppRq';
+			SET mdm     = '3';
+		WHEN 'RMessage_DB_UCModKMEKRq' THEN
+			SET labelName = 'RMessage_DB_UCModKMEKRq';
+			SET mdm     = '1';
+		WHEN 'Message_DB_MGModRq' THEN
+			SET labelName = 'Message_DB_MGModRq';
+			SET mdm     = '3';
+		WHEN 'Message_DB_MGModGKMRq' THEN
+			SET labelName = 'Message_DB_MGModGKMRq';
+			SET mdm     = '3';
+		WHEN 'Message_DB_MGAppRq' THEN
+			SET labelName = 'Message_DB_MGAppRq';
+			SET mdm     = '2';
+		WHEN 'Message_DB_StatusRq' THEN
+			SET labelName = 'Message_DB_StatusRq';
+			SET mdm     = '3';
+		WHEN 'CustOrgModRq' THEN
+			SET labelName = 'CustOrgModRq';
+			SET mdm     = '1';
+		WHEN 'RequestUpdateRelatedPrivateClientRq' THEN
+			SET labelName = 'RequestUpdateRelatedPrivateClientRq';
+			SET mdm     = '1';
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown format XML in RequestForMDM(crossborder)', Operation);
+		END CASE;
+		
+		CALL CopyEntireMessage();
+
+/*
+		IF saplm = '1' or saplm = '2' THEN
+		  DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+	      SET outRef.RqUID = UPPER(outRef.RqUID);
+		END IF;
+*/
+		-- Создаем заголовок и вставляем переменные для маршрутизации
+		IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+		END IF;
+		SET OutputRoot.MQMD.Format 		     = MQFMT_STRING;
+		SET OutputRoot.MQMD.CodedCharSetId 	 = 1208;
+		CASE mdm
+		WHEN '1' THEN
+		 	-- Маршрутизация через SystemId
+		 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter:async:response';
+		 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:mdmres';
+		WHEN '2' THEN
+		 	-- Маршрутизация через SystemId
+		 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter:async:response';
+		 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:crmcares';
+		WHEN '3' THEN
+		 	-- Маршрутизация через SystemId
+		 	SET OutputRoot.MQRFH2.usr.TypeId	= 'urn:sbkztypes:esb:adapter';
+		 	SET OutputRoot.MQRFH2.usr.SystemId	= 'urn:sbkzsystems:crm';
+		ELSE
+			-- Маршрутизация через OperationId в ПМИЛ
+			SET OutputRoot.MQRFH2.usr.OperationId	= Operation;
+		END CASE;
+
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;

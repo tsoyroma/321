@@ -1,0 +1,98 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.aml.esql
+
+/**
+ * Заполнение стандартных полей МДО в сообщениях (ответ)
+ **/
+CREATE PROCEDURE FillMDOStandartElementsRs (IN inroot REFERENCE, IN outroot REFERENCE, IN amlStatus CHARACTER)
+BEGIN
+	
+	SET outroot.*:*[<].RqUID	= inroot.*:*[<].RqUID;
+	SET outroot.*:*[<].RqTm		= inroot.*:*[<].RqTm;
+	SET outroot.*:*[<].TSMUID	= inroot.*:*[<].TSMUID;
+	
+	SET outroot.*:*[<].Status.ifxca:StatusCode VALUE	= CASE
+			WHEN amlStatus IN ('0', '1', '2') THEN '0'
+			WHEN amlStatus IN ('3') THEN '1001'
+			END;
+	/*
+	SET outroot.*:*[<].Status.ifxca:StatusDesc VALUE	= inroot.*:*[<].Status.StatusDesc;
+	*/
+END;
+
+
+/**
+ * Заполнение стандартных полей MDO в сообщениях (запрос)
+ **/
+CREATE PROCEDURE FillMDOStandardElementsRq (IN inRef REFERENCE, IN outRef REFERENCE, IN msgType CHARACTER)
+BEGIN
+	CREATE LASTCHILD OF outRef DOMAIN('XMLNSC') NAME 'XMLNSC';
+	DECLARE outBody REFERENCE TO outRef;
+	CREATE LASTCHILD OF outRef.XMLNSC AS outBody NAME msgType;
+	SET outBody.RqUID		= FIELDVALUE(inRef.RqUID);
+	SET outBody.RqTm		= FIELDVALUE(inRef.RqTm);	
+	SET outBody.OperUID		= '';
+	SET outBody.SPName		= '';
+	SET outBody.BankInfo	= '';
+END;
+
+/**
+ * Перекодировка типа документа
+ **/
+CREATE FUNCTION recodeIdTypeToAML(IN idType CHARACTER) RETURNS CHARACTER 
+BEGIN
+	RETURN CASE idType
+		WHEN '1' THEN '1'
+		WHEN '2' THEN '2'
+		WHEN '3' THEN '4'
+		WHEN '4' THEN '5'
+		WHEN '5' THEN '3'
+		WHEN '6' THEN ''
+		WHEN '7' THEN ''
+		WHEN '8' THEN ''
+		WHEN '9' THEN ''
+		WHEN '15' THEN '3'
+		WHEN '16' THEN ''
+		ELSE NULL
+	END;
+END;
+
+/**
+ * Перекодировка boolean поля
+ **/
+CREATE FUNCTION recodeBooleanToAML(IN boolValue CHARACTER) RETURNS CHARACTER
+BEGIN
+	RETURN CASE boolValue
+		WHEN 'Y' THEN '2'
+		WHEN 'N' THEN '1'
+		ELSE NULL
+	END;
+END;
+
+
+DECLARE AML_DATE_FORMAT CONSTANT CHARACTER 'dd.MM.yyyy';
+DECLARE ESB_DATE_FORMAT CONSTANT CHARACTER 'yyyy-MM-dd';
+
+/**
+ * Функция преобразования формата даты из AML в КСШ
+ **/
+CREATE FUNCTION convertFromAMLDate (IN inDate CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF LENGTH(inDate) = LENGTH(AML_DATE_FORMAT) THEN
+		RETURN CAST(CAST(inDate AS DATE FORMAT AML_DATE_FORMAT) AS CHARACTER FORMAT ESB_DATE_FORMAT);
+	ELSE
+		RETURN inDate;
+	END IF;
+END;
+
+/**
+ * Функция преобразования формата даты из КСШ в AML
+ **/
+CREATE FUNCTION convertToAMLDate (IN inDate CHARACTER) RETURNS CHARACTER
+BEGIN
+	IF LENGTH(inDate) >= LENGTH(ESB_DATE_FORMAT) THEN
+		RETURN CAST(CAST(LEFT(inDate, LENGTH(ESB_DATE_FORMAT)) AS DATE FORMAT ESB_DATE_FORMAT) AS CHARACTER FORMAT AML_DATE_FORMAT);
+	ELSE
+		RETURN inDate;
+	END IF;
+END;	
+

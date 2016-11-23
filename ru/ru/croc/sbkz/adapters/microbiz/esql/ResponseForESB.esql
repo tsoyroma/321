@@ -1,0 +1,74 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.microbiz.esql
+
+PATH ru.croc.sbrf.bp.common.esql, ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE ResponseForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		WHEN 'CurrencySyncResponse' THEN
+			SET labelName = 'CurrencySyncResponse';	
+		WHEN 'TSMEnrichmentResponse' THEN
+			SET labelName = 'TSMEnrichmentResponse';	
+		ELSE
+			-- Неизвестный тип сообщения
+			THROW USER EXCEPTION VALUES ('Unknown service in RequestForMB', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_RetrieveHeader
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		 
+		DECLARE OrigMsg REFERENCE TO InputRoot.ComIbmAggregateReplyBody.ECHO.XMLNSC.OrigMess;
+		SET Environment.UserProperties = OrigMsg.UserProperties;
+
+		CALL PrepareMQReplyHeaders(InputRoot, OutputRoot);
+
+		SET OutputRoot.XMLNSC = InputRoot.ComIbmAggregateReplyBody.REQUEST.XMLNSC;
+
+		--Адресат ответного сообщения
+		CALL SetMQReplyDestination(OrigMsg, OutputLocalEnvironment);
+
+		IF Environment.UserProperties.Operation = '' THEN
+				SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = 'unchanged';
+		END IF;
+		
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForESB_ConvertNewPragma2MDO
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN		  
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC NAME 'KZGetCurrencyRs';		
+		
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*:*[<].*:*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.KZGetCurrency;
+		
+		SET outRef.RqUID					        = Environment.UserProperties.RqUID;
+		SET outRef.RqTm						        = Environment.UserProperties.RqTm;
+		SET Environment.UserProperties.MsgFrom      = inRef.*:GeneralInfo.*:MsgFrom;	
+		                 
+        SET outRef.Uid		=	inRef.*:GeneralInfo.*:MsgID || inRef.*:GeneralInfo.*:MsgDate || inRef.*:GeneralInfo.*:MsgFrom;        
+        SET outRef.KOD  	=   inRef.*:MsgFrom;
+        SET outRef.DateReq  =   inRef.*:MsgDate;
+        	
+        SET outRef.ResultCode	=	inRef.*:ErrorInfo.*:ErrorCode;
+        SET outRef.ErrorText	=	inRef.*:ErrorInfo.*:ErrorDescription;	
+        	
+		RETURN TRUE;
+	END;
+END MODULE;

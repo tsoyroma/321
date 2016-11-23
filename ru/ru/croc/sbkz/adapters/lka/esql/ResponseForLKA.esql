@@ -1,0 +1,36 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.lka.esql
+
+
+CREATE COMPUTE MODULE ResponseForLKA_DetectOperation
+CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;	
+		CASE Operation	
+		WHEN 'message' THEN
+			SET labelName = 'KZGetORDER_ADD_RS';								
+		--- КОЛИБРИ ---	
+		ELSE
+			-- Неизвестный тип сообщения 
+			THROW USER EXCEPTION VALUES ('Unknown format XML in ResponseForNewPragma', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE ResponseForLKA_ConvertMDO2LKA_ORDER_ADD
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL ru.croc.sbkz.adapters.router.esql.CopyMessageHeaders(InputRoot, OutputRoot);
+		DECLARE inRef REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE outRef REFERENCE TO OutputRoot.XMLNSC.*[<];
+		SET OutputRoot = InputRoot;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+

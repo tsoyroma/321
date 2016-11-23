@@ -1,0 +1,358 @@
+BROKER SCHEMA ru.croc.sbkz.adapters.mdm.esql
+
+PATH ru.croc.sbkz.utils;
+
+CREATE COMPUTE MODULE RequestForESB_DetectOperation
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE Operation CHARACTER FIELDNAME(InputRoot.XMLNSC.*[<]);
+		DECLARE labelName CHARACTER;
+		
+		CASE Operation
+		
+		-- 2. Подтверждение состава Единого клиента :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_UCAppRq' THEN
+			SET labelName = 'Message_DB_UCAppRq';
+		-- 3. ПереназначениеКМ ЕК :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_UCModKMEKRq' THEN
+			SET labelName = 'Message_DB_UCModKMEKRq';
+
+		-- 5. Сообщение о переназначении ГКМ :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_MGModGKMRq' THEN
+			SET labelName = 'Message_DB_MGModGKMRq';
+		-- 6. Сообщение о признании связи внутри Мета-группы несущественной/существенной 
+		--     :: Передаются только идентификаторы CRM и MDM
+		WHEN 'Message_DB_MGAppRq' THEN
+			SET labelName = 'Message_DB_MGAppRq';	
+		-- 7. Сообщение-ответ :: Служебное сообщение
+		WHEN 'Message_DB_StatusRq' THEN
+			SET labelName = 'Message_DB_StatusRq';
+		-- 8. Создание или изменение юр. Лица :: Клиентские данные
+		WHEN 'CustOrgModRq' THEN
+			SET labelName = 'CustOrgModRq';	
+		-- 9. Создание или изменение физ. Лица :: Клиентские данные
+		WHEN 'RequestUpdateRelatedPrivateClientRq' THEN
+			SET labelName = 'RequestUpdateRelatedPrivateClientRq';	
+		
+		ELSE
+			-- Непонятный тэг
+			THROW USER EXCEPTION VALUES ('Unknown message format in RequestForCRM(CRM Corp)', Operation);
+		END CASE;
+		
+		SET OutputLocalEnvironment.Destination.RouterList.DestinationData[1].labelName = labelName;
+
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertToCRMCorp_CustOrgMod
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders(InputRoot, OutputRoot);
+		
+		-- создаем полную копию входящей структуры в исходящей структуре
+		SET OutputRoot = InputRoot;
+		
+		-- проверяем маппинг данных включен или выключен
+		IF isMapped() = 0 THEN
+			RETURN TRUE;
+		END IF;
+		
+		DECLARE InRq REFERENCE TO InputRoot.XMLNSC.CustOrgModRq;
+		DECLARE OutRq REFERENCE TO OutputRoot;
+		
+		-- меняем коды статуса клиента
+		IF EXISTS(InRq.*:CustStatusCode[]) THEN
+			SET OutRq.*:CustStatusCode = convertCustomerStatusCRM(InRq.*:CustStatusCode);
+		END IF;
+		
+		-- меняем коды типа клиента
+		IF EXISTS(InRq.*:CustInfo[]) AND EXISTS(InRq.*:CustInfo.LegalStatus[]) THEN
+			SET OutRq.*:CustInfo.LegalStatus = convertCustomerTypeCRM(InRq.*:CustInfo.LegalStatus);
+		END IF;
+		
+		-- меняем коды сегмента
+		IF EXISTS(InRq.*:CustInfo[])AND EXISTS(InRq.*:CustInfo.OrgRec[]) AND EXISTS(InRq.*:CustInfo.OrgRec.Segment[]) THEN
+			SET OutRq.*:CustInfo.OrgRec.Segment = convertSegmentCRM(InRq.*:CustInfo.OrgRec.Segment);
+		END IF;
+		 
+		
+		-- меняем коды типа клиента
+		IF EXISTS(InRq.*:CustInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgManager[])
+			AND EXISTS(InRq.*:CustInfo.OrgManager.Roles[])
+			AND EXISTS(InRq.*:CustInfo.OrgManager.Roles.Role[]) THEN
+			
+			IF FIELDVALUE(InRq.*:CustInfo.OrgManager.Roles.Role) = 'КураторГСЗ' THEN
+				SET OutRq.*:CustInfo.OrgManager.UserInfo.SPName = convertSystemCRM(InRq.*:CustInfo.OrgManager.UserInfo.SPName);
+			END IF;
+			
+			IF FIELDVALUE(InRq.*:CustInfo.OrgManager.Roles.Role) = 'ГКМГСЗ' THEN
+				SET OutRq.*:CustInfo.OrgManager.UserInfo.SPName = convertSystemCRM(InRq.*:CustInfo.OrgManager.UserInfo.SPName);
+			END IF;
+			
+			IF FIELDVALUE(InRq.*:CustInfo.OrgManager.Roles.Role) = 'КураторверхнеуровневойГСЗ' THEN
+				SET OutRq.*:CustInfo.OrgManager.UserInfo.SPName = convertSystemCRM(InRq.*:CustInfo.OrgManager.UserInfo.SPName);
+			END IF;
+			
+			IF FIELDVALUE(InRq.*:CustInfo.OrgManager.Roles.Role) = 'ВКО' THEN
+				SET OutRq.*:CustInfo.OrgManager.UserInfo.SPName = convertSystemCRM(InRq.*:CustInfo.OrgManager.UserInfo.SPName);
+			END IF;
+		END IF;
+		
+		-- меняем коды типа адреса клиента
+		IF EXISTS(InRq.*:CustInfo[]) AND EXISTS(InRq.*:CustInfo.LegalStatus[]) THEN
+			IF EXISTS(InRq.*:CustInfo[])
+				AND EXISTS(InRq.*:CustInfo.OrgRec[])
+				AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo[])
+				AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo[])
+				AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo[])
+				AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr[]) 
+				AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr.AddrType[]) THEN
+				
+				IF FIELDVALUE(InRq.*:CustInfo.LegalStatus) <> '1' THEN
+					SET OutRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr.AddrType = convertAddrTypeFizCRM(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr.AddrType);
+				ELSE
+					SET OutRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr.AddrType = convertAddrTypeJurCRM(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr.AddrType);
+				END IF;
+				
+			END IF;
+		ELSE
+			IF EXISTS(InRq.*:CustInfo[])
+				AND EXISTS(InRq.*:CustInfo.OrgRec[])
+				AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo[])
+				AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo[])
+				AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo[])
+				AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr[]) 
+				AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr.AddrType[]) THEN
+				
+				SET OutRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr.AddrType = convertAddrTypeJurCRM(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr.AddrType);
+								
+			END IF;
+		END IF;
+		 
+		-- меняем коды статуса документа
+		IF EXISTS(InRq.*:CustInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.Licenses[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.Licenses.LicenseInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.Licenses.LicenseInfo.LicenseStatus[]) THEN
+			SET OutRq.*:CustInfo.OrgRec.OrgInfo.Licenses.LicenseInfo.LicenseStatus = convertStatusCRM(InRq.*:CustInfo.OrgRec.OrgInfo.Licenses.LicenseInfo.LicenseStatus);
+		END IF;
+		
+		-- меняем коды стран
+		IF EXISTS(InRq.*:CustInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr.Country[]) THEN
+			SET OutRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr.Country = convertCountryCRM(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.PostAddr.Country);
+		END IF;
+		
+		-- меняем коды типа контакта
+		IF EXISTS(InRq.*:CustInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.ContactData[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.ContactData.ContactType[]) THEN
+			SET OutRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.ContactData.ContactType = convertContactTypeCRM(InRq.*:CustInfo.OrgRec.OrgInfo.CompositeContactInfo.ContactInfo.ContactData.ContactType);
+		END IF;
+		
+		-- меняем коды системы-источника
+		IF EXISTS(InRq.*:CustInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.RelOrganizationCustId[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.RelOrganizationCustId.SPName[]) THEN
+			
+			SET OutRq.*:CustInfo.OrgRec.RelOrganizationCustId.SPName = convertSystemCRM(InRq.*:CustInfo.OrgRec.RelOrganizationCustId.SPName);
+			
+		END IF;
+		
+		-- меняем коды типа связи
+		IF EXISTS(InRq.*:CustInfo[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec[])
+			AND EXISTS(InRq.*:CustInfo.OrgRec.RelOrganizationRelType[]) THEN
+			
+			SET OutRq.*:CustInfo.OrgRec.RelOrganizationRelType = convertConnectionTypeCRM(InRq.*:CustInfo.OrgRec.RelOrganizationRelType);
+			
+		END IF;
+		
+		
+		-- меняем коды системы-источника
+		IF EXISTS(InRq.*:UserInfo[])
+			AND EXISTS(InRq.*:UserInfo.SPName[]) THEN
+			
+			SET OutRq.*:UserInfo.SPName = convertSystemCRM(InRq.*:UserInfo.SPName);
+			
+		END IF;
+		
+		RETURN TRUE;
+	END;
+
+END MODULE;
+
+
+
+CREATE COMPUTE MODULE RequestForESB_ConvertToCRMCorp_RequestUpdateRelatedPrivateClientRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		CALL CopyEntireMessage();
+		
+		
+		DECLARE InRq REFERENCE TO InputRoot.XMLNSC.*[<];
+		DECLARE OutRq REFERENCE TO OutputRoot;
+		 
+		-- меняем коды системы-источника
+		IF EXISTS(InRq.*:CustId[])
+			AND EXISTS(InRq.*:CustId[]) THEN
+			
+			SET OutRq.*:CustId.SPName = convertSystemCRM(InRq.*:CustId.SPName);
+			
+		END IF;
+		
+		-- меняем коды системы-источника
+		IF EXISTS(InRq.*:RelPerson[])
+			AND EXISTS(InRq.*:RelPerson.CustOrgId[])
+			AND EXISTS(InRq.*:RelPerson.CustOrgId.SPName[]) THEN
+			
+			SET OutRq.*:RelPerson.CustOrgId.SPName = convertSystemCRM(InRq.*:RelPerson.CustOrgId.SPName);
+			
+		END IF;
+		
+		-- меняем коды типа связи
+		IF EXISTS(InRq.*:RelPerson[])
+			AND EXISTS(InRq.*:RelPerson.CustOrgId[])
+			AND EXISTS(InRq.*:RelPerson.CustOrgId.CustRelation[])
+			AND EXISTS(InRq.*:RelPerson.CustOrgId.CustRelation.RelType[]) THEN
+			
+			SET OutRq.*:RelPerson.CustOrgId.CustRelation.RelType = convertConnectionTypeCRM(InRq.*:RelPerson.CustOrgId.CustRelation.RelType);
+			
+		END IF;
+		
+		-- меняем коды гражданства
+		IF EXISTS(InRq.*:RelPerson[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.Citizenship[]) THEN
+			
+			SET OutRq.*:RelPerson.PersonInfo.Citizenship = convertResidencyCRM(InRq.*:RelPerson.PersonInfo.Citizenship);
+			
+		END IF;
+		
+		-- меняем коды гражданства
+		IF EXISTS(InRq.*:RelPerson[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.IdentityCards[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.IdentityCards.IdentityCard[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.IdentityCards.IdentityCard.IdType[]) THEN
+			
+			SET OutRq.*:RelPerson.PersonInfo.IdentityCards.IdentityCard.IdType = convertDocumentTypeCRM(InRq.*:RelPerson.PersonInfo.IdentityCards.IdentityCard.IdType);
+			
+		END IF;
+		
+		-- меняем коды статуса документа
+		IF EXISTS(InRq.*:RelPerson[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.IdentityCards[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.IdentityCards.IdentityCard[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.IdentityCards.IdentityCard.IdStatus[]) THEN
+			
+			SET OutRq.*:RelPerson.PersonInfo.IdentityCards.IdentityCard.IdStatus = convertStatusCRM(InRq.*:RelPerson.PersonInfo.IdentityCards.IdentityCard.IdStatus);
+			
+		END IF;
+		
+		-- меняем коды тип адреса
+		IF EXISTS(InRq.*:RelPerson[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.ContactInfo[]) 
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.ContactInfo.PostAddr[]) 
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.ContactInfo.PostAddr.AddrType[]) THEN
+			
+			SET OutRq.*:RelPerson.PersonInfo.ContactInfo.PostAddr.AddrType = convertAddrTypeFizCRM(InRq.*:RelPerson.PersonInfo.ContactInfo.PostAddr.AddrType);
+			
+		END IF;
+		
+		-- меняем коды стран
+		IF EXISTS(InRq.*:RelPerson[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.ContactInfo[]) 
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.ContactInfo.PostAddr[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.ContactInfo.PostAddr.CountryCode[])  THEN
+			
+			SET OutRq.*:RelPerson.PersonInfo.ContactInfo.PostAddr.CountryCode = convertCountryCRM(InRq.*:RelPerson.PersonInfo.ContactInfo.PostAddr.CountryCode);
+			
+		END IF;
+		
+		
+		-- меняем коды типа контакта
+		IF EXISTS(InRq.*:RelPerson[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.ContactInfo[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.ContactInfo.ContactData[])
+			AND EXISTS(InRq.*:RelPerson.PersonInfo.ContactInfo.ContactData.ContactType[]) THEN
+			
+			SET OutRq.*:RelPerson.PersonInfo.ContactInfo.ContactData.ContactType = convertContactTypeCRM(InRq.*:RelPerson.PersonInfo.ContactInfo.ContactData.ContactType);
+			
+		END IF;
+		
+		
+		-- меняем коды системы-источника
+		IF EXISTS(InRq.*:UserInfo[])
+			AND EXISTS(InRq.*:UserInfo.SPName[]) THEN
+			
+			SET OutRq.*:UserInfo.SPName = convertSystemCRM(InRq.*:UserInfo.SPName);
+			
+		END IF;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
+
+
+CREATE COMPUTE MODULE RequestForESB_FillMqRfh2usr
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyEntireMessage();
+		
+		IF NOT EXISTS(OutputRoot.XMLNSC.*:*[<].SPName[]) THEN
+			CREATE NEXTSIBLING OF OutputRoot.XMLNSC.*:*[<].RqTm NAME 'SPName' VALUE 'CRMc';
+		END IF;
+		
+
+		DECLARE systemId, adapterType CHARACTER;
+		
+
+	 	IF NOT EXISTS(OutputRoot.MQRFH2[]) THEN
+			CREATE PREVIOUSSIBLING OF OutputRoot.XMLNSC DOMAIN('MQRFH2') NAME 'MQRFH2';
+	 	END IF;
+
+	 	SET OutputRoot.MQRFH2.usr.OperationId	= FIELDNAME(OutputRoot.XMLNSC.*[<]);
+
+		RETURN TRUE;
+	END;
+	
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
