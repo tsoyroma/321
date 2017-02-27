@@ -1,0 +1,189 @@
+package kz.bankrbkutil;
+
+import com.github.junrar.Archive;
+import com.github.junrar.exception.RarException;
+import com.github.junrar.impl.FileVolumeManager;
+import com.github.junrar.rarfile.FileHeader;
+import org.apache.commons.io.FilenameUtils;
+
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Arrays;
+
+/**
+ * Created by voloboy_i on 23.06.2016.
+ */
+public class Util {
+	public Util() {
+	}
+
+	private static final byte[] Win1251 = { (byte) 0xbc, (byte) 0xb3,
+			(byte) 0xbe, (byte) 0xba, (byte) 0xbf, (byte) 0xa2, (byte) 0x9d,
+			(byte) 0xb4, (byte) 0x9e, (byte) 0xa3, (byte) 0xb2, (byte) 0xbd,
+			(byte) 0xaa, (byte) 0xaf, (byte) 0xa1, (byte) 0x8d, (byte) 0xa5,
+			(byte) 0x8e };
+	private static final char[] SrcChars = createSrcChars();
+	private static final char[] DstChars = "әіңғүұқөһӘІҢҒҮҰҚӨҺ".toCharArray();
+
+	private static char[] createSrcChars() {
+		try {
+			return new String(Win1251, "cp1251").toCharArray();
+		} catch (UnsupportedEncodingException e) {
+			throw new Error(e);
+		}
+	}
+
+	public static void convert(String infile, String outfile, String from,
+			String to) throws IOException {
+		File inf = new File(infile);
+		File of = new File(outfile);
+
+		if (!new File(of.getParent()).exists()) {
+			throw new IOException(
+					"Не удалось сохранить файл по указанному пути:'"
+							+ of.getParent() + "' Директория не найдена");
+		}
+		String name = of.getName();
+		for (String targetPath = of.getParentFile().getPath(); of.exists(); of = new File(
+				targetPath + "/" + name)) {
+			String path = of.getParent();
+			String ext = FilenameUtils.getExtension(outfile);
+			name = name.replace("." + ext, "") + "_n." + ext;
+			outfile = path + File.separator + name;
+		}
+
+		File encodedFile = new File(outfile);
+		if (inf.exists() && inf.isFile()) {
+			FileOutputStream os = new FileOutputStream(encodedFile);
+			FileInputStream is = new FileInputStream(inf);
+
+			try {
+				Path e = Paths.get(inf.getAbsolutePath(), new String[0]);
+				byte[] buffer = Files.readAllBytes(e);
+				byte[] buffer1 = Arrays.copyOfRange(buffer, 2, buffer.length);
+				String utf8String = decodeUTF8(buffer1, from);
+				byte[] outputBuffer1 = Utf8ToKazWin(utf8String).getBytes(to);
+				os.write(outputBuffer1);
+			} catch (Exception e) {
+				throw e;
+			} finally {
+				is.close();
+				os.flush();
+				os.close();
+			}
+		}
+	}
+
+	public static void copy(String infile, String outfile) throws IOException {
+		File inf = new File(infile);
+		File of = new File(outfile);
+		InputStream inStream = null;
+		OutputStream outStream = null;
+
+		if (!new File(of.getParent()).exists()) {
+			throw new IOException(
+					"Не удалось сохранить файл по указанному пути:'"
+							+ of.getParent() + "' Директория не найдена");
+		}
+		String name = of.getName();
+		for (String targetPath = of.getParentFile().getPath(); of.exists(); of = new File(
+				targetPath + "/" + name)) {
+			String path = of.getParent();
+			String ext = FilenameUtils.getExtension(outfile);
+			name = name.replace("." + ext, "") + "_n." + ext;
+			outfile = path + File.separator + name;
+		}
+
+		File encodedFile = new File(outfile);
+
+		inStream = new FileInputStream(inf);
+		outStream = new FileOutputStream(encodedFile);
+
+		byte[] buffer = new byte[(int) inf.length()];
+
+		int length;
+		try {
+			while ((length = inStream.read(buffer)) > 0) {
+
+				outStream.write(buffer, 0, length);
+			}
+		} catch (Exception e) {
+			throw e;
+		} finally {
+			inStream.close();
+			outStream.flush();
+			outStream.close();
+		}
+	}
+
+	public static String decodeUTF8(byte[] bytes, String sourceEnc)
+			throws UnsupportedEncodingException {
+		return new String(bytes, sourceEnc);
+	}
+
+	public static String Utf8ToKazWin(final String input) {
+		if (input == null || input.isEmpty())
+			return input;
+		char[] ca = input.toCharArray();
+		for (int i = 0; i < ca.length; i++) {
+			for (int j = 0; j < DstChars.length; j++) {
+				if (ca[i] == DstChars[j]) {
+					ca[i] = SrcChars[j];
+				}
+			}
+		}
+		return new String(ca);
+	}
+
+	public static String KazWinToUtf8(final String input)
+			throws UnsupportedEncodingException {
+		if (input == null || input.isEmpty())
+			return input;
+		char[] ca = input.toCharArray();
+		for (int i = 0; i < ca.length; i++) {
+			for (int j = 0; j < SrcChars.length; j++) {
+				if (ca[i] == SrcChars[j]) {
+					ca[i] = DstChars[j];
+				}
+			}
+		}
+		return new String(ca);
+	}
+
+	public static void unrar(String infile, String outfile, String inEnc,
+			String outEnc) throws IOException, RarException {
+		File f = new File(infile);
+		f.setWritable(false);
+		Archive a = null;
+		try {
+			a = new Archive(new FileVolumeManager(f));
+			if (a != null) {
+				FileHeader fh = a.nextFileHeader();
+				while (fh != null) {
+					if (fh.getFileNameString().contains("RegData")) {
+						String par = f.getParent();
+						String fhn = fh.getFileNameString().trim();						
+						File out = new File(FilenameUtils.concat(par, fhn));
+						File dir = new File(out.getParent());
+						if (!(dir.exists())) {
+							dir.mkdir();							
+						}
+						FileOutputStream os = new FileOutputStream(out);
+						a.extractFile(fh, os);
+						os.close();
+						convert(out.getAbsolutePath(), outfile + out.getName(),
+								inEnc, outEnc);
+					}
+
+					fh = a.nextFileHeader();
+				}
+			}
+		} catch (Exception e) {
+			throw e;
+		} finally {
+			a.close();
+		}
+	}
+}
