@@ -1,0 +1,258 @@
+package kz.bankrbk.email;
+
+import java.io.*;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.Properties;
+
+import javax.mail.MessagingException;
+
+import kz.bankrbkutil.Util;
+
+import com.github.junrar.exception.RarException;
+import com.ibm.broker.javacompute.MbJavaComputeNode;
+import com.ibm.broker.plugin.MbElement;
+import com.ibm.broker.plugin.MbException;
+import com.ibm.broker.plugin.MbMessage;
+import com.ibm.broker.plugin.MbMessageAssembly;
+import com.ibm.broker.plugin.MbOutputTerminal;
+import com.ibm.broker.plugin.MbUserException;
+import com.ibm.broker.plugin.MbXMLNSC;
+import org.apache.commons.io.FilenameUtils;
+
+public class Read_Mail_Box_JavaCompute extends MbJavaComputeNode {
+
+	private Properties properties;
+
+	public void evaluate(MbMessageAssembly inAssembly) throws MbException {
+		MbOutputTerminal out = getOutputTerminal("out");
+
+		MbMessage inMessage = inAssembly.getMessage();
+		MbElement mess = inMessage.getRootElement().getLastChild();
+		MbElement mailbox = mess
+				.getFirstElementByPath("root/request/ation/mailbox");
+		String mail = mailbox.getValueAsString();
+		MbMessageAssembly outAssembly = null;
+		try {
+			properties = getProperties();
+			MbMessage outMessage = new MbMessage(inMessage);
+			outAssembly = new MbMessageAssembly(inAssembly, outMessage);
+
+			EmailCleint.attachment = new ArrayList<String>();
+
+			if (mail.contains("Currrency")) {
+				ProcessCurrency(mail);
+			} else if (mail.contains("Vin")) {
+				ProcessVinCodes(mail);
+			} else if (mail.contains("Inn")) {
+				ProcessRnn(mail);
+			}
+			if (EmailCleint.attachment.isEmpty()) {
+				MbElement root = outMessage.getRootElement();
+				MbElement document = root.getLastChild().getFirstChild();
+				MbElement result = document.createElementAsLastChild(
+						MbElement.TYPE_NAME, "result", "No message");
+
+				// add title attribute
+				result.createElementAsFirstChild(MbXMLNSC.ATTRIBUTE, "status",
+						"ok");
+			} else {
+				MbElement root = outMessage.getRootElement();
+				MbElement document = root.getLastChild().getFirstChild();
+				MbElement result = document.createElementAsLastChild(
+						MbElement.TYPE_NAME, "result", "Messages:"
+								+ EmailCleint.attachment.size());
+
+				result.createElementAsLastChild(MbXMLNSC.ATTRIBUTE, "status",
+						"ok");
+			}
+		} catch (RuntimeException e) {
+			throw new MbUserException(this, "evaluate()", "", "", e.toString(),
+					null);
+		} catch (MessagingException e) {
+			throw new MbUserException(this, "evaluate()", "", "", e.toString(),
+					null);
+		} catch (IOException e) {
+			throw new MbUserException(this, "evaluate()", "", "", e.toString(),
+					null);
+		} catch (RarException e) {
+			throw new MbUserException(this, "evaluate()", "", "", e.toString(),
+					null);
+		}
+		out.propagate(outAssembly, true);
+	}
+
+	private void ProcessVinCodes(String mail) throws MessagingException,
+			IOException, MbUserException {
+		properties = getProperties();
+		String host = properties.getProperty("host");
+		String port = properties.getProperty("port");
+		String userName = properties.getProperty("IinVinUserName");
+		String password = properties.getProperty("IinVinPassword");
+		String msgID = properties.getProperty("VinMsgId");
+		String from = properties.getProperty("VinFrom");
+		DateFormat dateFormat = new SimpleDateFormat("yyyy_MM_dd");
+		Date date = new Date();
+		String saveDirectory = properties.getProperty("saveDirectory")
+				+ "Vin/Arhive" + dateFormat.format(date) + "/";
+		String decDirectory = properties.getProperty("VinDirectory");
+		File ff = new File(saveDirectory);
+		if (!(ff.exists())) {
+			ff.mkdir();
+		}
+		EmailCleint client = new EmailCleint();
+		client.setMsgID(msgID);
+		client.downloadEmailAttachments(host, port, userName, password, from, saveDirectory);
+		String filename;
+		for (int i = 0; i < EmailCleint.attachment.size(); i++) {
+			String ext = FilenameUtils.getExtension(EmailCleint.attachment
+					.get(i));
+			filename = FilenameUtils.getName(EmailCleint.attachment.get(i));
+			switch (ext) {
+			case "txt":
+				Util.copy(saveDirectory + filename, decDirectory + filename);
+				break;
+			default:
+				File f = new File(saveDirectory + filename);
+				f.delete();
+				break;
+			}
+		}
+		setMessageId(client.getMsgID(), mail);
+	}
+
+	private void ProcessRnn(String mail) throws MessagingException,
+			IOException, RarException, MbUserException {
+		properties = getProperties();
+		String host = properties.getProperty("host");
+		String port = properties.getProperty("port");
+		String userName = properties.getProperty("IinVinUserName");
+		String password = properties.getProperty("IinVinPassword");
+		String msgID = properties.getProperty("IinMsgId");
+		String inEnc = properties.getProperty("IinEnc");
+		String outEnc = properties.getProperty("OutEnc");
+		String from = properties.getProperty("IinFrom");
+		DateFormat dateFormat = new SimpleDateFormat("yyyy_MM_dd");
+		Date date = new Date();
+		String saveDirectory = properties.getProperty("saveDirectory")
+				+ "Rnn/Arhive" + dateFormat.format(date) + "/";
+		String decDirectory = properties.getProperty("IinDirectory");
+		File ff = new File(saveDirectory);
+		if (!(ff.exists())) {
+			ff.mkdir();
+		}
+		EmailCleint client = new EmailCleint();
+		client.setMsgID(msgID);
+		client.downloadEmailAttachments(host, port, userName, password, from, saveDirectory);
+		String filename;
+		for (int i = 0; i < EmailCleint.attachment.size(); i++) {
+			String ext = FilenameUtils.getExtension(EmailCleint.attachment
+					.get(i));
+			filename = FilenameUtils.getName(EmailCleint.attachment.get(i));
+			switch (ext) {
+			case "rar":
+				Util.unrar(saveDirectory + filename, decDirectory, inEnc,
+						outEnc);
+				break;
+			default:
+				File f = new File(saveDirectory + filename);
+				f.delete();
+				break;
+			}
+		}
+		setMessageId(client.getMsgID(), mail);
+	}
+
+	private void ProcessCurrency(String mail) throws MessagingException,
+			IOException, MbUserException {
+		properties = getProperties();
+		String host = properties.getProperty("host");
+		String port = properties.getProperty("port");
+		String userName = properties.getProperty("CurrUserName");
+		String password = properties.getProperty("CurrPassword");
+		String msgID = properties.getProperty("CurrMsgId");
+		String from = properties.getProperty("CurrFrom");
+		DateFormat dateFormat = new SimpleDateFormat("yyyy_MM_dd");
+		Date date = new Date();
+		String saveDirectory = properties.getProperty("saveDirectory")
+				+ "Currency/Arhive" + dateFormat.format(date) + "/";
+		String decDirectory = properties.getProperty("curDirectory");
+		File ff = new File(saveDirectory);
+		if (!(ff.exists())) {
+			ff.mkdir();
+		}
+		EmailCleint client = new EmailCleint();
+		client.setMsgID(msgID);
+		client.downloadEmailAttachments(host, port, userName, password, from, saveDirectory);
+		String filename;
+		for (int i = 0; i < EmailCleint.attachment.size(); i++) {
+			String ext = FilenameUtils.getExtension(EmailCleint.attachment
+					.get(i));
+			filename = FilenameUtils.getName(EmailCleint.attachment.get(i));
+			switch (ext) {
+			case "xls":
+				Util.copy(saveDirectory + filename, decDirectory + filename);
+				break;
+			case "xlsx":
+				Util.copy(saveDirectory + filename, decDirectory + filename);
+				break;
+			default:
+				File f = new File(saveDirectory + filename);
+				f.delete();
+				break;
+			}
+			setMessageId(client.getMsgID(), mail);
+		}
+	}
+
+	public void setMessageId(String id, String prop) throws MbUserException,
+			IOException {
+		synchronized (this) {
+			FileInputStream in = null;
+			FileOutputStream fis = null;
+			Properties property = new Properties();
+			try {
+				in = new FileInputStream(
+						"/home/IIB/appfiles/Source/EmailClent.properties");
+				property.load(in);
+				if (prop.contains("Currrency")) {
+					property.setProperty("CurrMsgId", id);
+				} else if (prop.contains("Inn")) {
+					property.setProperty("IinMsgId", id);
+				} else if (prop.contains("Vin")) {
+					property.setProperty("VinMsgId", id);
+				}
+				fis = new FileOutputStream(
+						"/home/IIB/appfiles/Source/EmailClent.properties");
+				property.store(fis, null);
+			} catch (Exception e) {
+				throw new MbUserException(this, "setMessageId()", "", "",
+						e.toString(), null);
+			} finally {
+				fis.flush();
+				fis.close();
+				in.close();
+			}
+		}
+	}
+
+	private Properties getProperties() throws MbUserException, IOException {
+		synchronized (this) {
+			FileInputStream fis = null;
+			Properties property = new Properties();
+			try {
+				fis = new FileInputStream(
+						"/home/IIB/appfiles/Source/EmailClent.properties");
+				property.load(fis);
+				return property;
+			} catch (Exception e) {
+				throw new MbUserException(this, "getProperties()", "", "",
+						e.toString(), null);
+			} finally {
+				fis.close();
+			}
+		}
+	}
+}
