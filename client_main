@@ -1,0 +1,155 @@
+package kz.bankrbk.email;
+
+import org.apache.commons.io.FilenameUtils;
+
+import javax.mail.*;
+import javax.mail.internet.InternetAddress;
+import javax.mail.internet.MimeBodyPart;
+import javax.mail.internet.MimeUtility;
+import javax.mail.search.SearchTerm;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.List;
+import java.util.Properties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Created by voloboy_i on 23.06.2016.
+ */
+public class EmailCleint {
+
+	public EmailCleint() {
+	}
+
+	private String msgID;
+	public static List<String> attachment;
+
+	public void setMsgID(String id) {
+		this.msgID = id;
+	}
+
+	public String getMsgID() {
+		return msgID;
+	}
+
+	public void downloadEmailAttachments(String host, String port,
+			String userName, String password, String sendFrom,
+			String saveDirectory) throws IOException, MessagingException {
+		Properties properties = new Properties();
+
+		// server setting
+		properties.put("mail.host", host);
+		properties.put("mail.port", port);
+		properties.put("mail.store.protocol", "imap");
+		properties.put("mail.transport.protocol", "imap");
+
+		Session session = Session.getDefaultInstance(properties);
+		// connects to the message store
+		Store store = session.getStore("imap");
+		store.connect(userName, password);
+
+		// opens the inbox folder
+		Folder folderInbox = store.getFolder("INBOX");
+		folderInbox.open(Folder.READ_ONLY);
+		final UIDFolder uf = (UIDFolder) folderInbox;
+		final String from = sendFrom;
+		SearchTerm searchCondition = new SearchTerm() {
+			@Override
+			public boolean match(Message message) {
+				try {
+					Address[] ad = message.getFrom();
+					if (ad.length == 0) {
+						return false;
+					}
+					if (((InternetAddress) message.getFrom()[0]).getAddress()
+							.contains(from)) {
+						return true;
+					}
+				} catch (MessagingException ex) {
+					ex.printStackTrace();
+				}
+				return false;
+			}
+		};
+
+		// fetches new messages from server
+		Message[] arrayMessages = folderInbox.search(searchCondition);
+
+		for (int i = 0; i < arrayMessages.length; i++) {
+			Message message = arrayMessages[i];
+			File f = new File(saveDirectory);
+			if (!f.exists()) {
+				throw new IOException(
+						"Не удалось сохранить файл по указанному пути:'"
+								+ saveDirectory + "' Директория не найдена");
+			}
+			if (Integer.parseInt(msgID) < (int) uf.getUID(message)) {
+				String contentType = message.getContentType();
+				// store attachment file name, separated by comma
+				String attachFiles = "";
+				if (contentType.contains("multipart")) {
+					// content may contain attachments
+					Multipart multiPart = (Multipart) message.getContent();
+					int numberOfParts = multiPart.getCount();
+					for (int partCount = 0; partCount < numberOfParts; partCount++) {
+						MimeBodyPart part = (MimeBodyPart) multiPart
+								.getBodyPart(partCount);
+						if (Part.ATTACHMENT.equalsIgnoreCase(part
+								.getDisposition())) {
+							// this part is attachment
+							String fileName = MimeUtility.decodeText(part
+									.getFileName());
+							attachFiles += fileName + ", ";
+							File in = new File(saveDirectory + File.separator
+									+ fileName);
+							String name = in.getName();
+							for (String targetPath = in.getParentFile()
+									.getPath(); in.exists(); in = new File(
+									targetPath + "/" + name)) {
+								String ext = FilenameUtils.getExtension(in
+										.getPath());
+								name = name.replace("." + ext, "") + "_n."
+										+ ext;
+							}
+
+							part.saveFile(saveDirectory + File.separator + name);
+							if (name.endsWith(".rar")) {
+								if (checkWithRegExp(name)) {
+									attachment.add(name);
+								} else if (!(name.contains(".part"))) {
+									attachment.add(name);
+								}
+							} else {
+								attachment.add(name);
+							}
+						}
+					}
+
+					if (attachFiles.length() > 1) {
+						attachFiles = attachFiles.substring(0,
+								attachFiles.length() - 2);
+					}
+				} else if (contentType.contains("text/plain")
+						|| contentType.contains("text/html")) {
+					Object content = message.getContent();
+					if (content != null) {
+					}
+				}
+			}
+			if (!(Integer.parseInt(msgID) > (int) uf.getUID(message))) {
+				setMsgID(String.valueOf(uf.getUID(message)));
+			}
+		}
+		// disconnect
+		folderInbox.close(false);
+		store.close();
+	}
+
+	public static boolean checkWithRegExp(String userNameString) {
+		Pattern p = Pattern.compile(".+(part(0?)*1).rar");
+		Matcher m = p.matcher(userNameString);
+		return m.matches();
+	}
+}
